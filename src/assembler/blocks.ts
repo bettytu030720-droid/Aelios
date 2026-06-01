@@ -187,6 +187,10 @@ function extractSystemTexts(messages: OpenAIChatMessage[]): string[] {
 function isVolatileTimeLine(line: string): boolean {
   const trimmed = line.trim();
   if (!trimmed) return false;
+    // Multi-line time formats (e.g. Operit injects time as separate lines).
+  if (/^[【\[](?:当前|现在|系统|本地)?(?:时间|日期|日期时间|时间戳)[】\]]$/.test(trimmed)) return true;
+  if (/^\d{4}[-/]\d{1,2}[-/]\d{1,2}(\s+\d{1,2}:\d{2}(:\d{2})?)?$/.test(trimmed)) return true;
+  if (/^星期\s*[:：]/.test(trimmed)) return true;
   const normalized = trimmed.replace(/^[>*\-\d.)\s]+/, "").trim();
   const lower = normalized.toLowerCase();
 
