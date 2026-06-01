@@ -114,7 +114,10 @@ function applyRollingMessageCache(messages: AnthropicMessage[], env: Env): void 
     const message = messages[i];
     if (message.role !== "user" || message.content.length === 0) continue;
     message.content[message.content.length - 1].cache_control = cacheControl;
-    return;
+   for (let i = start; i !== end; i += step) {
+    const message = messages[i];
+    if (message.role !== "user" || message.content.length === 0) continue;
+    message.content[message.content.length - 1].cache_control = cacheControl; 
   }
 }
 
