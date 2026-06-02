@@ -105,15 +105,26 @@ function applyRollingMessageCache(messages: AnthropicMessage[], env: Env): void 
   if (!cacheControl) return;
   if (env.ANTHROPIC_ROLLING_CACHE_ENABLED === "false") return;
 
-  const isFullWindow = messages.length >= getRollingCacheWindowSize(env);
-  const start = isFullWindow ? 0 : messages.length - 1;
-  const end = isFullWindow ? messages.length : -1;
-  const step = isFullWindow ? 1 : -1;
+  // Anthropic限4个cache_control，system已占1个，消息层最多放3个
+  const MAX_MESSAGE_MARKERS = 3;
 
-  for (let i = start; i !== end; i += step) {
-    const message = messages[i];
-    if (message.role !== "user" || message.content.length === 0) continue;
-    message.content[message.content.length - 1].cache_control = cacheControl;
+  // 收集所有用户消息的下标
+  const userIndices: number[] = [];
+  for (let i = 0; i < messages.length; i++) {
+    if (messages[i].role === "user" && messages[i].content.length > 0) {
+      userIndices.push(i);
+    }
+  }
+
+  if (userIndices.length === 0) return;
+
+  // 均匀分布标记点
+  const markers = Math.min(userIndices.length, MAX_MESSAGE_MARKERS);
+  const step = userIndices.length / markers;
+
+  for (let m = 0; m < markers; m++) {
+    const idx = userIndices[Math.floor(m * step)];
+    messages[idx].content[messages[idx].content.length - 1].cache_control = cacheControl;
   }
 }
 
