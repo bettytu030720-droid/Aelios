@@ -418,14 +418,21 @@ export function buildAnthropicRequestFromAssembled(
   const system = assembledToAnthropicSystem(systemBlocks);
   const messages = assembledToAnthropicMessages(assembled.messages);
   applyCacheOverrides(system, env);
-const systemCacheCount = system.filter(b => b.cache_control).length;
-applyRollingMessageCache(messages, env, systemCacheCount);
+
+  // 统计已存在的 cache_control（system块 + 请求级）
+  let existing = system.filter(b => b.cache_control).length;
+  const autoCache = buildAutomaticCacheControl(env);
+  if (autoCache) existing++;
+
+  // 消息层最多放 4 - existing 个
+  applyRollingMessageCache(messages, env, existing);
+
   appendUncachedUserContext(messages, dynamicMemoryPatch);
 
   return {
     model: stripAnthropicModelPrefix(targetModel),
     max_tokens: getAnthropicMaxTokens(req, env, thinking),
-    cache_control: buildAutomaticCacheControl(env),
+    cache_control: autoCache,
     temperature: thinking ? undefined : typeof req.temperature === "number" ? req.temperature : undefined,
     stream: Boolean(req.stream),
     thinking,
