@@ -100,12 +100,14 @@ export function getAnthropicCacheMode(env: Env): string | null {
   return parts.join("_");
 }
 
-function applyRollingMessageCache(messages: AnthropicMessage[], env: Env): void {
+function applyRollingMessageCache(messages: AnthropicMessage[], env: Env, systemCacheCount: number = 0): void {
   const cacheControl = buildCacheControl(env);
   if (!cacheControl) return;
   if (env.ANTHROPIC_ROLLING_CACHE_ENABLED === "false") return;
 
-  const MAX_MESSAGE_MARKERS = 3;
+  // Anthropic上限4个，减去system已占的
+  const MAX_MESSAGE_MARKERS = Math.max(1, 4 - systemCacheCount);
+
   const userIndices: number[] = [];
   for (let i = 0; i < messages.length; i++) {
     if (messages[i].role === "user" && messages[i].content.length > 0) {
@@ -416,7 +418,8 @@ export function buildAnthropicRequestFromAssembled(
   const system = assembledToAnthropicSystem(systemBlocks);
   const messages = assembledToAnthropicMessages(assembled.messages);
   applyCacheOverrides(system, env);
-  applyRollingMessageCache(messages, env);
+const systemCacheCount = system.filter(b => b.cache_control).length;
+applyRollingMessageCache(messages, env, systemCacheCount);
   appendUncachedUserContext(messages, dynamicMemoryPatch);
 
   return {
