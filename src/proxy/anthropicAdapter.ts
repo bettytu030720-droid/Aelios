@@ -430,7 +430,7 @@ export function buildAnthropicRequestFromAssembled(
   return {
     model: stripAnthropicModelPrefix(targetModel),
     max_tokens: getAnthropicMaxTokens(req, env, thinking),
-    cache_control: autoCache,
+    cache_control: buildAutomaticCacheControl(env),
     temperature: thinking ? undefined : typeof req.temperature === "number" ? req.temperature : undefined,
     stream: Boolean(req.stream),
     thinking,
