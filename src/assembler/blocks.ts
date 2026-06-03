@@ -140,7 +140,7 @@ const longTermSummaryBlock: Block = {
   id: "long_term_summary",
   kind: "stable",
   role: "system",
-  cache_anchor: true,
+  cache_anchor: false,
   content_fn: (ctx: AssemblerContext): string | null => {
     const entry = ctx.summaryEntry;
     if (!entry || !entry.content) return null;
