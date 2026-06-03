@@ -426,26 +426,18 @@ export function buildAnthropicRequestFromAssembled(
 }
 
 function applyCacheOverrides(systemBlocks: AnthropicTextBlock[], env: Env): void {
-  const anchor = systemBlocks.find((b) => b.cache_control);
-  if (!anchor) return;
-
   if (env.ANTHROPIC_CACHE_ENABLED === "false") {
-    delete anchor.cache_control;
+    for (const b of systemBlocks) delete b.cache_control;
     return;
   }
-
   const ttl = env.ANTHROPIC_CACHE_TTL === "1h" ? "1h" : "5m";
-  anchor.cache_control = { type: "ephemeral", ttl };
+  for (const b of systemBlocks) {
+    if (b.cache_control) {
+      b.cache_control = { type: "ephemeral", ttl };
+    }
+  }
 }
-
-export async function callAnthropicNative(env: Env, body: AnthropicRequest, targetModel?: string): Promise<Response> {
-  return fetch(getAnthropicUrlForModel(env, targetModel || body.model), {
-    method: "POST",
-    headers: buildAnthropicHeaders(env),
-    body: JSON.stringify(body)
-  });
-}
-
+  
 export function parseAnthropicNonStream(response: AnthropicResponse): {
   openai: OpenAIChatResponse;
   content: string;
