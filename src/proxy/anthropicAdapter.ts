@@ -421,6 +421,7 @@ export function buildAnthropicRequestFromAssembled(
 
   // 统计已存在的 cache_control（system块 + 请求级）
   let existing = system.filter(b => b.cache_control).length;
+  if (buildAutomaticCacheControl(env)) existing++;
 
   // 消息层最多放 4 - existing 个
   applyRollingMessageCache(messages, env, existing);
