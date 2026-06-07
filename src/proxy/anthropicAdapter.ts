@@ -391,7 +391,8 @@ export async function buildAnthropicNativeRequest(
     stream: Boolean(req.stream),
     thinking,
     system,
-    messages
+    messages,
+    metadata: { user_id: "operit-user" },
   };
 }
 
@@ -437,6 +438,7 @@ export function buildAnthropicRequestFromAssembled(
     thinking,
     system,
     messages,
+    metadata: { user_id: "operit-user" },
   };
 }
 
