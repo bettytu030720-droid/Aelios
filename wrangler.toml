@@ -5,7 +5,7 @@ keep_vars = true
 
 [triggers]
 # Cloudflare cron uses UTC. 20:10 UTC is 04:10 in Singapore/China time.
-crons = ["5 1 * * *"]
+crons = ["* * * * *"]
 
 [ai]
 binding = "AI"
