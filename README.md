@@ -1,213 +1,208 @@
 # Aelios
 
-给 AI 加一颗长期记忆。换窗口、换客户端、换模型，记忆跟着你走。
+**A long memory for your AI.** Switch windows, switch clients, switch models — the memory follows you.
 
-它是一个跑在 Cloudflare 上的记忆网关：你的 Chatbox / Claude Code / Codex 先连它，它再把请求转给模型。对话会被记下来，下次自动想起来。
+English | [简体中文](README.zh-CN.md) · QQ group: 1091783659
 
-## 怎么用
+<!-- 🎬 Promo video: upload the Aelios trailer (the one Muse made) via GitHub's web editor and paste the user-attachments link here. A video at the very top of the README is the single highest-leverage change for star conversion. -->
 
-就三步。
+Aelios is a memory gateway that runs on Cloudflare. Your Chatbox / Claude Code / Codex connects to Aelios first; Aelios forwards the request to the model. Every conversation is kept, and the relevant parts come back automatically next time.
 
-### 1. 部署
+```text
+your client  →  Aelios (identify, remember, recall)  →  the model
+```
+
+## Quick start — three steps
+
+### 1. Deploy
 
 [![Deploy to Cloudflare](https://deploy.workers.cloudflare.com/button)](https://deploy.workers.cloudflare.com/?url=https://github.com/wusaki0723/Aelios)
 
-点按钮，登录 Cloudflare。表单里**只必填** `CHATBOX_API_KEY`：自己编一个密码，比如 `sk-my-aelios`。其余可以空着。
+Click the button and sign in to Cloudflare. The only required field is `CHATBOX_API_KEY` — make up a password, e.g. `sk-my-aelios`. Everything else can stay empty.
 
-Vectorize 那栏照抄：Dimensions `1024`，Metric `cosine`。构建命令 `npm ci`，部署命令 `npm run deploy`。
+For the Vectorize index, copy these values: Dimensions `1024`, Metric `cosine`. Build command `npm ci`, deploy command `npm run deploy`.
 
-部署完会得到一个地址，类似：
+You'll get an address like:
 
-```
-https://companion-memory-proxy.<你的子域>.workers.dev
-```
-
-想自己掌控每一步的话：Fork 本仓库 → Cloudflare Workers 连上 GitHub → 构建 `npm ci`、部署 `npm run deploy` → 在 Worker Settings 里加 Secret `CHATBOX_API_KEY`。不要用裸 `wrangler deploy`，那样不会建库。
-
-### 2. 加一个助手
-
-浏览器打开：
-
-```
-https://<你的 Worker 地址>/admin
+```text
+https://companion-memory-proxy.<your-subdomain>.workers.dev
 ```
 
-填 Worker 地址和刚才那把钥匙，进「设置」。
+Prefer to control every step? Fork this repo → connect it in Cloudflare Workers → build `npm ci`, deploy `npm run deploy` → add the `CHATBOX_API_KEY` secret in Worker Settings. Don't run a bare `wrangler deploy` — it won't create the databases.
 
-1. **上游地址**：填你的 Cloudflare 账号 ID（32 位）。要用完整聊天转发的话，再在 Worker Secrets 里加 `CLOUDFLARE_API_TOKEN`。
-2. **助手**：点「添加助手」，例如：
+### 2. Add an assistant
 
-   | 栏 | 填什么 | 例子 |
+Open:
+
+```text
+https://<your Worker address>/admin
+```
+
+Enter your Worker address and the key from step 1, then go to **Settings**.
+
+1. **Upstream**: your Cloudflare account ID (32 characters). For full chat forwarding, also add a `CLOUDFLARE_API_TOKEN` Worker secret.
+2. **Assistant**: click *Add assistant*, for example:
+
+   | Field | What it means | Example |
    |---|---|---|
-   | 名字 | 地址里那一段，小写英文 | `coder` |
-   | 主模型 | 只有这些模型会记、会召回 | `anthropic/claude-opus-4-5` |
-   | 钥匙 | 谁能用这个助手 | 勾选主钥匙 |
+   | Name | The segment in the URL, lowercase English | `coder` |
+   | Primary model | Only these models remember and recall | `anthropic/claude-opus-4-5` |
+   | Keys | Who may use this assistant | check the primary key |
 
-3. 点「保存」。
+3. Click **Save**.
 
-一个助手一个地址。名字写成 `coder`，地址就是：
+One assistant, one address. Name it `coder` and the address is:
 
+```text
+https://<your Worker address>/coder/v1
 ```
-https://<你的 Worker 地址>/coder/v1
-```
 
-主模型才有记忆。没登记的模型（比如 Claude Code 里的小模型）只是路过，不记也不召。
+Only registered primary models get memory. Unregistered models (like the small utility models inside Claude Code) just pass through — nothing is recorded or recalled for them.
 
-### 3. 客户端指过来
+### 3. Point your client at it
 
-API Key 一律填 `CHATBOX_API_KEY`。模型名写成 `厂商/模型`，比如 `anthropic/claude-opus-4-5`。
+Use `CHATBOX_API_KEY` as the API key everywhere. Write model names as `vendor/model`, e.g. `anthropic/claude-opus-4-5`.
 
-| 你用什么 | 填这个地址 |
+| Client | Address to use |
 |---|---|
-| Chatbox、Cherry Studio 等 | `https://<Worker 地址>/coder/v1` |
-| Claude Code | `ANTHROPIC_BASE_URL=https://<Worker 地址>/coder` |
-| Codex | `base_url = https://<Worker 地址>/coder/v1`，并设 `wire_api = "responses"` |
+| Chatbox, Cherry Studio, … | `https://<Worker address>/coder/v1` |
+| Claude Code | `ANTHROPIC_BASE_URL=https://<Worker address>/coder` |
+| Codex | `base_url = https://<Worker address>/coder/v1`, with `wire_api = "responses"` |
 
-不带助手名的 `/v1` 会走这把钥匙的第一个助手。
+A bare `/v1` without an assistant name routes to the first assistant of that key.
 
-试一句：「请记住：我的测试暗号是苹果星星-0428。」过一会儿再问：「我的测试暗号是什么？」答出来就通了。
+Try it: say *"Please remember: my test code phrase is apple-star-0428."* Wait a bit, then ask *"What is my test code phrase?"* If it answers, you're wired up.
 
-## 平时怎么管
+## Day-to-day: the admin panel
 
-打开 `/admin`，底部几个标签：
+Open `/admin`. The bottom tabs:
 
-| 标签 | 干什么 |
+| Tab | What it's for |
 |---|---|
-| **今日** | 今天聊了什么 |
-| **审核队列** | 夜间整理出来的候选记忆，点通过或丢掉 |
-| **重要记忆** | 浏览、搜索、改、删 |
-| **更多** | 珍贵原文、术语表、维护工具 |
-| **设置** | 上游、助手、环境参数 |
+| **Today** | What you talked about today |
+| **Review queue** | Candidate memories consolidated overnight — approve or discard |
+| **Important memories** | Browse, search, edit, delete |
+| **More** | Precious originals, glossary, maintenance tools |
+| **Settings** | Upstream, assistants, environment parameters |
 
-想让 AI 记住、忘掉、改掉什么，在面板点就行。
+Want the AI to remember, forget, or fix something? It's all point-and-click.
 
-## 它实际在做什么
+## How it actually works
 
-```
-你的客户端  →  Aelios（认助手、记、召回）  →  模型
-```
+- Every time you speak, relevant old memories are tucked onto the end of the current conversation.
+- Raw conversations are stored first; overnight, Aelios consolidates them into long-term memory (the *Dream* pass). Important ones land in your review queue.
+- Memory lives in **your own Cloudflare account** (D1 + Vectorize) — never tied to a chat window, never on someone else's server.
 
-- 你每说一句，相关旧记忆会贴到这次对话里。
-- 对话原文先存下来；夜里自动整理成长期记忆（Dream），重要的会进审核队列。
-- 记忆存在你自己的 Cloudflare（D1 + Vectorize），不绑某个聊天窗口。
+One assistant can write to one space and read from several. A fresh conversation can write `coder` while also reading the old vault `coder-old` and a shared `shared-docs`. Leave the recall spaces empty and it only reads its own.
 
-一个助手可以写一个空间、读好几个空间。比如新对话写 `coder`，同时还能读旧库 `coder-old` 和共享的 `shared-docs`。不填召回空间就只读自己那个。
+## Optional features
 
-## 可选功能
+**Full chat gateway** — let Aelios forward to every vendor's models, billed against your own keys:
 
-**完整聊天网关**（想让 Aelios 转发各家模型，用你自己的 key 计费）
+1. Cloudflare → AI → AI Gateway: create a gateway and store each vendor's key under it.
+2. Add the `CLOUDFLARE_API_TOKEN` Worker secret.
+3. In `/admin` Settings, put your 32-character account ID as the upstream and add assistants.
 
-1. Cloudflare → AI → AI Gateway，建一个 gateway，把各家 key 存在它下面。
-2. Worker Secrets 加 `CLOUDFLARE_API_TOKEN`。
-3. `/admin` 设置里，上游填 32 位账号 ID，再加助手。
+Skip all of that and memory recall + the overnight Dream still work (via Workers AI).
 
-不配这些，记忆召回和夜间整理也能跑（走 Workers AI）。
+**MCP memory for Claude Code / Codex**:
 
-**给 Claude Code / Codex 加 MCP 记忆**
-
-```
-https://<Worker 地址>/mcp?token=<CHATBOX_API_KEY>
+```text
+https://<Worker address>/mcp?token=<CHATBOX_API_KEY>
 ```
 
-想让 Claude Code 每条消息自动召回、批量写回，用仓库里的 Hook：[`integrations/claude-code/`](./integrations/claude-code/README.md)。
+For automatic per-message recall and batch write-back in Claude Code, use the Hook in this repo: [`integrations/claude-code/`](integrations/claude-code/README.md).
 
-**看图**
+**Seeing images (guide-dog)**: add the `GUIDE_DOG_API_KEY` secret, then point your client at `https://<Worker address>/v1/guide-dog` with model `companion`. The guide-dog only describes images — it writes no memory.
 
-加 Secret `GUIDE_DOG_API_KEY`，客户端改成：
+## Common pitfalls
 
-- 地址：`https://<Worker 地址>/v1/guide-dog`
-- 模型：`companion`
+- Deploy with `npm run deploy`, never a bare `wrangler deploy`.
+- Assistant names are part of the URL: use `coder`-style English, no spaces.
+- Model names need the vendor prefix: `anthropic/claude-opus-4-5`, not `claude-opus-4-5`.
+- Only registered primary models get memory. Keep small utility models out.
+- Never hand-delete the Vectorize index (`memo-kb`, 1024-dim cosine).
 
-导盲犬只转述图片，不写记忆。
+## Digging deeper
 
-## 最容易踩的坑
-
-- 部署用 `npm run deploy`，不要裸 `wrangler deploy`。
-- 助手名字是地址的一部分，用 `coder` 这种英文，别用空格。
-- 模型名要带厂商前缀：`anthropic/claude-opus-4-5`，不要只写 `claude-opus-4-5`。
-- 只有助手里登记的主模型才有记忆。小模型、杂务模型别写进去。
-- Vectorize 索引别手动删（`memo-kb`，1024 维 cosine）。
-
-## 想看细节
-
-- 网关怎么路由、怎么记、怎么召回：[docs/memory-gateway.md](docs/memory-gateway.md)
-- 请求会改什么、thinking 怎么处理：[docs/request-contract.md](docs/request-contract.md)
-- 哪些密钥必填：[SECRETS.md](./SECRETS.md)
-- 维护、端点、MCP 工具：下面这一段
+- How the gateway routes, remembers, and recalls: [docs/memory-gateway.md](docs/memory-gateway.md)
+- What happens to requests, how thinking is handled: [docs/request-contract.md](docs/request-contract.md)
+- Which secrets are required: [SECRETS.md](SECRETS.md)
+- For maintainers: endpoints, MCP tools, and the memory lifecycle — see the sections below.
 
 ---
 
-# 给维护的人
+# For maintainers
 
-Cloudflare Workers 上的记忆网关。帮用户部署时只关联**用户自己的 fork**，Secrets 都在用户自己的账号。
+A memory gateway on Cloudflare Workers. When helping a user deploy, always link **the user's own fork**; all secrets live in the user's own account.
 
-| 资源 | 值 |
+| Resource | Value |
 |---|---|
 | Worker | `companion-memory-proxy` |
 | D1 | `companion_memory_proxy` |
-| Vectorize | `memo-kb`（1024 维 cosine） |
+| Vectorize | `memo-kb` (1024-dim, cosine) |
 | Queue | `companion-memory` |
 | Embedding | `workers-ai/@cf/baai/bge-m3` |
 
-入口：`/<助手>/v1/chat/completions`、`/<助手>/v1/messages`、`/<助手>/v1/responses`。不带助手名的 `/v1/...` 走该钥匙的第一个助手。
+Entry points: `/<assistant>/v1/chat/completions`, `/<assistant>/v1/messages`, `/<assistant>/v1/responses`. A bare `/v1/...` uses the first assistant of that key.
 
-CF 上游：chat 走 compat（全厂商，BYOK）；messages / responses 走各厂商原生端点。模型名原样透传，厂商认不出来由上游报错。自定义 OpenAI 兼容地址原样转发。
+Upstreams: chat goes through compat (all vendors, BYOK); messages / responses hit each vendor's native endpoint. Model names pass through untouched — if the vendor doesn't recognize one, the upstream error says so. Custom OpenAI-compatible base URLs are forwarded as-is.
 
-配置三层，都在 `/admin` 的「设置」：上游、助手、环境参数。优先级：面板保存的 > `GATEWAY_CONFIG` > 空配置。
+Configuration has three layers, all under `/admin` Settings: upstream, assistants, environment parameters. Precedence: panel-saved > `GATEWAY_CONFIG` > empty config.
 
-### 常用端点
+### Common endpoints
 
-| 方法 | 路径 | 说明 |
+| Method | Path | Notes |
 |---|---|---|
-| GET | `/health` | 健康检查 |
-| GET | `/admin` | 管理面板 |
-| GET | `/v1/models` | 模型列表 |
-| POST | `/<助手>/v1/chat/completions` | OpenAI 兼容聊天 |
-| POST | `/<助手>/v1/messages` | Anthropic messages |
-| POST | `/<助手>/v1/responses` | OpenAI responses |
-| GET / POST | `/mcp` | MCP 记忆工具 |
-| GET / POST | `/v1/memories` | 记忆列表 / 新建 |
-| POST | `/v1/memory/recall` | 动态召回（hook 优先用这个） |
-| POST | `/v1/search/memories` | 原始搜索（不记账） |
-| POST | `/v1/ingest/messages` | 写入原始聊天 |
-| GET | `/v1/memory_boot` | 冷启动包 |
-| GET | `/v1/diary` `/v1/diary/recent` | 日记 |
-| GET / POST / DELETE | `/v1/precious` `/v1/glossary` | 珍贵原文 / 术语表 |
-| GET / POST | `/v1/candidates` | 审核队列 |
+| GET | `/health` | Health check |
+| GET | `/admin` | Admin panel |
+| GET | `/v1/models` | Model list |
+| POST | `/<assistant>/v1/chat/completions` | OpenAI-compatible chat |
+| POST | `/<assistant>/v1/messages` | Anthropic messages |
+| POST | `/<assistant>/v1/responses` | OpenAI responses |
+| GET / POST | `/mcp` | MCP memory tools |
+| GET / POST | `/v1/memories` | List / create memories |
+| POST | `/v1/memory/recall` | Dynamic recall (preferred by hooks) |
+| POST | `/v1/search/memories` | Raw search (unmetered) |
+| POST | `/v1/ingest/messages` | Ingest raw chats |
+| GET | `/v1/memory_boot` | Cold-start pack |
+| GET | `/v1/diary`, `/v1/diary/recent` | Diary |
+| GET / POST / DELETE | `/v1/precious`, `/v1/glossary` | Precious originals / glossary |
+| GET / POST | `/v1/candidates` | Review queue |
 
-非 `/health` `/admin` 都要 `Authorization: Bearer <key>`。网关按助手钥匙鉴权，记忆接口按 `memory:read` / `memory:write`。
+Everything except `/health` and `/admin` requires `Authorization: Bearer <key>`. The gateway authorizes by assistant key; memory APIs by `memory:read` / `memory:write` scopes.
 
-### MCP 工具
+### MCP tools
 
 `memory_search` `memory_list` `memory_get` `memory_delete` `memory_ingest` `memory_boot` `memory_recall` `memory_upsert` `memory_supersede` `memory_archive` `memory_pin` `glossary_set` `diary_get` `memory_export`
 
-### 记忆怎么走
+### How memory flows
 
-写入：助手直写 `memory_upsert`；夜里 cron（`10 20 * * *`）从当天对话抽事实 → 进审核队列，并写日记 / 周记 / 月记。
+**Writes:** assistants write directly via `memory_upsert`; a nightly cron (`10 20 * * *`) extracts facts from the day's conversations → review queue, and writes diary / weekly / monthly entries.
 
-召回：最后一句用户话 → 向量搜索 + 词面 → 原文片段批量重排 + 规则 → 把干净原文贴到当前消息末尾。默认不调用生成式 LLM，日常最多一条，回答旧事最多两条；低分不凑数，重排失败回落词面。分数与取舍可在 `/admin → 设置` 查看。传输信封、哈希和消息 ID 不进入日常提示，同一会话里直接相邻且 90 秒内的两句会合并；主动搜索仍返回完整记录和 ID。日记不自动注入。
+**Recall:** your latest message → vector search + lexical match → batch rerank of original passages + rules → the clean original text is tucked onto the end of the current message. No generative LLM by default: at most one memory on a normal turn, two when answering about the past; low scores are never padded in. Rerank failures fall back to lexical. Scores and trade-offs are visible in `/admin → Settings`. Transport envelopes, hashes, and message IDs never enter the daily prompt; two adjacent messages within 90 seconds in one session are merged. Active search still returns full records and IDs. Diaries are not auto-injected.
 
-清理：消息约 7 天，过期记忆 180 天标记，失效记录再过 30 天硬删。
+**Cleanup:** messages live ~7 days; expired memories are flagged at 180 days and hard-deleted 30 days later.
 
-### 本地验证
+### Local verification
 
 ```bash
 npm install
 npm run verify
 ```
 
-测试需要 Node.js 22+。
+Tests need Node.js 22+.
 
-CI 里 lint 是阻断的：`npm run lint` 必须零 error 才能合并。仍有 17 个 `noNonNullAssertion` warning，这条规则在 `biome.json` 里被降为 warning，不影响退出码 —— 清不清由改到那行的人自己判断，别用 Biome 的自动修复批量改，它会把 `x!.y` 换成 `x?.y`，把「出错就炸」变成「悄悄返回 undefined」。
+Lint is blocking in CI: `npm run lint` must be zero-error to merge. There are still 17 `noNonNullAssertion` warnings; the rule is demoted to warning in `biome.json` and doesn't affect the exit code — clean them up if you're touching that line, and never bulk-fix with Biome's autofix: it rewrites `x!.y` into `x?.y`, turning "crash loudly" into "silently return undefined".
 
 ## License
 
 AGPL-3.0
 
-可自由使用、修改；若把修改后的版本对外提供网络服务，须以相同许可开源修改后的源码。
+Free to use and modify; if you run a modified version as a network service, you must open-source your modifications under the same license.
 
-v1 最终封存点在 tag `v1-final`（当时仍是 MIT）。`tg-bot` 是 Telegram 集成分支，截至 2026-09-11 停在 2026-07-16，之后 main 领先它 154 个 commit（135 个文件、约 1.8 万行改动），分支自己只加了 17 个文件，按现状合不回去。留着当历史看；要捡回来得先 rebase 到 main，别直接合。
+The final v1 point is tag `v1-final` (MIT at the time). `tg-bot` is the Telegram integration branch, stuck at 2026-07-16 as of 2026-09-11 with main 154 commits ahead (135 files, ~18k lines changed) while the branch itself only added 17 files — it can't be merged back as-is. Kept as history; resurrect it by rebasing onto main, never by direct merge.
 
-## 交流
+## Community
 
-QQ 群：**1091783659**
+QQ group: **1091783659**
