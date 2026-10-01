@@ -1102,7 +1102,7 @@ document.documentElement.dataset.theme = localStorage.getItem('aelios.admin.colo
                 <input x-model="idn.maxMemoryChars" type="number" min="256" max="24000" class="mt-1 h-10 w-full rounded-xl border border-zinc-800 bg-zinc-900 px-3 text-sm text-zinc-100 outline-none focus:border-coral" placeholder="留空默认 6000">
                 <label class="mt-2 block text-xs text-zinc-400">审自己记忆用的模型</label>
                 <input x-model="idn.judgeModel" class="mt-1 h-10 w-full rounded-xl border border-zinc-800 bg-zinc-900 px-3 text-sm text-zinc-100 outline-none focus:border-coral" placeholder="留空用它最近聊天的主模型,如 anthropic/claude-opus-5">
-                <p class="mt-1 text-[11px] leading-5 text-zinc-500">主模型太贵或太慢时填一个 author/model,走 chat。最近 7 天没聊过又没填时,交给环境设置里的审核模型代审。</p>
+                <p class="mt-1 text-[11px] leading-5 text-zinc-500">主模型太贵或太慢时填一个 author/model,走 chat。聊天原文保留期内没聊过又没填时,交给环境设置里的代审模型。</p>
               </details>
             </div>
           </template>

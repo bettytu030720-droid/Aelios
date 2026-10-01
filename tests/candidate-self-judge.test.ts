@@ -117,6 +117,17 @@ test("the assistant's own voice comes from its latest main-model exchange", asyn
   assert.equal(pinned.model, "deepseek/deepseek-v4-flash");
 
   assert.throws(() => validateConfig({ version: 3, identities: [{ ...danjiu(), judgeModel: "no-author" }] }), /judgeModel/);
+
+  // Two assistants sharing a space: whoever spoke last judges, with its own pin if it has one.
+  setConfig([danjiu(), { slug: "guest", namespace: "default", keys: ["CHATBOX_API_KEY"], models: ["*sol*"],
+    assistantName: "知来", judgeModel: "openai/gpt-6.1-sol" }]);
+  invalidateSettingsCache();
+  exchange("guest", "responses", "openai/gpt-6.1-sol-pro", "", "human", "2026-09-30T01:00:00.000Z");
+  const last: any = await resolveJudgeVoice(env, "default");
+  assert.deepEqual([last.name, last.model, last.protocol], ["旦九", "anthropic/claude-opus-5-5", "messages"]);
+  exchange("guest", "responses", "openai/gpt-6.1-sol-pro", "", "human", "2026-10-01T04:00:00.000Z");
+  const guest: any = await resolveJudgeVoice(env, "default");
+  assert.deepEqual([guest.name, guest.model, guest.protocol], ["知来", "openai/gpt-6.1-sol", "chat"]);
 });
 
 test("self-judge decides remember or let go, through the assistant's own route", async () => {
@@ -238,6 +249,27 @@ test("undo restores an archived memory and refuses what changed since", async ()
   candidate("c-del-gone", "咲咲住在出租屋。", { source: "dream_delete", target: "missing", created: "2026-09-30T10:00:00.000Z" });
   sqlite.prepare("UPDATE memory_candidates SET status = 'discarded', decision_note = 'judge[旦九]: 我想留着。' WHERE id = 'c-del-gone'").run();
   assert.equal((await api("/v1/candidates/c-del-gone/undo?namespace=default", "POST")).status, 409);
+
+  // A remembered update whose old version was touched since is refused before anything moves.
+  memory("city-old", "咲咲住在香港。", "city");
+  candidate("c-city", "咲咲长期住在武汉。", { source: "dream_update", fact_key: "city", created: "2026-09-30T10:00:00.000Z" });
+  verdicts.push(verdict(0.9));
+  await runCandidateJudge(env, "default");
+  const city = row("memory_candidates", "c-city");
+  assert.equal(row("memories", "city-old").status, "superseded");
+  sqlite.prepare("UPDATE memories SET status = 'archived' WHERE id = 'city-old'").run();
+  assert.equal((await api("/v1/candidates/c-city/undo?namespace=default", "POST")).status, 409);
+  assert.equal(row("memories", city.target_memory_id).status, "active");
+
+  // An archive is not undone once the fact has a newer current version.
+  memory("pet-old", "咲咲养了一只猫。", "pet");
+  candidate("c-pet", "咲咲养了一只猫。", { source: "dream_delete", target: "pet-old", created: "2026-09-30T10:00:00.000Z" });
+  verdicts.push(verdict(0.9, true, { should_delete: true }));
+  await runCandidateJudge(env, "default");
+  assert.equal(row("memories", "pet-old").status, "archived");
+  memory("pet-new", "咲咲养了两只猫。", "pet");
+  assert.equal((await api("/v1/candidates/c-pet/undo?namespace=default", "POST")).status, 409);
+  assert.equal(row("memories", "pet-old").status, "archived");
 
   // Human decisions are not this endpoint's to reverse.
   candidate("c-human", "咲咲住在武汉。");

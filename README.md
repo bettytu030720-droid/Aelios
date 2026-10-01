@@ -90,7 +90,7 @@ Want the AI to remember, forget, or fix something? It's all point-and-click.
 ## How it actually works
 
 - Every time you speak, relevant old memories are tucked onto the end of the current conversation.
-- Raw conversations are stored first; overnight, Aelios consolidates them into long-term memory (the *Dream* pass). Each assistant decides what it keeps using the model it chats with; you only step in to undo.
+- Raw conversations are stored first; overnight, Aelios consolidates them into long-term memory (the *Dream* pass). Each assistant decides what it keeps using the model it chats with, and you can undo any of its calls.
 - Memory lives in **your own Cloudflare account** (D1 + Vectorize) — never tied to a chat window, never on someone else's server.
 
 One assistant can write to one space and read from several. A fresh conversation can write `coder` while also reading the old vault `coder-old` and a shared `shared-docs`. Leave the recall spaces empty and it only reads its own.

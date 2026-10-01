@@ -10,6 +10,7 @@
 import { getMessagesByIds } from "../db/messages";
 import {
   archiveMemory,
+  checkMemoryRestorable,
   getActiveMemoryByFactKey,
   listMemoryCandidates,
   restoreMemory,
@@ -565,7 +566,9 @@ export async function undoJudgeDecision(
 
   if (candidate.source === "dream_delete") {
     const restored = await restoreMemory(env, { namespace, id: targetId });
-    if (!restored) return { ok: false, httpStatus: 409, error: "那条记忆已经不在归档里，撤回不了" };
+    if (!restored) {
+      return { ok: false, httpStatus: 409, error: "那条记忆已经不在归档里，或者这件事已经记了新版本，撤回不了" };
+    }
     const updated = await updateMemoryCandidateStatus(env.DB, {
       namespace,
       id: candidate.id,
@@ -593,10 +596,16 @@ export async function undoJudgeDecision(
     return { ok: false, httpStatus: 409, error: "记住的那条记忆之后又变过，撤回不了" };
   }
 
+  // 先确认被顶掉的旧版本还能放回来，再动新条；否则收回新条后两头都不在。
+  const previousId = target.supersedes_id;
+  if (previousId && !await checkMemoryRestorable(env.DB, { namespace, id: previousId, supersededBy: targetId })) {
+    return { ok: false, httpStatus: 409, error: "被这次记住顶掉的旧版本之后又变过，撤回不了" };
+  }
+
   await archiveMemory(env, { namespace, id: targetId });
   let restoredId: string | undefined;
-  if (target.supersedes_id && await restoreMemory(env, { namespace, id: target.supersedes_id, supersededBy: targetId })) {
-    restoredId = target.supersedes_id;
+  if (previousId && await restoreMemory(env, { namespace, id: previousId, supersededBy: targetId })) {
+    restoredId = previousId;
   }
   const updated = await updateMemoryCandidateStatus(env.DB, {
     namespace,

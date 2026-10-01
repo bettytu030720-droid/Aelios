@@ -1,5 +1,6 @@
 // 候选由谁来审：先让这个空间的助手自己判——用它最近真正在说话的那个主模型，
-// 走和聊天同一条上游路线；认不出它的模型时，才交给 JUDGE_MODEL / DREAM_MODEL 代审。
+// 走和聊天同一条上游路线 (网关只记主模型的往来，和聊天原文同一个保留期)；
+// 认不出它的模型时，才交给 JUDGE_MODEL / DREAM_MODEL 代审。
 
 import {
   identityNamespace,
@@ -50,11 +51,7 @@ export async function resolveJudgeVoice(env: Env, namespace: string): Promise<Ju
     : [];
 
   if (config && identities.length > 0) {
-    const pinned = identities.find((identity) => identity.judgeModel?.trim());
-    if (pinned?.judgeModel) {
-      return { kind: "self", name: assistantLabel(pinned), config, identity: pinned, protocol: "chat", model: pinned.judgeModel.trim() };
-    }
-
+    // 最近开口的那位助手来判：填了审核模型就用它 (走 chat)，否则用它这次说话的主模型和协议。
     try {
       const rows = await env.DB.prepare(
         `SELECT profile, protocol, upstream_model, upstream_provider
@@ -67,13 +64,22 @@ export async function resolveJudgeVoice(env: Env, namespace: string): Promise<Ju
         .all<{ profile: string; protocol: string; upstream_model: string; upstream_provider: string }>();
       for (const row of rows.results ?? []) {
         const identity = identities.find((item) => item.slug === row.profile);
+        if (!identity) continue;
+        const pinned = identity.judgeModel?.trim();
+        if (pinned) return { kind: "self", name: assistantLabel(identity), config, identity, protocol: "chat", model: pinned };
         const model = callableModelName(row.upstream_model, row.upstream_provider);
         const protocol = PROTOCOLS.find((item) => item === row.protocol);
-        if (!identity || !model || !protocol || !isMainModel(identity, model)) continue;
+        if (!model || !protocol || !isMainModel(identity, model)) continue;
         return { kind: "self", name: assistantLabel(identity), config, identity, protocol, model };
       }
     } catch (error) {
-      console.error("candidate judge: recent exchanges unreadable, using the shared judge", { namespace, error });
+      console.error("candidate judge: recent exchanges unreadable", { namespace, error });
+    }
+
+    // 聊天记录保留期内没人开口：有填审核模型的助手照样自己判。
+    const pinned = identities.find((identity) => identity.judgeModel?.trim());
+    if (pinned?.judgeModel) {
+      return { kind: "self", name: assistantLabel(pinned), config, identity: pinned, protocol: "chat", model: pinned.judgeModel.trim() };
     }
   }
 

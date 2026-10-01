@@ -48,7 +48,7 @@ export const SETTINGS: SettingSpec[] = [
   { group: "Dream 与日记", name: "SUMMARY_MODEL", label: "摘要模型的最后兜底", hint: "DREAM_MODEL 和旧名 DAILY_DIGEST_MODEL 都没填时，摘要链路用它" },
   { group: "Dream 与日记", name: "ENABLE_WEEKLY_ROLLUP", label: "周记汇总", hint: "默认开启。填 false 不生成 weekly_log，命中也就没有周块可附" },
   { group: "Dream 与日记", name: "ENABLE_MONTHLY_ROLLUP", label: "月记汇总", hint: "默认开启。填 false 不生成 monthly_log" },
-  { group: "Dream 与日记", name: "JUDGE_MODEL", label: "代审模型", hint: "只在认不出助手自己的模型时用（最近 7 天没通过网关聊过，助手设置里也没填审核模型）。留空回落 DREAM_MODEL；两者都空就把这些候选留给人工" },
+  { group: "Dream 与日记", name: "JUDGE_MODEL", label: "代审模型", hint: "只在认不出助手自己的模型时用（聊天原文保留期内没通过网关聊过，助手设置里也没填审核模型）。留空回落 DREAM_MODEL；两者都空就把这些候选留给人工" },
   { group: "Dream 与日记", name: "TRIGGER_BUILD", label: "夜里给新记忆建触发器", hint: "默认 off。填 on 或 true 后，夜批给当天新记忆生成检索触发器。成本是每条记忆一次模型调用加三次向量化，只建增量，已有触发器的记忆跳过" },
   { group: "Dream 与日记", name: "TRIGGER_BUILD_MODEL", label: "建触发器用哪个模型", hint: "留空回落 DREAM_MODEL。触发器质量直接决定这条通道有没有用，别用太小的模型" },
   { group: "Dream 与日记", name: "JUDGE_MAX_CANDIDATES", label: "一轮最多审几条候选", hint: "默认 20，上限 100" },

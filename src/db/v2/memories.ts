@@ -655,21 +655,52 @@ export async function archiveMemory(
   return true;
 }
 
-// restore: 把归档的记忆放回 active；传 supersededBy 时改为复原被那条新版本顶掉的旧版本。
-// 状态对不上 (已被别处改过) 就不动，返回 false。
+// 能不能把一条记忆放回 active：状态得对得上 (归档的；或被 supersededBy 顶掉的旧版本)，
+// 而且同一 fact_key 下没有别的现行版本，否则放回来就是两条重复的现行事实。
+export async function checkMemoryRestorable(
+  db: D1Database,
+  input: { namespace: string; id: string; supersededBy?: string }
+): Promise<{ content: string } | null> {
+  const row = await db
+    .prepare(
+      `SELECT m.status, m.content, m.superseded_by, COALESCE(m.fact_key, lc.fact_key) AS fact_key
+       FROM memories m
+       LEFT JOIN memory_lifecycle lc ON lc.memory_id = m.id
+       WHERE m.namespace = ? AND m.id = ?`
+    )
+    .bind(input.namespace, input.id)
+    .first<{ status: string; content: string; superseded_by: string | null; fact_key: string | null }>();
+  if (!row) return null;
+  const stateOk = input.supersededBy
+    ? row.status === "superseded" && row.superseded_by === input.supersededBy
+    : row.status === "archived";
+  if (!stateOk) return null;
+  if (row.fact_key) {
+    const other = await db
+      .prepare(
+        `SELECT m.id FROM memories m
+         LEFT JOIN memory_lifecycle lc ON lc.memory_id = m.id
+         WHERE m.namespace = ? AND m.status = 'active'
+           AND (m.version_status IS NULL OR m.version_status IN ('current', 'under_review'))
+           AND (m.fact_key = ? OR (m.fact_key IS NULL AND lc.fact_key = ?))
+           AND m.id != ? AND m.id != ?
+         LIMIT 1`
+      )
+      .bind(input.namespace, row.fact_key, row.fact_key, input.id, input.supersededBy ?? input.id)
+      .first<{ id: string }>();
+    if (other) return null;
+  }
+  return { content: row.content };
+}
+
+// restore: 把记忆放回 active (条件见 checkMemoryRestorable)，再补回向量和全文索引。
+// 对不上就不动，返回 false。
 export async function restoreMemory(
   env: Env,
   input: { namespace: string; id: string; supersededBy?: string }
 ): Promise<boolean> {
   const db = env.DB;
-  const existing = await db
-    .prepare("SELECT id, status, content, superseded_by FROM memories WHERE namespace = ? AND id = ?")
-    .bind(input.namespace, input.id)
-    .first<{ id: string; status: string; content: string; superseded_by: string | null }>();
-  if (!existing) return false;
-  const restorable = input.supersededBy
-    ? existing.status === "superseded" && existing.superseded_by === input.supersededBy
-    : existing.status === "archived";
+  const restorable = await checkMemoryRestorable(db, input);
   if (!restorable) return false;
 
   await db
@@ -689,7 +720,7 @@ export async function restoreMemory(
       .run();
   }
   await syncMemoryVector(env, { namespace: input.namespace, id: input.id });
-  await upsertMemoryFts(env.DB, { namespace: input.namespace, memoryId: input.id, content: existing.content });
+  await upsertMemoryFts(env.DB, { namespace: input.namespace, memoryId: input.id, content: restorable.content });
   return true;
 }
 
