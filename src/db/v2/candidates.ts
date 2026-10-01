@@ -160,6 +160,26 @@ export async function listJudgedCandidatesInRange(
   return result.results ?? [];
 }
 
+// 自动审核的决定 (含撤回过的)，给后台"这周助手自己定的"清单用，按决定时间倒序。
+export async function listJudgeDecisionsSince(
+  db: D1Database,
+  input: { namespace: string; sinceIso: string; limit?: number }
+): Promise<MemoryCandidateRow[]> {
+  const limit = Math.min(Math.max(Math.floor(input.limit ?? 200), 1), 500);
+  const result = await db
+    .prepare(
+      `SELECT *
+       FROM memory_candidates
+       WHERE namespace = ? AND status IN ('approved', 'discarded') AND updated_at >= ?
+         AND (decision_note LIKE 'judge%' OR decision_note LIKE 'undo: judge%')
+       ORDER BY updated_at DESC
+       LIMIT ?`
+    )
+    .bind(input.namespace, input.sinceIso, limit)
+    .all<MemoryCandidateRow>();
+  return result.results ?? [];
+}
+
 export async function getMemoryCandidateById(
   db: D1Database,
   input: { namespace: string; id: string }

@@ -450,6 +450,31 @@ document.documentElement.dataset.theme = localStorage.getItem('aelios.admin.colo
             </div>
           </article>
         </template>
+
+        <div class="pt-4">
+          <h2 class="text-lg font-semibold">这周自动定下的</h2>
+          <p class="mt-1 text-sm text-zinc-400">助手自己判的只分记住和放下，不进上面的队列。觉得不对就撤回：记住的收回，放下的补记。</p>
+        </div>
+        <template x-if="judgeDecisions.length === 0">
+          <div class="text-keep w-full rounded-2xl border border-zinc-800 bg-zinc-900 p-6 text-sm text-zinc-400">这 7 天没有自动决定。</div>
+        </template>
+        <template x-for="item in judgeDecisions" :key="item.id">
+          <article class="rounded-2xl border border-zinc-800 bg-zinc-900 p-4 shadow-sm">
+            <div class="mb-2 flex flex-wrap items-center gap-2 text-xs">
+              <span class="chip" :class="item.undone ? 'chip-dim' : (item.status === 'approved' ? 'chip-ok' : 'chip-dim')" x-text="judgeDecisionLabel(item)"></span>
+              <span class="chip chip-dim" x-text="dreamCandidateSourceLabel(item.source)"></span>
+              <span class="text-zinc-500" x-text="item.type"></span>
+              <span class="ml-auto text-zinc-500" x-text="fmt(item.updated_at)"></span>
+            </div>
+            <p class="whitespace-pre-wrap text-sm leading-7 text-zinc-100" x-text="item.content"></p>
+            <p x-show="item.reason" class="mt-1 text-xs leading-6 text-zinc-400" x-text="item.reason"></p>
+            <div x-show="item.undoable" class="mt-3">
+              <button type="button" @click="undoJudgeDecision(item)" class="tap inline-flex items-center justify-center gap-2 rounded-2xl border border-zinc-800 px-4 text-sm text-zinc-100 transition duration-150 ease-in-out hover:border-coral">
+                <i data-lucide="undo-2" class="h-4 w-4"></i><span x-text="judgeUndoLabel(item)"></span>
+              </button>
+            </div>
+          </article>
+        </template>
       </section>
 
       <section x-show="page === 'memory'" class="space-y-4">
@@ -1075,6 +1100,9 @@ document.documentElement.dataset.theme = localStorage.getItem('aelios.admin.colo
                 </select>
                 <label class="mt-2 block text-xs text-zinc-400">单次记忆字数上限</label>
                 <input x-model="idn.maxMemoryChars" type="number" min="256" max="24000" class="mt-1 h-10 w-full rounded-xl border border-zinc-800 bg-zinc-900 px-3 text-sm text-zinc-100 outline-none focus:border-coral" placeholder="留空默认 6000">
+                <label class="mt-2 block text-xs text-zinc-400">审自己记忆用的模型</label>
+                <input x-model="idn.judgeModel" class="mt-1 h-10 w-full rounded-xl border border-zinc-800 bg-zinc-900 px-3 text-sm text-zinc-100 outline-none focus:border-coral" placeholder="留空用它最近聊天的主模型,如 anthropic/claude-opus-5">
+                <p class="mt-1 text-[11px] leading-5 text-zinc-500">主模型太贵或太慢时填一个 author/model,走 chat。最近 7 天没聊过又没填时,交给环境设置里的审核模型代审。</p>
               </details>
             </div>
           </template>
@@ -1179,6 +1207,7 @@ function memoryAdmin() {
 
     todayMessages: [],
     candidates: [],
+    judgeDecisions: [],
     memories: [],
     precious: [],
     glossary: [],
@@ -1317,7 +1346,7 @@ function memoryAdmin() {
       this.recallHistoryRevision += 1;
       this.recallHistory = []; this.recallHistoryError = ''; this.recallHistoryLoading = false;
       this.boot = {}; this.stats = {};
-      this.todayMessages = []; this.candidates = []; this.memories = [];
+      this.todayMessages = []; this.candidates = []; this.judgeDecisions = []; this.memories = [];
       this.precious = []; this.glossary = [];
       this.diaryDailies = []; this.diaryWeeklies = []; this.diaryExpanded = {};
       this.worldItems = []; this.worldSelection = {}; this.worldQuery = '';
@@ -1446,7 +1475,8 @@ function memoryAdmin() {
             readNamespacesText: idn.readNamespaces ? (idn.readNamespaces.length ? idn.readNamespaces.join(', ') : '[]') : '',
             keys: idn.keys && idn.keys.length ? idn.keys.slice() : ['CHATBOX_API_KEY'],
             anthropicThinking: idn.anthropicThinking || 'passthrough',
-            maxMemoryChars: idn.maxMemoryChars || ''
+            maxMemoryChars: idn.maxMemoryChars || '',
+            judgeModel: idn.judgeModel || ''
           };
         });
         const envData = await this.request('/api/gateway/env');
@@ -1457,7 +1487,7 @@ function memoryAdmin() {
       this.gwBusy = false;
     },
     gwAdd() {
-      this.gwIdentities.push({ slug: '', userName: '', assistantName: '', modelsText: '', namespace: '', readNamespacesText: '', keys: ['CHATBOX_API_KEY'], anthropicThinking: 'passthrough', maxMemoryChars: '' });
+      this.gwIdentities.push({ slug: '', userName: '', assistantName: '', modelsText: '', namespace: '', readNamespacesText: '', keys: ['CHATBOX_API_KEY'], anthropicThinking: 'passthrough', maxMemoryChars: '', judgeModel: '' });
     },
     async gwSave() {
       if (this.gwBusy) return;
@@ -1477,6 +1507,7 @@ function memoryAdmin() {
           if (idn.anthropicThinking && idn.anthropicThinking !== 'passthrough') out.anthropicThinking = idn.anthropicThinking;
           const budget = parseInt(idn.maxMemoryChars, 10);
           if (budget) out.maxMemoryChars = budget;
+          if ((idn.judgeModel || '').trim()) out.judgeModel = idn.judgeModel.trim();
           return out;
         });
         const config = { version: 3, identities: identities };
@@ -1498,6 +1529,7 @@ function memoryAdmin() {
     async reloadAll() {
       this.savePrefs();
       var tasks = [this.loadBoot(), this.loadCandidates(), this.loadMemories()];
+      if (this.page === 'review') tasks.push(this.loadJudgeDecisions());
       if (this.page === 'settings') tasks.push(this.loadRecallHistory());
       if (this.page === 'diary') tasks.push(this.loadDiary());
       if (this.page === 'more' && this.moreView === 'world') tasks.push(this.loadWorldFacts());
@@ -1545,6 +1577,45 @@ function memoryAdmin() {
         });
       } catch (error) {
         if (revision !== this.spaceRevision) return;
+        this.notify(error.message);
+      }
+    },
+    async loadJudgeDecisions() {
+      const revision = this.spaceRevision;
+      try {
+        const data = await this.request(this.withNamespace('/v1/candidates/decisions?days=7'));
+        if (revision !== this.spaceRevision) return;
+        this.judgeDecisions = data.data || [];
+        this.icons();
+      } catch (error) {
+        if (revision !== this.spaceRevision) return;
+        this.notify(error.message);
+      }
+    },
+    judgeDecisionLabel(item) {
+      const archive = item.source === 'dream_delete';
+      if (item.undone) {
+        if (archive) return item.status === 'approved' ? '撤回后归档' : '撤回后放回';
+        return item.status === 'approved' ? '撤回后补记' : '撤回后收回';
+      }
+      const verdict = archive
+        ? (item.status === 'approved' ? '归档了' : '留着')
+        : (item.status === 'approved' ? '记住了' : '放下了');
+      return (item.judged_by || '代审') + ' · ' + verdict;
+    },
+    judgeUndoLabel(item) {
+      if (item.source === 'dream_delete') return item.status === 'approved' ? '撤回，放回来' : '撤回，归档它';
+      return item.status === 'approved' ? '撤回，不记了' : '撤回，记下来';
+    },
+    async undoJudgeDecision(item) {
+      try {
+        await this.request(this.withNamespace('/v1/candidates/' + encodeURIComponent(item.id) + '/undo'), {
+          method: 'POST',
+          body: JSON.stringify({})
+        });
+        await Promise.all([this.loadJudgeDecisions(), this.loadMemories(), this.loadBoot()]);
+        this.notify('已撤回');
+      } catch (error) {
         this.notify(error.message);
       }
     },
@@ -1950,7 +2021,7 @@ function memoryAdmin() {
       }
       this.page = id;
       if (id === 'settings') { this.loadRecallHistory(); if (!this.gwGroups.length) this.gwLoad(); }
-      if (id === 'review') this.loadCandidates();
+      if (id === 'review') { this.loadCandidates(); this.loadJudgeDecisions(); }
       if (id === 'memory') this.loadMemories();
       if (id === 'diary') this.loadDiary();
       if (id === 'more') this.loadMoreView();

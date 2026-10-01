@@ -655,6 +655,44 @@ export async function archiveMemory(
   return true;
 }
 
+// restore: 把归档的记忆放回 active；传 supersededBy 时改为复原被那条新版本顶掉的旧版本。
+// 状态对不上 (已被别处改过) 就不动，返回 false。
+export async function restoreMemory(
+  env: Env,
+  input: { namespace: string; id: string; supersededBy?: string }
+): Promise<boolean> {
+  const db = env.DB;
+  const existing = await db
+    .prepare("SELECT id, status, content, superseded_by FROM memories WHERE namespace = ? AND id = ?")
+    .bind(input.namespace, input.id)
+    .first<{ id: string; status: string; content: string; superseded_by: string | null }>();
+  if (!existing) return false;
+  const restorable = input.supersededBy
+    ? existing.status === "superseded" && existing.superseded_by === input.supersededBy
+    : existing.status === "archived";
+  if (!restorable) return false;
+
+  await db
+    .prepare(
+      `UPDATE memories
+       SET status = 'active',
+           version_status = CASE WHEN version_status = 'superseded' THEN 'current' ELSE version_status END,
+           superseded_by = NULL, updated_at = ?
+       WHERE namespace = ? AND id = ?`
+    )
+    .bind(nowIso(), input.namespace, input.id)
+    .run();
+  if (input.supersededBy) {
+    await db
+      .prepare("UPDATE memory_lifecycle SET superseded_by_id = NULL WHERE memory_id = ?")
+      .bind(input.id)
+      .run();
+  }
+  await syncMemoryVector(env, { namespace: input.namespace, id: input.id });
+  await upsertMemoryFts(env.DB, { namespace: input.namespace, memoryId: input.id, content: existing.content });
+  return true;
+}
+
 // hard delete: D1 (本体+侧车) + 向量都删。memory_delete 在 v2 开时用。
 export async function deleteMemoryV2(
   env: Env,
