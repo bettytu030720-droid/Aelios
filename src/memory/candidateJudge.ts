@@ -38,7 +38,10 @@ const SELF_REMEMBER_MIN = 0.5;
 // 助手的主模型可能是又慢又贵的推理款。夜里这一轮给它的总时长封顶，超时的留到明晚，
 // 免得把同一个 cron 里后面的日记、周记和别的空间饿死。
 const SELF_JUDGE_BUDGET_MS = 5 * 60_000;
-const JUDGE_MAX_TOKENS = 300;
+// 代审默认的 gpt-oss-120b 是推理模型，思考也算输出额度。10-02 实测 300 时 7 条里有 3 条
+// 思考到一半就被截断 (finish_reason=length)，判不出来，候选只能干等到原文过期被丢；
+// 2000 时全部给出合法 JSON，平均只用 ~375。只按实际用量计费。
+const JUDGE_MAX_TOKENS = 2000;
 const JUDGE_SYSTEM_PROMPT = "你是严格的 JSON 生成器。你只输出 JSON。";
 
 export interface JudgeRunResult {
