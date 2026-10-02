@@ -25,6 +25,7 @@ import {
   getMemoryCandidateById,
   HandAuthoredProtectedError,
   listGlossary,
+  listJudgeDecisionsSince,
   listMemoryCandidates,
   listPrecious,
   type MemoryCandidateRow,
@@ -34,6 +35,7 @@ import {
   upsertGlossary,
   upsertMemoryByFactKey
 } from "../db/v2";
+import { parseJudgeNote, undoJudgeDecision } from "../memory/candidateJudge";
 import { withImpressionDisclaimer } from "../memory/impression";
 import { isV2Enabled, runRecall } from "../memory/v2/recall";
 
@@ -446,6 +448,17 @@ function toCandidateApiRecord(row: MemoryCandidateRow) {
   };
 }
 
+function toJudgeDecisionRecord(row: MemoryCandidateRow) {
+  const note = parseJudgeNote(row.decision_note);
+  return {
+    ...toCandidateApiRecord(row),
+    judged_by: note?.judgedBy ?? null,
+    reason: note?.reason ?? row.decision_note,
+    undone: note?.undone ?? false,
+    undoable: note?.undoable ?? false
+  };
+}
+
 async function countMessagesInRange(
   db: D1Database,
   input: { namespace: string; startCreatedAt: string; endCreatedAt: string }
@@ -780,6 +793,19 @@ export async function handleMemoryCandidates(request: Request, env: Env): Promis
     return json({ data: rows.map(toCandidateApiRecord) });
   }
 
+  // 自动审核这几天替你定下的：GET /v1/candidates/decisions?days=7
+  if (request.method === "GET" && id === "decisions" && !action) {
+    const scopeError = requireScope(auth.profile, "memory:read");
+    if (scopeError) return scopeError;
+    const days = readPositiveInt(url.searchParams.get("days"), 7, 31);
+    const rows = await listJudgeDecisionsSince(env.DB, {
+      namespace,
+      sinceIso: new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString(),
+      limit: readPositiveInt(url.searchParams.get("limit"), 200, 500)
+    });
+    return json({ data: rows.map(toJudgeDecisionRecord) });
+  }
+
   const scopeError = requireScope(auth.profile, "memory:write");
   if (scopeError) return scopeError;
   if (!id || request.method !== "POST") return openAiError("Not found", 404);
@@ -796,6 +822,26 @@ export async function handleMemoryCandidates(request: Request, env: Env): Promis
   const sourceMessageIds = Array.isArray(body.source_message_ids)
     ? readStringArray(body.source_message_ids)
     : parseJsonArray(candidate.source_message_ids);
+
+  if (action === "undo") {
+    let result: Awaited<ReturnType<typeof undoJudgeDecision>>;
+    try {
+      result = await undoJudgeDecision(env, namespace, candidate);
+    } catch (error) {
+      const conflict = handAuthoredConflict(error);
+      if (conflict) return conflict;
+      throw error;
+    }
+    if (!result.ok) return openAiError(result.error, result.httpStatus);
+    return json({
+      data: {
+        candidate: result.candidate ? toJudgeDecisionRecord(result.candidate) : null,
+        status: result.status,
+        memory_id: result.memoryId,
+        ...(result.restoredId ? { restored_id: result.restoredId } : {})
+      }
+    });
+  }
 
   if (action === "approve") {
     if (candidate.source === "dream_delete" && candidate.target_memory_id) {

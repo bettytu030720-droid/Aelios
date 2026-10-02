@@ -80,7 +80,7 @@ Open `/admin`. The bottom tabs:
 | Tab | What it's for |
 |---|---|
 | **Today** | What you talked about today |
-| **Review queue** | Candidate memories consolidated overnight — approve or discard |
+| **Review queue** | Candidate memories consolidated overnight. Each assistant decides its own first; the week's decisions are listed here with an undo |
 | **Important memories** | Browse, search, edit, delete |
 | **More** | Precious originals, glossary, maintenance tools |
 | **Settings** | Upstream, assistants, environment parameters |
@@ -90,7 +90,7 @@ Want the AI to remember, forget, or fix something? It's all point-and-click.
 ## How it actually works
 
 - Every time you speak, relevant old memories are tucked onto the end of the current conversation.
-- Raw conversations are stored first; overnight, Aelios consolidates them into long-term memory (the *Dream* pass). Important ones land in your review queue.
+- Raw conversations are stored first; overnight, Aelios consolidates them into long-term memory (the *Dream* pass). Each assistant decides what it keeps using the model it chats with, and you can undo any of its calls.
 - Memory lives in **your own Cloudflare account** (D1 + Vectorize) — never tied to a chat window, never on someone else's server.
 
 One assistant can write to one space and read from several. A fresh conversation can write `coder` while also reading the old vault `coder-old` and a shared `shared-docs`. Leave the recall spaces empty and it only reads its own.
@@ -168,7 +168,7 @@ Configuration has three layers, all under `/admin` Settings: upstream, assistant
 | GET | `/v1/memory_boot` | Cold-start pack |
 | GET | `/v1/diary`, `/v1/diary/recent` | Diary |
 | GET / POST / DELETE | `/v1/precious`, `/v1/glossary` | Precious originals / glossary |
-| GET / POST | `/v1/candidates` | Review queue |
+| GET / POST | `/v1/candidates` | Review queue; `/decisions?days=7` lists automatic decisions, `/:id/undo` reverses one |
 
 Everything except `/health` and `/admin` requires `Authorization: Bearer <key>`. The gateway authorizes by assistant key; memory APIs by `memory:read` / `memory:write` scopes.
 
@@ -178,7 +178,7 @@ Everything except `/health` and `/admin` requires `Authorization: Bearer <key>`.
 
 ### How memory flows
 
-**Writes:** assistants write directly via `memory_upsert`; a nightly cron (`10 20 * * *`) extracts facts from the day's conversations → review queue, and writes diary / weekly / monthly entries.
+**Writes:** assistants write directly via `memory_upsert`; a nightly cron (`10 20 * * *`) extracts facts from the day's conversations → each candidate is judged remember-or-let-go by its space's own assistant, using the main model it last chatted with (falling back to `JUDGE_MODEL`, which leaves unsure ones for you; an assistant can be switched off main-model judging in its settings to save quota), and writes diary / weekly / monthly entries.
 
 **Recall:** your latest message → vector search + lexical match → batch rerank of original passages + rules → the clean original text is tucked onto the end of the current message. No generative LLM by default: at most one memory on a normal turn, two when answering about the past; low scores are never padded in. Rerank failures fall back to lexical. Scores and trade-offs are visible in `/admin → Settings`. Transport envelopes, hashes, and message IDs never enter the daily prompt; two adjacent messages within 90 seconds in one session are merged. Active search still returns full records and IDs. Diaries are not auto-injected.
 

@@ -655,6 +655,75 @@ export async function archiveMemory(
   return true;
 }
 
+// 能不能把一条记忆放回 active：状态得对得上 (归档的；或被 supersededBy 顶掉的旧版本)，
+// 而且同一 fact_key 下没有别的现行版本，否则放回来就是两条重复的现行事实。
+export async function checkMemoryRestorable(
+  db: D1Database,
+  input: { namespace: string; id: string; supersededBy?: string }
+): Promise<{ content: string } | null> {
+  const row = await db
+    .prepare(
+      `SELECT m.status, m.content, m.superseded_by, COALESCE(m.fact_key, lc.fact_key) AS fact_key
+       FROM memories m
+       LEFT JOIN memory_lifecycle lc ON lc.memory_id = m.id
+       WHERE m.namespace = ? AND m.id = ?`
+    )
+    .bind(input.namespace, input.id)
+    .first<{ status: string; content: string; superseded_by: string | null; fact_key: string | null }>();
+  if (!row) return null;
+  const stateOk = input.supersededBy
+    ? row.status === "superseded" && row.superseded_by === input.supersededBy
+    : row.status === "archived";
+  if (!stateOk) return null;
+  if (row.fact_key) {
+    const other = await db
+      .prepare(
+        `SELECT m.id FROM memories m
+         LEFT JOIN memory_lifecycle lc ON lc.memory_id = m.id
+         WHERE m.namespace = ? AND m.status = 'active'
+           AND (m.version_status IS NULL OR m.version_status IN ('current', 'under_review'))
+           AND (m.fact_key = ? OR (m.fact_key IS NULL AND lc.fact_key = ?))
+           AND m.id != ? AND m.id != ?
+         LIMIT 1`
+      )
+      .bind(input.namespace, row.fact_key, row.fact_key, input.id, input.supersededBy ?? input.id)
+      .first<{ id: string }>();
+    if (other) return null;
+  }
+  return { content: row.content };
+}
+
+// restore: 把记忆放回 active (条件见 checkMemoryRestorable)，再补回向量和全文索引。
+// 对不上就不动，返回 false。
+export async function restoreMemory(
+  env: Env,
+  input: { namespace: string; id: string; supersededBy?: string }
+): Promise<boolean> {
+  const db = env.DB;
+  const restorable = await checkMemoryRestorable(db, input);
+  if (!restorable) return false;
+
+  await db
+    .prepare(
+      `UPDATE memories
+       SET status = 'active',
+           version_status = CASE WHEN version_status = 'superseded' THEN 'current' ELSE version_status END,
+           superseded_by = NULL, updated_at = ?
+       WHERE namespace = ? AND id = ?`
+    )
+    .bind(nowIso(), input.namespace, input.id)
+    .run();
+  if (input.supersededBy) {
+    await db
+      .prepare("UPDATE memory_lifecycle SET superseded_by_id = NULL WHERE memory_id = ?")
+      .bind(input.id)
+      .run();
+  }
+  await syncMemoryVector(env, { namespace: input.namespace, id: input.id });
+  await upsertMemoryFts(env.DB, { namespace: input.namespace, memoryId: input.id, content: restorable.content });
+  return true;
+}
+
 // hard delete: D1 (本体+侧车) + 向量都删。memory_delete 在 v2 开时用。
 export async function deleteMemoryV2(
   env: Env,
