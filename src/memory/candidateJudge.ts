@@ -580,13 +580,20 @@ export async function undoJudgeDecision(
   }
 
   const target = await env.DB.prepare(
-    `SELECT m.status, m.version_status, m.created_at, lc.supersedes_id
+    `SELECT m.status, m.version_status, m.created_at, m.content, m.authored_by, lc.supersedes_id
      FROM memories m
      LEFT JOIN memory_lifecycle lc ON lc.memory_id = m.id
      WHERE m.namespace = ? AND m.id = ?`
   )
     .bind(namespace, targetId)
-    .first<{ status: string; version_status: string | null; created_at: string; supersedes_id: string | null }>();
+    .first<{
+      status: string;
+      version_status: string | null;
+      created_at: string;
+      content: string;
+      authored_by: string | null;
+      supersedes_id: string | null;
+    }>();
   if (!target) return { ok: false, httpStatus: 404, error: "记住的那条记忆已经不在了" };
   // 早于候选本身的记忆不是这次记住新建的 (同 key 就地改写)，收回会连旧内容一起丢。
   if (target.created_at < candidate.created_at) {
@@ -594,6 +601,16 @@ export async function undoJudgeDecision(
   }
   if (target.status !== "active" || target.version_status === "superseded") {
     return { ok: false, httpStatus: 409, error: "记住的那条记忆之后又变过，撤回不了" };
+  }
+  // 记住之后又被就地改过 (记忆页编辑、memory_upsert 同 key 写入)：id 和 created_at 不变，
+  // 内容已经不是候选那句了。收回会把后来的改动一起归档。不比 updated_at：夜里标 under_review、
+  // 重建向量都会刷新它但不动内容，比时间会把没改过的也拦下。
+  if (target.content.trim() !== candidate.content.trim()) {
+    return { ok: false, httpStatus: 409, error: "记住之后这条记忆又被改过，撤回会把改动一起收走，请到记忆页手动改" };
+  }
+  // 亲笔记忆不归自动流程收：archiveMemory 不查 authored_by，这里先挡。
+  if (target.authored_by) {
+    return { ok: false, httpStatus: 409, error: "这条记忆现在是亲笔的，撤回不了，请到记忆页手动改" };
   }
 
   // 先确认被顶掉的旧版本还能放回来，再动新条；否则收回新条后两头都不在。

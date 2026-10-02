@@ -50,7 +50,10 @@ export async function resolveJudgeVoice(env: Env, namespace: string): Promise<Ju
     ? config.identities.filter((identity) => identity.models.length > 0 && identityNamespace(identity) === namespace)
     : [];
 
-  if (config && identities.length > 0) {
+  // SELF_JUDGE_ENABLED=false：不碰聊天主模型 (省额度)，只认助手设置里单独填的审核模型。
+  const useMainModel = env.SELF_JUDGE_ENABLED !== "false";
+
+  if (config && identities.length > 0 && useMainModel) {
     // 最近开口的那位助手来判：填了审核模型就用它 (走 chat)，否则用它这次说话的主模型和协议。
     try {
       const rows = await env.DB.prepare(
@@ -75,8 +78,10 @@ export async function resolveJudgeVoice(env: Env, namespace: string): Promise<Ju
     } catch (error) {
       console.error("candidate judge: recent exchanges unreadable", { namespace, error });
     }
+  }
 
-    // 聊天记录保留期内没人开口：有填审核模型的助手照样自己判。
+  if (config && identities.length > 0) {
+    // 聊天记录保留期内没人开口，或主模型自审关了：有填审核模型的助手照样自己判。
     const pinned = identities.find((identity) => identity.judgeModel?.trim());
     if (pinned?.judgeModel) {
       return { kind: "self", name: assistantLabel(pinned), config, identity: pinned, protocol: "chat", model: pinned.judgeModel.trim() };

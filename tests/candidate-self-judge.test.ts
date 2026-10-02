@@ -130,6 +130,18 @@ test("the assistant's own voice comes from its latest main-model exchange", asyn
   assert.deepEqual([guest.name, guest.model, guest.protocol], ["知来", "openai/gpt-6.1-sol", "chat"]);
 });
 
+test("SELF_JUDGE_ENABLED=false keeps main models out of judging", async () => {
+  exchange("danjiu", "messages", "claude-opus-5-5", "anthropic");
+  env.SELF_JUDGE_ENABLED = "false";
+  assert.deepEqual(await resolveJudgeVoice(env, "default"), { kind: "shared", model: "workers-ai/@cf/openai/gpt-oss-120b" });
+
+  // A judge model picked for the assistant is still its own, cheaper voice.
+  setConfig([{ ...danjiu(), judgeModel: "deepseek/deepseek-v4-flash" }]);
+  invalidateSettingsCache();
+  const pinned: any = await resolveJudgeVoice(env, "default");
+  assert.deepEqual([pinned.kind, pinned.name, pinned.model, pinned.protocol], ["self", "旦九", "deepseek/deepseek-v4-flash", "chat"]);
+});
+
 test("self-judge decides remember or let go, through the assistant's own route", async () => {
   setConfig([danjiu()], "d121aa7cd60ccebd6213c931efce41da");
   exchange("danjiu", "messages", "claude-opus-5-5", "anthropic");
@@ -244,6 +256,36 @@ test("undo restores an archived memory and refuses what changed since", async ()
   sqlite.prepare("UPDATE memories SET status = 'archived' WHERE id = ?").run(gone.target_memory_id);
   const refused = await api("/v1/candidates/c-gone/undo?namespace=default", "POST");
   assert.equal(refused.status, 409);
+
+  // A remembered memory edited in place afterwards (same id, same created_at) is left alone,
+  // so the later edit is not archived with it.
+  candidate("c-edited", "咲咲在学中级经济师。", { fact_key: "exam-edited", created: "2026-09-30T10:00:00.000Z" });
+  verdicts.push(verdict(0.9));
+  await runCandidateJudge(env, "default");
+  const edited = row("memory_candidates", "c-edited");
+  sqlite.prepare("UPDATE memories SET content = ?, updated_at = ? WHERE id = ?")
+    .run("咲咲 11-07 考中级经济师。", new Date(Date.now() + 60_000).toISOString(), edited.target_memory_id);
+  assert.equal((await api("/v1/candidates/c-edited/undo?namespace=default", "POST")).status, 409);
+  assert.equal(row("memories", edited.target_memory_id).status, "active");
+
+  // Flagged for review overnight (fresh updated_at, same content) is not an edit: undo still works.
+  candidate("c-review", "咲咲在学人工智能训练师。", { fact_key: "ai-cert", created: "2026-09-30T10:00:00.000Z" });
+  verdicts.push(verdict(0.9));
+  await runCandidateJudge(env, "default");
+  const review = row("memory_candidates", "c-review");
+  sqlite.prepare("UPDATE memories SET version_status = 'under_review', updated_at = ? WHERE id = ?")
+    .run(new Date(Date.now() + 60_000).toISOString(), review.target_memory_id);
+  assert.equal((await api("/v1/candidates/c-review/undo?namespace=default", "POST")).status, 200);
+  assert.equal(row("memories", review.target_memory_id).status, "archived");
+
+  // A memory that has become hand-authored is left alone too.
+  candidate("c-hand", "咲咲在学营销师。", { fact_key: "cert", created: "2026-09-30T10:00:00.000Z" });
+  verdicts.push(verdict(0.9));
+  await runCandidateJudge(env, "default");
+  const hand = row("memory_candidates", "c-hand");
+  sqlite.prepare("UPDATE memories SET authored_by = '咲咲' WHERE id = ?").run(hand.target_memory_id);
+  assert.equal((await api("/v1/candidates/c-hand/undo?namespace=default", "POST")).status, 409);
+  assert.equal(row("memories", hand.target_memory_id).status, "active");
 
   // Undoing a declined archive needs the memory to still be there.
   candidate("c-del-gone", "咲咲住在出租屋。", { source: "dream_delete", target: "missing", created: "2026-09-30T10:00:00.000Z" });
