@@ -41,7 +41,6 @@ export const SETTINGS: SettingSpec[] = [
   { group: "Dream 与日记", name: "DEDUP_COSINE", label: "记忆去重相似度", hint: "越高越容易判成新记忆，越低越容易被合并" },
   { group: "Dream 与日记", name: "WEEKLY_ROLLUP_DELETE_DAILIES", label: "周记落成后自动删日志", hint: "填 false 走人工审阅，填 true 一条龙" },
   { group: "Dream 与日记", name: "CANDIDATE_JUDGE_ENABLED", label: "Dream 之后自动审核候选", hint: "默认开启，由每个助手用自己最近聊天的主模型审自己那份，只分记住和放下，审核页能撤回。填 false 才回到全部人工批准" },
-  { group: "Dream 与日记", name: "SELF_JUDGE_ENABLED", label: "助手用主模型审自己的候选", hint: "默认开启。填 false 不再用聊天主模型审，省主模型额度：助手设置里单独填了审核模型的照样用它，其余交给代审模型" },
   { group: "Dream 与日记", name: "DREAM_STRATEGY", label: "新记忆写入策略", hint: "默认 upsert，直接改写。填 review 改成先进候选队列等人批" },
   { group: "Dream 与日记", name: "DREAM_NAMESPACE", label: "夜整写进哪个记忆空间", hint: "默认 default" },
   { group: "Dream 与日记", name: "ENABLE_DIARY_WRITER", label: "夜整后写叙事日记", hint: "默认开启。填 false 不写日记" },

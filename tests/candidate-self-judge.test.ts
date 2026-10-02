@@ -130,16 +130,27 @@ test("the assistant's own voice comes from its latest main-model exchange", asyn
   assert.deepEqual([guest.name, guest.model, guest.protocol], ["知来", "openai/gpt-6.1-sol", "chat"]);
 });
 
-test("SELF_JUDGE_ENABLED=false keeps main models out of judging", async () => {
+test("an assistant switched off main-model judging leaves it to its judge model or the shared judge", async () => {
   exchange("danjiu", "messages", "claude-opus-5-5", "anthropic");
-  env.SELF_JUDGE_ENABLED = "false";
+  setConfig([{ ...danjiu(), judgeWithMainModel: false }]);
+  invalidateSettingsCache();
   assert.deepEqual(await resolveJudgeVoice(env, "default"), { kind: "shared", model: "workers-ai/@cf/openai/gpt-oss-120b" });
 
   // A judge model picked for the assistant is still its own, cheaper voice.
-  setConfig([{ ...danjiu(), judgeModel: "deepseek/deepseek-v4-flash" }]);
+  setConfig([{ ...danjiu(), judgeWithMainModel: false, judgeModel: "deepseek/deepseek-v4-flash" }]);
   invalidateSettingsCache();
   const pinned: any = await resolveJudgeVoice(env, "default");
   assert.deepEqual([pinned.kind, pinned.name, pinned.model, pinned.protocol], ["self", "旦九", "deepseek/deepseek-v4-flash", "chat"]);
+
+  assert.throws(() => validateConfig({ version: 3, identities: [{ ...danjiu(), judgeWithMainModel: "no" }] }), /judgeWithMainModel/);
+
+  // Sharing a space: the switched-off speaker does not borrow the other assistant's main model or judge model.
+  setConfig([{ ...danjiu(), judgeWithMainModel: false }, { slug: "guest", namespace: "default", keys: ["CHATBOX_API_KEY"],
+    models: ["*sol*"], assistantName: "知来", judgeModel: "openai/gpt-6.1-sol" }]);
+  invalidateSettingsCache();
+  exchange("guest", "responses", "openai/gpt-6.1-sol-pro", "", "human", "2026-09-30T01:00:00.000Z");
+  exchange("danjiu", "messages", "claude-opus-5-5", "anthropic", "human", "2026-10-01T05:00:00.000Z");
+  assert.deepEqual(await resolveJudgeVoice(env, "default"), { kind: "shared", model: "workers-ai/@cf/openai/gpt-oss-120b" });
 });
 
 test("self-judge decides remember or let go, through the assistant's own route", async () => {

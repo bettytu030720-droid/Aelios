@@ -74,8 +74,6 @@ export interface Env {
   DEDUP_COSINE?: string;
   // 候选队列自动评审（judge），默认开启；设 "false" 关闭
   CANDIDATE_JUDGE_ENABLED?: string;
-  // 助手用自己最近聊天的主模型判候选，默认开启；设 "false" 只用助手填的审核模型或代审
-  SELF_JUDGE_ENABLED?: string;
   JUDGE_MODEL?: string;
   JUDGE_MAX_CANDIDATES?: string;
   // judge 评分阈值：>= APPROVE_MIN 自动入库，<= DISCARD_MAX 自动丢弃，中间留人工

@@ -1100,6 +1100,8 @@ document.documentElement.dataset.theme = localStorage.getItem('aelios.admin.colo
                 </select>
                 <label class="mt-2 block text-xs text-zinc-400">单次记忆字数上限</label>
                 <input x-model="idn.maxMemoryChars" type="number" min="256" max="24000" class="mt-1 h-10 w-full rounded-xl border border-zinc-800 bg-zinc-900 px-3 text-sm text-zinc-100 outline-none focus:border-coral" placeholder="留空默认 6000">
+                <label class="mt-2 flex items-center gap-1.5 text-xs text-zinc-400"><input type="checkbox" x-model="idn.judgeWithMainModel" class="h-4 w-4 accent-[#f4a07c]"><span>用聊天主模型审自己的记忆候选</span></label>
+                <p class="mt-1 text-[11px] leading-5 text-zinc-500">关掉省主模型额度:下面填了审核模型就用它,没填交给环境设置里的代审模型。</p>
                 <label class="mt-2 block text-xs text-zinc-400">审自己记忆用的模型</label>
                 <input x-model="idn.judgeModel" class="mt-1 h-10 w-full rounded-xl border border-zinc-800 bg-zinc-900 px-3 text-sm text-zinc-100 outline-none focus:border-coral" placeholder="留空用它最近聊天的主模型,如 anthropic/claude-opus-5">
                 <p class="mt-1 text-[11px] leading-5 text-zinc-500">主模型太贵或太慢时填一个 author/model,走 chat。聊天原文保留期内没聊过又没填时,交给环境设置里的代审模型。</p>
@@ -1476,7 +1478,8 @@ function memoryAdmin() {
             keys: idn.keys && idn.keys.length ? idn.keys.slice() : ['CHATBOX_API_KEY'],
             anthropicThinking: idn.anthropicThinking || 'passthrough',
             maxMemoryChars: idn.maxMemoryChars || '',
-            judgeModel: idn.judgeModel || ''
+            judgeModel: idn.judgeModel || '',
+            judgeWithMainModel: idn.judgeWithMainModel !== false
           };
         });
         const envData = await this.request('/api/gateway/env');
@@ -1487,7 +1490,7 @@ function memoryAdmin() {
       this.gwBusy = false;
     },
     gwAdd() {
-      this.gwIdentities.push({ slug: '', userName: '', assistantName: '', modelsText: '', namespace: '', readNamespacesText: '', keys: ['CHATBOX_API_KEY'], anthropicThinking: 'passthrough', maxMemoryChars: '', judgeModel: '' });
+      this.gwIdentities.push({ slug: '', userName: '', assistantName: '', modelsText: '', namespace: '', readNamespacesText: '', keys: ['CHATBOX_API_KEY'], anthropicThinking: 'passthrough', maxMemoryChars: '', judgeModel: '', judgeWithMainModel: true });
     },
     async gwSave() {
       if (this.gwBusy) return;
@@ -1508,6 +1511,7 @@ function memoryAdmin() {
           const budget = parseInt(idn.maxMemoryChars, 10);
           if (budget) out.maxMemoryChars = budget;
           if ((idn.judgeModel || '').trim()) out.judgeModel = idn.judgeModel.trim();
+          if (idn.judgeWithMainModel === false) out.judgeWithMainModel = false;
           return out;
         });
         const config = { version: 3, identities: identities };

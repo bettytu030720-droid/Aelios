@@ -29,6 +29,8 @@ export interface Identity {
   assistantName?: string;
   /** 助手审自己记忆候选时用的模型（author/model，走 chat）。空则用它最近真正说话的主模型。 */
   judgeModel?: string;
+  /** false：不用聊天主模型审自己的候选 (省额度)。填了 judgeModel 照样用它，否则交给代审。默认 true。 */
+  judgeWithMainModel?: boolean;
 }
 export interface GatewayConfig {
   version: 3;
@@ -90,6 +92,8 @@ export function validateConfig(value: unknown): GatewayConfig {
     check(identity.judgeModel === undefined || text(identity.judgeModel) && identity.judgeModel.length <= 200 &&
       /^[^/\s]+\/\S+$/.test(identity.judgeModel.trim()),
       `${where}: judgeModel must be an author/model name (max 200 characters)`);
+    check(identity.judgeWithMainModel === undefined || typeof identity.judgeWithMainModel === "boolean",
+      `${where}: judgeWithMainModel must be true or false`);
   }
   return value as unknown as GatewayConfig;
 }
