@@ -103,93 +103,170 @@ function toolError(message: string): Record<string, unknown> {
   };
 }
 
+const NAMESPACE_PARAM = {
+  type: "string",
+  description: "Memory space to use. Defaults to 'default'. Ignored when the API key is bound to a fixed namespace."
+};
+
+const MEMORY_TYPES_TEXT = "fact, event, preference, relationship, boundary, habit, decision, note";
+
+const MEMORY_ID_PARAM = {
+  type: "string",
+  description: "Memory id (e.g. from memory_search, memory_recall or memory_list)."
+};
+
+const READ_ONLY = { readOnlyHint: true, openWorldHint: false };
+
+// Reads that also write recall bookkeeping (counters / last-injected timestamps), never memory content.
+const BOOKKEEPING_READ = { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: false };
+
 function getTools(): Array<Record<string, unknown>> {
   return [
     {
       name: "memory_search",
-      description: "Search the user's long-term memory library. Returns complete records with ids for follow-up get/update/delete. This is explicit recall, not the short auto-injection patch.",
+      description:
+        "Hybrid search (vector + keyword) over the user's active long-term memories. Returns up to top_k full records " +
+        "(id, content, type, status, scores) after a relevance filter but without reranking, as { data: [...] }. " +
+        "Use it to find memories you want to inspect or edit by id. To answer a question with the most relevant, " +
+        "reranked memories plus glossary hits, use memory_recall instead. Never changes memory content; " +
+        "it only updates recall counters.",
+      annotations: { title: "Search memories", ...BOOKKEEPING_READ },
       inputSchema: {
         type: "object",
         properties: {
-          query: { type: "string" },
-          top_k: { type: "number", minimum: 1, maximum: 50 },
-          types: { type: "array", items: { type: "string" } },
-          namespace: { type: "string" }
+          query: { type: "string", description: "What to look for, in natural language or keywords." },
+          top_k: {
+            type: "number",
+            minimum: 1,
+            maximum: 50,
+            description: "Maximum number of records to return. Defaults to the server setting (50)."
+          },
+          types: {
+            type: "array",
+            items: { type: "string" },
+            description: `Only return these memory types (${MEMORY_TYPES_TEXT}). Omit for all types.`
+          },
+          namespace: NAMESPACE_PARAM
         },
         required: ["query"]
       }
     },
     {
       name: "memory_list",
-      description: "List memories from the user's memory library.",
+      description:
+        "Page through stored memories without a query, pinned first, then by importance, then most recently updated; " +
+        "optionally filtered by type or status. Returns { data, paging: { limit, has_more, next_offset } }; pass next_offset back as offset for the next page. " +
+        "Use memory_search or memory_recall to find memories by meaning. Read-only.",
+      annotations: { title: "List memories", ...READ_ONLY },
       inputSchema: {
         type: "object",
         properties: {
-          limit: { type: "number", minimum: 1, maximum: 1000 },
-          cursor: { type: "string" },
-          offset: { type: "number", minimum: 0 },
-          include_ids: { type: "boolean" },
-          type: { type: "string" },
-          status: { type: "string" },
-          namespace: { type: "string" }
+          limit: { type: "number", minimum: 1, maximum: 1000, description: "Page size. Defaults to 100." },
+          offset: { type: "number", minimum: 0, description: "Number of records to skip. Use paging.next_offset from the previous page." },
+          cursor: { type: "string", description: "Legacy paging cursor; only used when the lifecycle store is disabled. Prefer offset." },
+          include_ids: { type: "boolean", description: "Legacy mode only: also return the bare id list." },
+          type: { type: "string", description: `Only list one memory type (${MEMORY_TYPES_TEXT}).` },
+          status: {
+            type: "string",
+            description: "Only list memories with this status: active (default), archived or superseded."
+          },
+          namespace: NAMESPACE_PARAM
         }
       }
     },
     {
       name: "memory_export",
-      description: "Bulk export memory records as JSON, including content and metadata.",
+      description:
+        "Export the namespace's active memories (content plus metadata) as one JSON payload, for backup or " +
+        "migration. Archived and superseded memories are not included. The result can be large; use memory_list to page or memory_search to look things up. Read-only.",
+      annotations: { title: "Export memories", ...READ_ONLY },
       inputSchema: {
         type: "object",
         properties: {
-          type: { type: "string" },
-          format: { type: "string", enum: ["json"] },
-          namespace: { type: "string" }
+          type: { type: "string", description: `Only export one memory type (${MEMORY_TYPES_TEXT}). Omit for all.` },
+          format: { type: "string", enum: ["json"], description: "Output format. Only json is supported (default)." },
+          namespace: NAMESPACE_PARAM
         }
       }
     },
     {
       name: "memory_get",
-      description: "Get one memory from the Vectorize memory library by id.",
+      description:
+        "Fetch one memory by id with its full record and lifecycle fields (fact_key, version status, superseded_by). " +
+        "Returns { data: record }, or an error result 'Memory not found' if the id does not exist in this namespace. Use it after " +
+        "memory_search, memory_recall or memory_list when you need the complete record before editing. Read-only.",
+      annotations: { title: "Get memory", ...READ_ONLY },
       inputSchema: {
         type: "object",
         properties: {
-          id: { type: "string" }
+          id: MEMORY_ID_PARAM,
+          namespace: NAMESPACE_PARAM
         },
         required: ["id"]
       }
     },
     {
       name: "memory_delete",
-      description: "Delete one memory from the Vectorize memory library by id.",
+      description:
+        "Permanently delete one memory by id, removing it from storage and from the search index. This cannot be " +
+        "undone. To hide a memory but keep the record, use memory_archive; to replace an outdated fact while keeping " +
+        "its history, use memory_supersede. Returns { data: { id, deleted: true } }, or an error result if the id is not " +
+        "found or the memory could not be removed from the search index (the record is then kept).",
+      annotations: {
+        title: "Delete memory",
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: true,
+        openWorldHint: false
+      },
       inputSchema: {
         type: "object",
         properties: {
-          id: { type: "string" }
+          id: MEMORY_ID_PARAM,
+          namespace: NAMESPACE_PARAM
         },
         required: ["id"]
       }
     },
     {
       name: "memory_ingest",
-      description: "Save chat messages and optionally extract memories from them.",
+      description:
+        "Store raw chat messages as conversation history. Memories are not extracted immediately: the nightly " +
+        "background pipeline (dream) reads stored messages and distills them into long-term memories later. " +
+        "To save a fact right away, use memory_upsert. Returns { data: { conversation_id, message_ids } }; message_ids " +
+        "can be passed to memory_pin as context.",
+      annotations: {
+        title: "Ingest messages",
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false
+      },
       inputSchema: {
         type: "object",
         properties: {
           messages: {
             type: "array",
+            description: "Messages in chronological order.",
             items: {
               type: "object",
               properties: {
-                role: { type: "string" },
-                content: {}
+                role: { type: "string", description: "One of user, assistant, system, tool. Other roles are dropped." },
+                content: { description: "Message text, or an OpenAI-style content parts array." }
               },
               required: ["role", "content"]
             }
           },
-          conversation_id: { type: "string" },
-          source: { type: "string" },
-          auto_extract: { type: "boolean" },
-          namespace: { type: "string" }
+          conversation_id: {
+            type: "string",
+            description: "Conversation to append to. Defaults to the namespace's shared default conversation."
+          },
+          source: { type: "string", description: "Label for where the messages came from. Defaults to 'mcp'." },
+          auto_extract: {
+            type: "boolean",
+            description: "Accepted for compatibility only; it is not stored and does not change processing."
+          },
+          namespace: NAMESPACE_PARAM
         },
         required: ["messages"]
       }
@@ -199,30 +276,51 @@ function getTools(): Array<Record<string, unknown>> {
     {
       name: "memory_boot",
       description:
-        "Cold-start package: yesterday log + top pinned precious + all glossary. " +
-        "Output is stable and deterministically ordered so the client can cache it. " +
-        "Call once on SessionStart.",
+        "Cold-start context package for a new session: yesterday's diary log, the latest weekly and monthly summaries, " +
+        "the 20 most recent precious entries (from memory_pin), every glossary term and any spontaneous perception " +
+        "items, as { data: {...} }. Output is stable and deterministically ordered so the client can cache it. " +
+        "Call once at session start, not every turn; for per-question lookups use memory_recall. Never changes " +
+        "memory content; it only records that the returned precious entries were shown.",
+      annotations: { title: "Load session context", ...BOOKKEEPING_READ },
       inputSchema: {
         type: "object",
         properties: {
-          namespace: { type: "string" }
+          namespace: NAMESPACE_PARAM
         }
       }
     },
     {
       name: "memory_recall",
       description:
-        "Explicit recall with complete hit records (id, score, source). Glossary + active memories " +
-        "+ world_fact + longtail. Does not apply the 2-item auto-injection budget. Precious is not " +
-        "queried here (it lives in boot). Prefer this or memory_search when the model needs to cite or edit.",
+        "Answer-oriented recall: matches glossary terms literally, runs hybrid search over active memories, " +
+        "reranks the hits and drops anything below min_score. Returns { data: { hits, glossary_hits, week_blocks, meta } }, " +
+        "each hit with id, score and source so you can cite or edit it. Precious entries are not searched here " +
+        "(they come from memory_boot). Prefer this over memory_search when you want only the relevant memories " +
+        "for the current question. Never changes memory content, but marks the returned memories as recently " +
+        "injected, which briefly lowers their rank in later automatic recall.",
+      annotations: { title: "Recall memories", ...BOOKKEEPING_READ },
       inputSchema: {
         type: "object",
         properties: {
-          query: { type: "string" },
-          k: { type: "number", minimum: 1, maximum: 100 },
-          min_score: { type: "number", minimum: 0, maximum: 1 },
-          types: { type: "array", items: { type: "string" } },
-          namespace: { type: "string" },
+          query: { type: "string", description: "The question or topic to recall memories for." },
+          k: {
+            type: "number",
+            minimum: 1,
+            maximum: 100,
+            description: "Maximum number of memory hits. Defaults to 20."
+          },
+          min_score: {
+            type: "number",
+            minimum: 0,
+            maximum: 1,
+            description: "Relevance floor applied after reranking. Defaults to the server setting (0.15)."
+          },
+          types: {
+            type: "array",
+            items: { type: "string" },
+            description: `Only recall these memory types (${MEMORY_TYPES_TEXT}). Omit for all types.`
+          },
+          namespace: NAMESPACE_PARAM,
           include_history: {
             type: "boolean",
             description:
@@ -234,30 +332,62 @@ function getTools(): Array<Record<string, unknown>> {
     },
     {
       name: "memory_pin",
-      description: "Mark a memory as precious (L3, pinned, exempt from dedup/decay/delete). " +
-        "Store with surrounding context so a single line stays interpretable later.",
+      description:
+        "Save a moment as a precious entry: pinned, offered through memory_boot (which shows the 20 most recent), and " +
+        "never deduplicated, decayed or deleted by the automatic pipeline. Each call creates a new entry. Write the content so it " +
+        "still makes sense on its own later, and attach the surrounding messages via context_message_ids. " +
+        "For ordinary facts use memory_upsert. Returns { data: precious record }.",
+      annotations: {
+        title: "Pin precious memory",
+        readOnlyHint: false,
+        destructiveHint: false,
+        idempotentHint: false,
+        openWorldHint: false
+      },
       inputSchema: {
         type: "object",
         properties: {
-          content: { type: "string" },
-          context_message_ids: { type: "array", items: { type: "string" } },
-          namespace: { type: "string" }
+          content: { type: "string", description: "The moment to keep, self-contained and readable on its own." },
+          context_message_ids: {
+            type: "array",
+            items: { type: "string" },
+            description: "Ids of stored messages (e.g. message_ids from memory_ingest) to keep as surrounding context."
+          },
+          namespace: NAMESPACE_PARAM
         },
         required: ["content"]
       }
     },
     {
       name: "glossary_set",
-      description: "Add or update a glossary term (L5, literal recall, not in vector index). " +
-        "Upsert by (namespace, term).",
+      description:
+        "Add or update a glossary term: private vocabulary such as nicknames, in-jokes or project names. Terms are " +
+        "matched literally (not by vector) during memory_recall and are all included in memory_boot. Upserts by " +
+        "term: an existing term gets the new definition, and aliases/examples are replaced by what you pass " +
+        "(omitting them clears them). Returns { data: glossary row }.",
+      annotations: {
+        title: "Set glossary term",
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: true,
+        openWorldHint: false
+      },
       inputSchema: {
         type: "object",
         properties: {
-          term: { type: "string" },
-          aliases: { type: "array", items: { type: "string" } },
-          definition: { type: "string" },
-          examples: { type: "array", items: { type: "string" } },
-          namespace: { type: "string" }
+          term: { type: "string", description: "The word or phrase exactly as it is used." },
+          aliases: {
+            type: "array",
+            items: { type: "string" },
+            description: "Other spellings or names that should match this term. Replaces any existing aliases."
+          },
+          definition: { type: "string", description: "What the term means." },
+          examples: {
+            type: "array",
+            items: { type: "string" },
+            description: "Example sentences using the term. Replaces any existing examples."
+          },
+          namespace: NAMESPACE_PARAM
         },
         required: ["term", "definition"]
       }
@@ -265,25 +395,44 @@ function getTools(): Array<Record<string, unknown>> {
     {
       name: "memory_upsert",
       description:
-        "Assert/update a refined memory by fact_key (no waiting for dream). " +
-        "world_fact also uses this with type='world_fact'. " +
-        "E-axis: pass authored_by (your signature) + optional response_tendency (one line on how to act " +
-        "when this memory fires) to mark it hand-authored — hand-authored memories rank above distilled " +
-        "ones and are protected from dream/judge overwrite.",
+        "Write a refined memory immediately (no waiting for the nightly dream), keyed by fact_key. If an active " +
+        "memory with the same fact_key exists, its content and fields are overwritten in place and the old text is " +
+        "not kept; otherwise a new memory is created. To keep the old version as history, use memory_supersede. " +
+        "Pass authored_by (with the default source) to mark the memory as hand-authored: it ranks above distilled " +
+        "memories and the automatic pipeline cannot overwrite it. Returns { data: { id, created } }.",
+      annotations: {
+        title: "Upsert memory",
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: false,
+        openWorldHint: false
+      },
       inputSchema: {
         type: "object",
         properties: {
-          fact_key: { type: "string" },
-          content: { type: "string" },
-          type: { type: "string" },
-          importance: { type: "number" },
-          confidence: { type: "number" },
-          tags: { type: "array", items: { type: "string" } },
-          source: { type: "string" },
-          valid_as_of: { type: "string" },
-          authored_by: { type: "string", description: "E-axis signature; only honored on hand sources (mcp/manual/api)" },
+          fact_key: {
+            type: "string",
+            description:
+              "Stable key for this fact, e.g. 'user:favorite_coffee'. Reusing a key updates that memory. " +
+              "Facts about the outside world rather than the user use the prefix 'world_fact:'."
+          },
+          content: { type: "string", description: "The memory text, one self-contained statement." },
+          type: { type: "string", description: `One of ${MEMORY_TYPES_TEXT}. Other values become fact (default).` },
+          importance: { type: "number", description: "0 to 1, how much this matters. Defaults to 0.6." },
+          confidence: { type: "number", description: "0 to 1, how sure you are it is true. Defaults to 0.8." },
+          tags: { type: "array", items: { type: "string" }, description: "Free-form labels." },
+          source: {
+            type: "string",
+            description:
+              "Who is writing. Leave unset (defaults to 'mcp'). authored_by is only stored when source is mcp, manual, api or remember_now."
+          },
+          valid_as_of: {
+            type: "string",
+            description: "When the fact became true (ISO date or datetime). Used as the event date in recall."
+          },
+          authored_by: { type: "string", description: "E-axis signature; only honored on hand sources (mcp/manual/api/remember_now)" },
           response_tendency: { type: "string", description: "E-axis: how to respond when this memory fires" },
-          namespace: { type: "string" }
+          namespace: NAMESPACE_PARAM
         },
         required: ["fact_key", "content"]
       }
@@ -291,32 +440,53 @@ function getTools(): Array<Record<string, unknown>> {
     {
       name: "memory_supersede",
       description:
-        "Mark old_id as superseded and insert a new active entry, linking the supersede chain. " +
-        "Used for world_fact updates that invalidate older entries.",
+        "Replace an outdated memory while keeping history: marks old_id as superseded (kept, and visible via " +
+        "memory_recall with include_history) and inserts a new active memory linked to it. The new entry inherits " +
+        "the old fact_key unless new_fact_key is given. If old_id does not exist, the new memory is still created and " +
+        "oldStatus is 'missing'. Use it when a fact changed over time; to fix a mistake in place use memory_upsert, " +
+        "and to remove a memory use memory_archive or memory_delete. Returns { data: { oldStatus, newId } }.",
+      annotations: {
+        title: "Supersede memory",
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: false,
+        openWorldHint: false
+      },
       inputSchema: {
         type: "object",
         properties: {
-          old_id: { type: "string" },
-          new_content: { type: "string" },
-          new_type: { type: "string" },
-          new_fact_key: { type: "string" },
-          valid_as_of: { type: "string" },
-          reason: { type: "string" },
+          old_id: { type: "string", description: "Id of the memory being replaced." },
+          new_content: { type: "string", description: "The up-to-date memory text." },
+          new_type: { type: "string", description: `One of ${MEMORY_TYPES_TEXT}. Other values become fact (default).` },
+          new_fact_key: { type: "string", description: "fact_key for the new entry. Defaults to the old entry's fact_key." },
+          valid_as_of: { type: "string", description: "When the new fact became true (ISO date or datetime)." },
+          reason: { type: "string", description: "Short note on why the old memory is outdated; stored with the chain." },
           authored_by: { type: "string", description: "E-axis signature for the new entry (hand sources only)" },
-          response_tendency: { type: "string" },
-          namespace: { type: "string" }
+          response_tendency: { type: "string", description: "E-axis: how to respond when the new memory fires" },
+          namespace: NAMESPACE_PARAM
         },
         required: ["old_id", "new_content"]
       }
     },
     {
       name: "memory_archive",
-      description: "Soft-archive a memory (status='archived'). Does not touch the supersede chain.",
+      description:
+        "Soft-archive a memory: sets status='archived' and removes it from search and recall, but keeps the record " +
+        "in storage (memory_list with status='archived' still shows it). There is no MCP tool to un-archive. " +
+        "Does not touch the supersede chain. Prefer this over memory_delete when the memory might be needed later. " +
+        "Returns { data: { id, archived: true } }, or an error result 'Memory not found'.",
+      annotations: {
+        title: "Archive memory",
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: true,
+        openWorldHint: false
+      },
       inputSchema: {
         type: "object",
         properties: {
-          id: { type: "string" },
-          namespace: { type: "string" }
+          id: MEMORY_ID_PARAM,
+          namespace: NAMESPACE_PARAM
         },
         required: ["id"]
       }
@@ -327,12 +497,13 @@ function getTools(): Array<Record<string, unknown>> {
         "Read daily_log diary entries. These are impressions, not verified facts. " +
         "Omit date for today+yesterday (recent). Use week (e.g. 2026-W29) for weekly_log. " +
         "Rolled-up daily dates fall back to weekly_log. Fetch explicitly when needed; do not treat diary as ground truth.",
+      annotations: { title: "Read diary", ...READ_ONLY },
       inputSchema: {
         type: "object",
         properties: {
           date: { type: "string", description: "YYYY-MM-DD; omit for recent (today+yesterday)" },
           week: { type: "string", description: "ISO week label, e.g. 2026-W29" },
-          namespace: { type: "string" }
+          namespace: NAMESPACE_PARAM
         }
       }
     }

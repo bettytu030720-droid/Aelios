@@ -129,7 +129,7 @@ assert.match(recallSource, /const beforeFloor = \[\.\.\.afterRelation, \.\.\.lon
 assert.match(recallSource, /if \(\(hit\.raw_score \?\? hit\.score\) >= minScore\) return true;\s+flooredIds\.push\(hit\.id\);/s);
 assert.match(recallSource, /raw_score: rawScore,/);
 assert.match(recallSource, /floored_ids: flooredIds,\s+floored_count: flooredIds\.length,\s+min_score: minScore,/s);
-assert.match(mcpSource, /min_score: \{ type: "number", minimum: 0, maximum: 1 \}/);
+assert.match(mcpSource, /min_score: \{\s*type: "number",\s*minimum: 0,\s*maximum: 1\b/);
 assert.match(mcpSource, /min_score: typeof args\.min_score === "number" \? readNumber\(args\.min_score, 0\.15\) : undefined/);
 assert.match(wranglerSource, /crons = \["10 20 \* \* \*"\]/);
 assert.match(wranglerSource, /DREAM_MODEL = "workers-ai\/@cf\/openai\/gpt-oss-120b"/);
