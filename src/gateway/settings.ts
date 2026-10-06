@@ -1,7 +1,8 @@
 import type { Env } from "../types";
 
 // Everything here is editable from /admin, so Worker settings only needs the API key.
-export interface SettingSpec { name: string; label: string; hint?: string; group: string }
+// kind "switch" 在设置页画成开关：开存 on，关存空 (部署值是开时存 off)。
+export interface SettingSpec { name: string; label: string; hint?: string; group: string; kind?: "switch" }
 export const SETTINGS: SettingSpec[] = [
   { group: "记忆召回", name: "MEMORY_LIFECYCLE_ENABLED", label: "记忆库 v2 总闸", hint: "默认开启。填 false 回退旧路径，v2 的 boot 和召回工具会直接回未启用，不碰 v2 表" },
   { group: "记忆召回", name: "RECALL_RERANK_MIN_SCORE", label: "原文重排分数下限", hint: "默认 0.25，低于此值不注入。只是初始值，请结合下方召回记录调整；分数不是正确率，不同模型不可直接比较" },
@@ -40,6 +41,7 @@ export const SETTINGS: SettingSpec[] = [
   { group: "Dream 与日记", name: "DREAM_MAX_TOKENS", label: "单轮输出上限" },
   { group: "Dream 与日记", name: "DEDUP_COSINE", label: "记忆去重相似度", hint: "越高越容易判成新记忆，越低越容易被合并" },
   { group: "Dream 与日记", name: "WEEKLY_ROLLUP_DELETE_DAILIES", label: "周记落成后自动删日志", hint: "填 false 走人工审阅，填 true 一条龙" },
+  { group: "Dream 与日记", name: "CLEF_AUTO_REVIEW", kind: "switch", label: "每天用 clef 自动审候选", hint: "默认关。打开后每天夜整完，由 Cloudflare 的 clef 把待审候选一次审完，只分记住和放下，不再留给人工批；不管下面那项和助手自己的模型。审核页能逐条撤回。走 Workers AI 计费，一条几百 token" },
   { group: "Dream 与日记", name: "CANDIDATE_JUDGE_ENABLED", label: "Dream 之后自动审核候选", hint: "默认开启，由每个助手用自己最近聊天的主模型审自己那份，只分记住和放下，审核页能撤回。填 false 才回到全部人工批准" },
   { group: "Dream 与日记", name: "DREAM_STRATEGY", label: "新记忆写入策略", hint: "默认 upsert，直接改写。填 review 改成先进候选队列等人批" },
   { group: "Dream 与日记", name: "DREAM_NAMESPACE", label: "夜整写进哪个记忆空间", hint: "默认 default" },
@@ -51,7 +53,7 @@ export const SETTINGS: SettingSpec[] = [
   { group: "Dream 与日记", name: "JUDGE_MODEL", label: "代审模型", hint: "只在认不出助手自己的模型时用（聊天原文保留期内没通过网关聊过，助手设置里也没填审核模型）。留空回落 DREAM_MODEL；两者都空就把这些候选留给人工" },
   { group: "Dream 与日记", name: "TRIGGER_BUILD", label: "夜里给新记忆建触发器", hint: "默认 off。填 on 或 true 后，夜批给当天新记忆生成检索触发器。成本是每条记忆一次模型调用加三次向量化，只建增量，已有触发器的记忆跳过" },
   { group: "Dream 与日记", name: "TRIGGER_BUILD_MODEL", label: "建触发器用哪个模型", hint: "留空回落 DREAM_MODEL。触发器质量直接决定这条通道有没有用，别用太小的模型" },
-  { group: "Dream 与日记", name: "JUDGE_MAX_CANDIDATES", label: "一轮最多审几条候选", hint: "默认 20，上限 100" },
+  { group: "Dream 与日记", name: "JUDGE_MAX_CANDIDATES", label: "一轮最多审几条候选", hint: "默认 20（开了 clef 自动审时默认 100），上限 100" },
   { group: "Dream 与日记", name: "JUDGE_APPROVE_MIN", label: "代审自动入库阈值", hint: "默认 0.8。只管代审：评分不低于它自动入库。助手自己判时不看这个" },
   { group: "Dream 与日记", name: "JUDGE_DISCARD_MAX", label: "代审自动丢弃阈值", hint: "默认 0.3。只管代审：评分不高于它自动丢弃，中间留人工。助手自己判时不看这个" },
   { group: "Dream 与日记", name: "EMPTY_MEMORY_MIN_CHARS", label: "空记忆最短字符数", hint: "默认 4。短于这个长度的抽取结果当空记忆丢掉" },
@@ -119,7 +121,7 @@ export function describeSettings(env: Env, settings: Record<string, string>) {
     let group = groups.find(g => g.group === spec.group);
     if (!group) { group = { group: spec.group, items: [] }; groups.push(group); }
     group.items.push({
-      name: spec.name, label: spec.label, hint: spec.hint || "",
+      name: spec.name, label: spec.label, hint: spec.hint || "", ...(spec.kind ? { kind: spec.kind } : {}),
       value: settings[spec.name] || "",
       deployed: typeof deployed === "string" ? deployed : ""
     });
