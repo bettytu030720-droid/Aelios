@@ -191,6 +191,18 @@ document.documentElement.dataset.theme = localStorage.getItem('aelios.admin.colo
   .chip-dim { color: var(--text-4); }
   .chip-aurora { border-color: rgba(139, 124, 246, .45); color: var(--violet); }
 
+  /* 设置页的开关 */
+  .switch {
+    position: relative; flex-shrink: 0; width: 44px; height: 26px; border-radius: 999px;
+    border: 1px solid var(--panel-border); background: var(--hover-bg); transition: background-color .15s ease, border-color .15s ease;
+  }
+  .switch > span {
+    position: absolute; top: 2px; left: 2px; width: 20px; height: 20px; border-radius: 999px;
+    background: var(--text-4); transition: transform .15s ease, background-color .15s ease;
+  }
+  .switch.is-on { background: var(--coral); border-color: var(--coral); }
+  .switch.is-on > span { transform: translateX(18px); background: var(--on-accent); }
+
   /* ===== 梦境观测台 ===== */
   .dream-stat { position: relative; }
   .dream-stat::before {
@@ -251,6 +263,15 @@ document.documentElement.dataset.theme = localStorage.getItem('aelios.admin.colo
         </div>
       </div>
 
+      <button type="button" @click="spaceOpen = true" class="tap flex items-center gap-3 rounded-2xl border border-zinc-800 bg-zinc-900 px-3 py-2 text-left transition duration-150 ease-in-out hover:border-coral" aria-label="查看谁的记忆">
+        <i data-lucide="users" class="h-4 w-4 shrink-0 text-zinc-400"></i>
+        <span class="min-w-0 flex-1">
+          <span class="block text-[11px] text-zinc-500">查看谁的记忆</span>
+          <span class="block truncate text-sm text-zinc-100" :class="identityLoadError ? 'text-coral' : ''" x-text="viewingLabel()"></span>
+        </span>
+        <i data-lucide="chevrons-up-down" class="h-4 w-4 shrink-0 text-zinc-500"></i>
+      </button>
+
       <nav class="grid gap-1">
         <template x-for="item in nav" :key="item.id">
           <button type="button" @click="go(item.id)" class="tap flex items-center gap-3 rounded-2xl px-3 text-left text-sm transition duration-150 ease-in-out" :class="page === item.id ? 'bg-zinc-900 text-zinc-100 ring-1 ring-zinc-800' : 'text-zinc-400 hover:bg-zinc-900 hover:text-zinc-100'">
@@ -280,7 +301,6 @@ document.documentElement.dataset.theme = localStorage.getItem('aelios.admin.colo
           </button>
         </div>
         <div class="mt-1 text-[11px]" :class="tokenSaved() ? 'text-zinc-500' : 'text-coral'" x-text="tokenSaved() ? 'Token 已保存到本机' : 'Token 尚未保存'"></div>
-        <p class="mt-3 text-xs text-zinc-400">当前空间：<span x-text="namespace"></span></p>
       </div>
     </aside>
 
@@ -293,50 +313,20 @@ document.documentElement.dataset.theme = localStorage.getItem('aelios.admin.colo
             <div class="text-xs text-zinc-400" x-text="subtitle()"></div>
           </div>
         </div>
-        <button type="button" @click="reloadAll()" class="tap rounded-2xl border border-zinc-800 bg-zinc-900 px-3 text-zinc-100 transition duration-150 ease-in-out active:bg-zinc-800" aria-label="刷新">
-          <i data-lucide="refresh-cw" class="h-4 w-4"></i>
-        </button>
+        <div class="flex min-w-0 items-center gap-2">
+          <button type="button" @click="spaceOpen = true" class="tap flex min-w-0 max-w-[11rem] items-center gap-1.5 rounded-2xl border border-zinc-800 bg-zinc-900 px-3 text-sm text-zinc-100 transition duration-150 ease-in-out active:bg-zinc-800" aria-label="查看谁的记忆">
+            <i data-lucide="users" class="h-4 w-4 shrink-0 text-zinc-400"></i>
+            <span class="truncate" :class="identityLoadError ? 'text-coral' : ''" x-text="viewingLabel()"></span>
+            <i data-lucide="chevron-down" class="h-4 w-4 shrink-0 text-zinc-500"></i>
+          </button>
+          <button type="button" @click="reloadAll()" class="tap rounded-2xl border border-zinc-800 bg-zinc-900 px-3 text-zinc-100 transition duration-150 ease-in-out active:bg-zinc-800" aria-label="刷新">
+            <i data-lucide="refresh-cw" class="h-4 w-4"></i>
+          </button>
+        </div>
       </header>
 
       <div x-show="toast" x-transition.opacity.duration.150ms class="fixed left-4 right-4 top-4 z-50 rounded-2xl border border-zinc-800 bg-zinc-900 px-4 py-3 text-sm text-zinc-100 shadow-sm md:left-auto md:right-6 md:w-96" x-text="toast"></div>
 
-      <section class="mb-5 rounded-2xl border border-zinc-800 bg-zinc-900 p-4" aria-label="选择助手的记忆">
-        <div class="grid gap-3 md:grid-cols-2">
-          <label class="text-xs text-zinc-400">查看谁的记忆
-            <select x-model="selectedIdentity" @change="selectIdentity($event.target.value)" class="mt-2 h-11 w-full rounded-xl border border-zinc-800 bg-[#0a0a0b] px-3 text-sm text-zinc-100">
-              <option value="">自选空间（高级）</option>
-              <template x-for="idn in memoryIdentities" :key="idn.slug"><option :value="idn.slug" x-text="idn.slug"></option></template>
-            </select>
-          </label>
-          <label class="text-xs text-zinc-400" x-show="selectedIdentity">查看哪个空间
-            <select x-model="namespace" @change="switchSpace($event.target.value)" class="mt-2 h-11 w-full rounded-xl border border-zinc-800 bg-[#0a0a0b] px-3 text-sm text-zinc-100">
-              <template x-for="space in identitySpaces()" :key="space.name"><option :value="space.name" x-text="space.label"></option></template>
-            </select>
-          </label>
-        </div>
-        <p class="mt-2 text-xs leading-6 text-zinc-400" x-text="spaceDescription()"></p>
-        <p class="text-xs leading-6 text-zinc-500">这里切换查看的记忆；客户端使用哪位助手由接入地址和钥匙决定。</p>
-        <div x-show="selectedIdentity" class="mt-3 rounded-xl border border-zinc-800 bg-[#0a0a0b] p-3">
-          <p class="text-xs text-zinc-400">说话人名字</p>
-          <p class="mt-1 text-[11px] leading-5 text-zinc-500">Dream、日记、周月卷、审核写记忆时只用这两个名字，不许写用户/助手。</p>
-          <div class="mt-2 grid gap-2 md:grid-cols-[1fr_1fr_auto] md:items-end">
-            <label class="text-xs text-zinc-400">用户叫什么
-              <input x-model="speakerUserName" class="mt-1 h-11 w-full rounded-xl border border-zinc-800 bg-zinc-900 px-3 text-sm text-zinc-100 outline-none focus:border-coral" placeholder="如 小南">
-            </label>
-            <label class="text-xs text-zinc-400">助手叫什么
-              <input x-model="speakerAssistantName" class="mt-1 h-11 w-full rounded-xl border border-zinc-800 bg-zinc-900 px-3 text-sm text-zinc-100 outline-none focus:border-coral" placeholder="如 小北；留空用路径名">
-            </label>
-            <button type="button" @click="saveSpeakers()" :disabled="speakerBusy" class="tap h-11 rounded-2xl bg-coral px-4 text-sm font-semibold text-zinc-950 transition duration-150 ease-in-out active:bg-coral/80 disabled:opacity-60">保存名字</button>
-          </div>
-        </div>
-        <p x-show="identityLoadError" x-text="identityLoadError" class="mt-2 text-xs text-coral"></p>
-        <details class="mt-2" :open="!selectedIdentity">
-          <summary class="cursor-pointer text-xs text-zinc-500">高级：手动指定空间</summary>
-          <label class="mt-2 block text-xs text-zinc-400">空间名
-            <input :value="namespace" @change="selectCustomSpace($event.target.value)" class="mt-2 h-11 w-full rounded-xl border border-zinc-800 bg-[#0a0a0b] px-3 text-sm text-zinc-100" placeholder="default">
-          </label>
-        </details>
-      </section>
 
       <section x-show="page === 'today'" class="space-y-4">
         <div class="hidden items-center justify-between gap-4 md:flex">
@@ -393,6 +383,8 @@ document.documentElement.dataset.theme = localStorage.getItem('aelios.admin.colo
           <div class="min-w-0 flex-1">
             <h1 class="text-2xl font-semibold">审核队列</h1>
             <p class="mt-1 text-sm text-zinc-400">低置信候选先过手，再进入长期记忆。</p>
+            <p x-show="autoReview === 'clef'" class="mt-1 text-xs leading-6 text-zinc-500">clef 每天夜里自动审，队列里这些下一轮会被定掉，不用一条条批。</p>
+            <p x-show="autoReview !== 'clef'" class="mt-1 text-xs leading-6 text-zinc-500">嫌一条条批累：<button type="button" @click="go('settings')" class="text-coral underline-offset-2 hover:underline">去设置</button>打开「每天用 clef 自动审候选」。</p>
           </div>
           <span class="rounded-full bg-coral px-3 py-1 text-sm font-semibold text-zinc-950" x-text="pendingCount"></span>
         </div>
@@ -453,7 +445,7 @@ document.documentElement.dataset.theme = localStorage.getItem('aelios.admin.colo
 
         <div class="pt-4">
           <h2 class="text-lg font-semibold">这周自动定下的</h2>
-          <p class="mt-1 text-sm text-zinc-400">助手自己判的只分记住和放下，不进上面的队列。觉得不对就撤回：记住的收回，放下的补记。</p>
+          <p class="mt-1 text-sm text-zinc-400">助手自己判的和 clef 审的只分记住和放下，不进上面的队列。觉得不对就撤回：记住的收回，放下的补记。</p>
         </div>
         <template x-if="judgeDecisions.length === 0">
           <div class="text-keep w-full rounded-2xl border border-zinc-800 bg-zinc-900 p-6 text-sm text-zinc-400">这 7 天没有自动决定。</div>
@@ -1011,8 +1003,8 @@ document.documentElement.dataset.theme = localStorage.getItem('aelios.admin.colo
             <h2 class="text-sm font-semibold">为什么想起这件事</h2>
             <button type="button" @click="loadRecallHistory()" :disabled="recallHistoryLoading || !selectedIdentity" class="tap rounded-2xl border border-zinc-800 px-3 text-xs disabled:opacity-40">刷新记录</button>
           </div>
-          <p class="mt-2 text-xs text-zinc-400">查看顶部所选助手最近 20 次召回，记录按助手区分，不随单个召回空间合并。</p>
-          <p x-show="!selectedIdentity" class="mt-2 text-xs text-zinc-400">请先在顶部选择一位助手。</p>
+          <p class="mt-2 text-xs text-zinc-400">查看所选助手最近 20 次召回，记录按助手区分，不随单个召回空间合并。</p>
+          <p x-show="!selectedIdentity" class="mt-2 text-xs text-zinc-400">请先点「查看谁的记忆」选一位助手。</p>
           <div aria-live="polite">
             <p x-show="recallHistoryLoading" class="mt-2 text-xs text-zinc-400">读取中…</p>
             <p x-show="recallHistoryError" class="mt-2 text-xs text-coral" x-text="recallHistoryError"></p>
@@ -1053,7 +1045,7 @@ document.documentElement.dataset.theme = localStorage.getItem('aelios.admin.colo
             </button>
           </div>
           <div class="mt-1 text-[11px]" :class="tokenSaved() ? 'text-zinc-500' : 'text-coral'" x-text="tokenSaved() ? 'Token 已保存到本机' : 'Token 尚未保存'"></div>
-          <p class="mt-4 text-xs text-zinc-400">查看空间请使用页面顶部的助手选择器。</p>
+          <p class="mt-4 text-xs text-zinc-400">切换助手和空间：电脑在左侧栏，手机在顶栏，点「查看谁的记忆」。</p>
         </article>
         <article class="rounded-2xl border border-zinc-800 bg-zinc-900 p-4 shadow-sm">
           <div class="flex items-center justify-between gap-2">
@@ -1070,7 +1062,7 @@ document.documentElement.dataset.theme = localStorage.getItem('aelios.admin.colo
             <label class="text-xs text-zinc-400">助手</label>
             <button type="button" @click="gwAdd()" class="tap rounded-2xl border border-zinc-800 px-3 py-1.5 text-xs text-zinc-400 transition duration-150 ease-in-out hover:border-coral hover:text-zinc-100">+ 添加助手</button>
           </div>
-          <p class="mt-1 text-[11px] text-zinc-500">名字即地址路径段;主模型支持 * 通配,只有主模型有记忆、进 Dream。用户名和助手名给 Dream、日记、周月卷、审核写记忆用,只许写名字,不许写用户/助手。顶部选择助手后也能填。</p>
+          <p class="mt-1 text-[11px] text-zinc-500">名字即地址路径段;主模型支持 * 通配,只有主模型有记忆、进 Dream。用户名和助手名给 Dream、日记、周月卷、审核写记忆用,只许写名字,不许写用户/助手。在「查看谁的记忆」里选中助手后也能填。</p>
           <template x-for="(idn, i) in gwIdentities" :key="i">
             <div class="mt-2 space-y-2 rounded-2xl border border-zinc-800 bg-[#0a0a0b] p-3">
               <div class="flex items-center gap-2">
@@ -1081,7 +1073,7 @@ document.documentElement.dataset.theme = localStorage.getItem('aelios.admin.colo
                 <input x-model="idn.userName" class="h-10 w-full rounded-xl border border-zinc-800 bg-zinc-900 px-3 text-sm text-zinc-100 outline-none focus:border-coral" placeholder="用户叫什么,如 小南">
                 <input x-model="idn.assistantName" class="h-10 w-full rounded-xl border border-zinc-800 bg-zinc-900 px-3 text-sm text-zinc-100 outline-none focus:border-coral" placeholder="助手叫什么,如 小北">
               </div>
-              <p class="text-[11px] text-zinc-500">Dream、日记、周月卷、审核写记忆只用这两个名字。助手名留空则用路径名。顶部选择助手后也能填。</p>
+              <p class="text-[11px] text-zinc-500">Dream、日记、周月卷、审核写记忆只用这两个名字。助手名留空则用路径名。在「查看谁的记忆」里选中助手后也能填。</p>
               <input x-model="idn.modelsText" class="h-10 w-full rounded-xl border border-zinc-800 bg-zinc-900 px-3 text-sm text-zinc-100 outline-none focus:border-coral" placeholder="主模型,逗号分隔,如 anthropic/claude-opus-5, *fable*">
               <input x-model="idn.namespace" class="h-10 w-full rounded-xl border border-zinc-800 bg-zinc-900 px-3 text-sm text-zinc-100 outline-none focus:border-coral" placeholder="写入空间,留空与名字同名">
               <input x-model="idn.readNamespacesText" class="h-10 w-full rounded-xl border border-zinc-800 bg-zinc-900 px-3 text-sm text-zinc-100 outline-none focus:border-coral" placeholder="召回空间,逗号分隔;留空只读写入空间;[] 不召回">
@@ -1118,8 +1110,18 @@ document.documentElement.dataset.theme = localStorage.getItem('aelios.admin.colo
                   <legend class="px-1 text-xs text-zinc-500" x-text="g.group"></legend>
                   <template x-for="item in g.items" :key="item.name">
                     <div class="mt-2">
-                      <label class="block text-xs text-zinc-400" x-text="item.label"></label>
-                      <input x-model="item.value" :placeholder="item.deployed || '未设置,用代码默认值'" :title="item.name" class="mt-1 h-10 w-full rounded-xl border border-zinc-800 bg-zinc-900 px-3 text-sm text-zinc-100 outline-none focus:border-coral">
+                      <template x-if="item.kind === 'switch'">
+                        <div class="flex items-center justify-between gap-3">
+                          <span class="text-xs text-zinc-400" x-text="item.label"></span>
+                          <button type="button" role="switch" :aria-checked="settingOn(item) ? 'true' : 'false'" :aria-label="item.label" :title="item.name" @click="toggleSetting(item)" class="switch" :class="settingOn(item) ? 'is-on' : ''"><span></span></button>
+                        </div>
+                      </template>
+                      <template x-if="item.kind !== 'switch'">
+                        <div>
+                          <label class="block text-xs text-zinc-400" x-text="item.label"></label>
+                          <input x-model="item.value" :placeholder="item.deployed || '未设置,用代码默认值'" :title="item.name" class="mt-1 h-10 w-full rounded-xl border border-zinc-800 bg-zinc-900 px-3 text-sm text-zinc-100 outline-none focus:border-coral">
+                        </div>
+                      </template>
                       <p x-show="item.hint" class="mt-1 text-[11px] leading-5 text-zinc-500" x-text="item.hint || ''"></p>
                     </div>
                   </template>
@@ -1137,6 +1139,54 @@ document.documentElement.dataset.theme = localStorage.getItem('aelios.admin.colo
         </article>
       </section>
     </main>
+  </div>
+
+  <!-- 查看谁的记忆：平时收成侧栏 / 顶栏里的一行，点开才是完整面板，不再占着每一页的顶上。 -->
+  <div x-show="spaceOpen" x-transition.opacity.duration.150ms @keydown.escape.window="spaceOpen = false" class="fixed inset-0 z-50">
+    <div class="absolute inset-0 bg-[#0a0a0b]/70" @click="spaceOpen = false"></div>
+    <section role="dialog" aria-modal="true" aria-label="选择助手的记忆" class="absolute inset-x-0 bottom-0 max-h-[85dvh] overflow-y-auto rounded-t-2xl border border-zinc-800 bg-zinc-900/95 p-4 pb-[max(16px,env(safe-area-inset-bottom))] shadow-sm md:bottom-auto md:top-16 md:mx-auto md:w-[34rem] md:rounded-2xl md:pb-4">
+      <div class="mb-3 flex items-center justify-between gap-3">
+        <h2 class="text-sm font-semibold text-zinc-100">查看谁的记忆</h2>
+        <button type="button" @click="spaceOpen = false" class="tap grid place-items-center rounded-2xl text-zinc-400 transition duration-150 ease-in-out hover:text-zinc-100" aria-label="关闭">
+          <i data-lucide="x" class="h-4 w-4"></i>
+        </button>
+      </div>
+        <div class="grid gap-3">
+          <label class="text-xs text-zinc-400">助手
+            <select x-model="selectedIdentity" @change="selectIdentity($event.target.value)" class="mt-2 h-11 w-full rounded-xl border border-zinc-800 bg-[#0a0a0b] px-3 text-sm text-zinc-100">
+              <option value="">自选空间（高级）</option>
+              <template x-for="idn in memoryIdentities" :key="idn.slug"><option :value="idn.slug" x-text="idn.slug"></option></template>
+            </select>
+          </label>
+          <label class="text-xs text-zinc-400" x-show="selectedIdentity">空间
+            <select x-model="namespace" @change="switchSpace($event.target.value)" class="mt-2 h-11 w-full rounded-xl border border-zinc-800 bg-[#0a0a0b] px-3 text-sm text-zinc-100">
+              <template x-for="space in identitySpaces()" :key="space.name"><option :value="space.name" x-text="space.label"></option></template>
+            </select>
+          </label>
+        </div>
+        <p class="mt-2 text-xs leading-6 text-zinc-400" x-text="spaceDescription()"></p>
+        <p class="text-xs leading-6 text-zinc-500">这里切换查看的记忆；客户端使用哪位助手由接入地址和钥匙决定。</p>
+        <div x-show="selectedIdentity" class="mt-3 rounded-xl border border-zinc-800 bg-[#0a0a0b] p-3">
+          <p class="text-xs text-zinc-400">说话人名字</p>
+          <p class="mt-1 text-[11px] leading-5 text-zinc-500">Dream、日记、周月卷、审核写记忆时只用这两个名字，不许写用户/助手。</p>
+          <div class="mt-2 grid gap-2 sm:grid-cols-[1fr_1fr_auto] sm:items-end">
+            <label class="text-xs text-zinc-400">用户叫什么
+              <input x-model="speakerUserName" class="mt-1 h-11 w-full rounded-xl border border-zinc-800 bg-zinc-900 px-3 text-sm text-zinc-100 outline-none focus:border-coral" placeholder="如 小南">
+            </label>
+            <label class="text-xs text-zinc-400">助手叫什么
+              <input x-model="speakerAssistantName" class="mt-1 h-11 w-full rounded-xl border border-zinc-800 bg-zinc-900 px-3 text-sm text-zinc-100 outline-none focus:border-coral" placeholder="如 小北；留空用路径名">
+            </label>
+            <button type="button" @click="saveSpeakers()" :disabled="speakerBusy" class="tap h-11 rounded-2xl bg-coral px-4 text-sm font-semibold text-zinc-950 transition duration-150 ease-in-out active:bg-coral/80 disabled:opacity-60">保存名字</button>
+          </div>
+        </div>
+        <p x-show="identityLoadError" x-text="identityLoadError" class="mt-2 text-xs text-coral"></p>
+        <details class="mt-2" :open="!selectedIdentity">
+          <summary class="cursor-pointer text-xs text-zinc-500">高级：手动指定空间</summary>
+          <label class="mt-2 block text-xs text-zinc-400">空间名
+            <input :value="namespace" @change="selectCustomSpace($event.target.value)" class="mt-2 h-11 w-full rounded-xl border border-zinc-800 bg-[#0a0a0b] px-3 text-sm text-zinc-100" placeholder="default">
+          </label>
+        </details>
+    </section>
   </div>
 
   <nav class="z-40 shrink-0 border-t border-zinc-800 bg-[#0a0a0b]/95 px-2 pb-[max(10px,env(safe-area-inset-bottom))] pt-2 backdrop-blur md:hidden">
@@ -1210,6 +1260,8 @@ function memoryAdmin() {
     todayMessages: [],
     candidates: [],
     judgeDecisions: [],
+    spaceOpen: false,
+    autoReview: null,
     memories: [],
     precious: [],
     glossary: [],
@@ -1251,6 +1303,24 @@ function memoryAdmin() {
     },
     currentIdentity() {
       return this.memoryIdentities.find(idn => idn.slug === this.selectedIdentity);
+    },
+    settingOn(item) {
+      const raw = String(item.value || item.deployed || '').trim().toLowerCase();
+      return raw === 'on' || raw === 'true' || raw === '1';
+    },
+    // 开存 on；关时留空回落部署值，部署值本身是开的才写 off 压住它。保存仍走下面的「保存」。
+    toggleSetting(item) {
+      if (this.settingOn(item)) {
+        const deployed = String(item.deployed || '').trim().toLowerCase();
+        item.value = (deployed === 'on' || deployed === 'true' || deployed === '1') ? 'off' : '';
+      } else {
+        item.value = 'on';
+      }
+    },
+    viewingLabel() {
+      const idn = this.currentIdentity();
+      const name = idn ? ((idn.assistantName || '').trim() || idn.slug) : '自选空间';
+      return name + ' · ' + (this.namespace || 'default');
     },
     identitySpaces() {
       const idn = this.currentIdentity();
@@ -1590,6 +1660,7 @@ function memoryAdmin() {
         const data = await this.request(this.withNamespace('/v1/candidates/decisions?days=7'));
         if (revision !== this.spaceRevision) return;
         this.judgeDecisions = data.data || [];
+        this.autoReview = data.auto_review || null;
         this.icons();
       } catch (error) {
         if (revision !== this.spaceRevision) return;

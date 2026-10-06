@@ -91,24 +91,17 @@ export async function listActiveFactKeys(
 // =====================================================================
 
 // =====================================================================
-// LMC-5 E 轴写入闸 (0011)。
+// LMC-5 E 轴署名 (0011)。
 // authored_by / response_tendency 只许"亲手"来源写：mcp (旦九的手)、manual、api。
-// 蒸馏链 (dream/judge/extract/supersede 默认值等) 一律禁写这两列；
-// 且亲笔记忆 (authored_by 非空) 禁止被蒸馏链改写内容——撞上直接抛错，
-// 调用方 (dream/judge 每条独立 try/catch) 记失败跳过，亲笔原文保住。
+// 蒸馏链 (dream/judge/extract/review/supersede 默认值等) 不能给记忆署名，但可以改写亲笔记忆；
+// 改写时署名和响应倾向沿用旧条，亲笔加成跟着走。(原先的"亲笔不许蒸馏链改写"保护已拆掉：
+// 审核时批不进去、只能逐条丢弃，太麻烦。)
 // =====================================================================
 
 const HAND_AUTHOR_SOURCES = new Set(["mcp", "manual", "api", "remember_now"]);
 
 export function isHandAuthorSource(source: string | null | undefined): boolean {
   return typeof source === "string" && HAND_AUTHOR_SOURCES.has(source);
-}
-
-export class HandAuthoredProtectedError extends Error {
-  constructor(id: string) {
-    super(`memory ${id} is hand-authored (E-axis); automated writers may propose but not overwrite`);
-    this.name = "HandAuthoredProtectedError";
-  }
 }
 
 // 按来源裁剪 E 轴字段：非亲手来源写入时两列强制 null。
@@ -195,13 +188,9 @@ export async function upsertMemoryByFactKey(
     .first<{ id: string; authored_by: string | null; response_tendency: string | null }>();
 
   if (existing) {
-    // E 轴保护：亲笔记忆不接受蒸馏链改写 (dream/judge 的候选路径可提案，落笔归人)。
-    if (existing.authored_by && !handSource) {
-      throw new HandAuthoredProtectedError(existing.id);
-    }
     // 更新 memories 本体 (v1 列 + LMC-5 fact_key/version_status)。
     // E 轴两列只在亲手来源时更新；不传就继承已有值 (亲手改内容不该抹掉旧署名)，
-    // 与 supersede 的继承原则一致。蒸馏链更新一条无主记忆时不碰它们 (保持 null)。
+    // 与 supersede 的继承原则一致。蒸馏链改写时不碰它们 (亲笔的沿用署名，无主的保持 null)。
     await db
       .prepare(
         `UPDATE memories SET content = ?, type = ?, importance = ?, confidence = ?,
@@ -406,7 +395,6 @@ export async function supersedeMemory(
   // 注意：supersede 的 source 默认值是 "supersede" (非亲手)，
   // 亲手 supersede 必须显式传 source:"mcp"/"manual"/"api" 才能带 E 轴字段。
   const effectiveSource = input.source ?? "supersede";
-  const handSource = isHandAuthorSource(effectiveSource);
   const eAxis = eAxisFieldsForWrite({
     source: effectiveSource,
     authoredBy: input.authoredBy,
@@ -426,11 +414,6 @@ export async function supersedeMemory(
       authored_by: string | null;
       response_tendency: string | null;
     }>();
-
-  // E 轴保护：亲笔记忆不许被蒸馏链 supersede (dream/judge 撞上抛错，各自的 per-item catch 会记失败跳过)。
-  if (old?.authored_by && !handSource) {
-    throw new HandAuthoredProtectedError(old.id);
-  }
 
   const nextId = newId("mem");
   const nextVectorId = `mem_${nextId}`;
@@ -515,11 +498,9 @@ export async function supersedeMemory(
     .run();
 
   // 2. 插新条目 (current，继承 fact_key)。
-  //    亲手 supersede 亲笔记忆时，新条 E 轴取显式入参；没传则继承旧条 (亲笔链不断，倾向同理)。
-  const nextAuthoredBy = handSource ? (eAxis.authoredBy ?? old.authored_by) : null;
-  const nextResponseTendency = handSource
-    ? (eAxis.responseTendency ?? old.response_tendency)
-    : null;
+  //    新条 E 轴取显式入参 (只有亲手来源能传)；没传则继承旧条 (亲笔链不断，倾向同理)。
+  const nextAuthoredBy = eAxis.authoredBy ?? old.authored_by;
+  const nextResponseTendency = eAxis.responseTendency ?? old.response_tendency;
   await db
     .prepare(
       `INSERT INTO memories (

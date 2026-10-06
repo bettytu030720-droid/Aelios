@@ -399,7 +399,7 @@ function getTools(): Array<Record<string, unknown>> {
         "memory with the same fact_key exists, its content and fields are overwritten in place and the old text is " +
         "not kept; otherwise a new memory is created. To keep the old version as history, use memory_supersede. " +
         "Pass authored_by (with the default source) to mark the memory as hand-authored: it ranks above distilled " +
-        "memories and the automatic pipeline cannot overwrite it. Returns { data: { id, created } }.",
+        "memories, and keeps that mark when the nightly pipeline later rewrites it. Returns { data: { id, created } }.",
       annotations: {
         title: "Upsert memory",
         readOnlyHint: false,

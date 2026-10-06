@@ -14,6 +14,7 @@ let sqlite: DatabaseSync;
 let env: any;
 let calls: { url: string; headers: Record<string, string>; body: any }[];
 let verdicts: any[];
+let clefAnswers: any[];
 
 const danjiu = () => ({ slug: "danjiu", namespace: "default", keys: ["CHATBOX_API_KEY"], models: ["*fable*", "*opus*"],
   userName: "咲咲", assistantName: "旦九" });
@@ -40,11 +41,16 @@ beforeEach(() => {
     const results = []; for (const statement of statements) results.push(await statement.run()); return results;
   } };
   invalidateSettingsCache();
-  calls = []; verdicts = [];
+  calls = []; verdicts = []; clefAnswers = [];
   env = { DB: db, CHATBOX_API_KEY: "owner-key", CLOUDFLARE_API_TOKEN: "cf-token",
     DREAM_MODEL: "workers-ai/@cf/openai/gpt-oss-120b",
-    AI: { async run(model: string) {
+    AI: { async run(model: string, input: any) {
       if (model.includes("bge")) return { data: [[0.1, 0.2, 0.3]] };
+      if (model.includes("clef")) {
+        calls.push({ url: `workers-ai:${model}`, headers: {}, body: input });
+        const answers = Object.fromEntries(Object.entries(clefAnswers.shift()).map(([id, noul]) => [id, { type: "noul", noul }]));
+        return { model: "clef", answers, usage: { input_tokens: 300, output_tokens: 0 } };
+      }
       // The shared judge (Workers AI) answers with the next queued verdict too.
       calls.push({ url: `workers-ai:${model}`, headers: {}, body: null });
       return { response: JSON.stringify(verdicts.shift()) };
@@ -289,14 +295,14 @@ test("undo restores an archived memory and refuses what changed since", async ()
   assert.equal((await api("/v1/candidates/c-review/undo?namespace=default", "POST")).status, 200);
   assert.equal(row("memories", review.target_memory_id).status, "archived");
 
-  // A memory that has become hand-authored is left alone too.
+  // A signature added afterwards (same text) no longer blocks undo: the hand-authored guard is gone.
   candidate("c-hand", "咲咲在学营销师。", { fact_key: "cert", created: "2026-09-30T10:00:00.000Z" });
   verdicts.push(verdict(0.9));
   await runCandidateJudge(env, "default");
   const hand = row("memory_candidates", "c-hand");
   sqlite.prepare("UPDATE memories SET authored_by = '咲咲' WHERE id = ?").run(hand.target_memory_id);
-  assert.equal((await api("/v1/candidates/c-hand/undo?namespace=default", "POST")).status, 409);
-  assert.equal(row("memories", hand.target_memory_id).status, "active");
+  assert.equal((await api("/v1/candidates/c-hand/undo?namespace=default", "POST")).status, 200);
+  assert.equal(row("memories", hand.target_memory_id).status, "archived");
 
   // Undoing a declined archive needs the memory to still be there.
   candidate("c-del-gone", "咲咲住在出租屋。", { source: "dream_delete", target: "missing", created: "2026-09-30T10:00:00.000Z" });
@@ -328,4 +334,80 @@ test("undo restores an archived memory and refuses what changed since", async ()
   candidate("c-human", "咲咲住在武汉。");
   sqlite.prepare("UPDATE memory_candidates SET status = 'discarded', decision_note = 'discarded' WHERE id = 'c-human'").run();
   assert.equal((await api("/v1/candidates/c-human/undo?namespace=default", "POST")).status, 409);
+});
+
+test("the clef switch judges every candidate itself, even with the judge switched off", async () => {
+  env.CANDIDATE_JUDGE_ENABLED = "false";
+  assert.equal((await runCandidateJudge(env, "default")).reason, "judge_disabled");
+
+  env.CLEF_AUTO_REVIEW = "on";
+  exchange("danjiu", "messages", "claude-opus-5-5", "anthropic"); // the assistant's own voice is not asked
+  message("m1", "user", "我搬进自己装修的旧房子了，不喝越南咖啡了。");
+  memory("home-old", "咲咲住在出租屋。", "home");
+  memory("coffee", "咲咲爱喝越南咸咖啡。");
+  candidate("c-hi", "咲咲在学中级经济师。", { created: "2026-09-30T13:00:00.000Z" });
+  candidate("c-lo", "咲咲今天说了你好。", { created: "2026-09-30T12:00:00.000Z" });
+  candidate("c-up", "咲咲搬进了自己装修的旧房子。", { source: "dream_update", fact_key: "home", created: "2026-09-30T11:00:00.000Z" });
+  candidate("c-del", "咲咲爱喝越南咸咖啡。", { source: "dream_delete", target: "coffee", created: "2026-09-30T10:00:00.000Z" });
+  // Judged newest first; no middle band left for people.
+  clefAnswers.push({ grounded: 0.94, worth: 0.85 }, { grounded: 0.95, worth: 0.06 }, { grounded: 0.9, worth: 0.8 }, { archive: 0.96 });
+
+  const result = await runCandidateJudge(env, "default");
+  assert.deepEqual([result.judgedBy, result.model], ["clef", "@cf/cloudflare/clef"]);
+  assert.deepEqual([result.approved, result.discarded, result.kept, result.failed], [3, 1, 0, 0]);
+  assert.ok(calls.every((call) => call.url === "workers-ai:@cf/cloudflare/clef"));
+
+  const [hi, lo, up, del] = calls.map((call) => call.body);
+  assert.equal(hi.model, "clef");
+  assert.deepEqual(Object.keys(hi.questions), ["grounded", "worth"]);
+  assert.equal(hi.state.speakers.user, "咲咲");
+  assert.match(hi.state.transcript, /\[咲咲\] 我搬进自己装修的旧房子了/);
+  assert.equal(up.state.old_memory, "咲咲住在出租屋。");
+  assert.deepEqual(Object.keys(del.questions), ["archive"]);
+  assert.equal(lo.state.candidate.content, "咲咲今天说了你好。");
+
+  const remembered = row("memory_candidates", "c-hi");
+  assert.equal(remembered.status, "approved");
+  assert.equal(remembered.decision_note, "judge[clef]: clef：有依据 94%，值得长期记 85%");
+  assert.equal(row("memory_candidates", "c-lo").status, "discarded");
+  assert.equal(row("memories", "home-old").status, "superseded");
+  assert.equal(row("memories", "coffee").status, "archived");
+
+  const list = await api("/v1/candidates/decisions?days=7&namespace=default");
+  assert.equal(list.body.auto_review, "clef");
+  assert.equal(list.body.data.find((d: any) => d.id === "c-lo").judged_by, "clef");
+  assert.equal((await api("/v1/candidates/c-lo/undo?namespace=default", "POST")).status, 200);
+});
+
+test("a failed clef call leaves the candidate for tomorrow", async () => {
+  env.CLEF_AUTO_REVIEW = "true";
+  message("m1", "user", "我下周三去复查肾功能。");
+  candidate("c-x", "咲咲下周三去复查肾功能。");
+  clefAnswers.push({ grounded: 0.9 }); // worth missing
+  const result = await runCandidateJudge(env, "default");
+  assert.deepEqual([result.failed, result.judged], [1, 0]);
+  assert.equal(row("memory_candidates", "c-x").status, "pending");
+});
+
+test("review and the judge can now rewrite a hand-authored memory, keeping its signature", async () => {
+  memory("hand", "咲咲叫我老公。", "boundary:naming");
+  sqlite.prepare("UPDATE memories SET authored_by = '旦九', response_tendency = '接住' WHERE id = 'hand'").run();
+  message("m1", "user", "场内叫先生，平时叫老公。");
+
+  // Approving from the review page used to answer 409 (E-axis protection).
+  candidate("c-review", "咲咲平时叫我老公，场内叫先生。", { fact_key: "boundary:naming" });
+  const approved = await api("/v1/candidates/c-review/approve?namespace=default", "POST");
+  assert.equal(approved.status, 200);
+  const rewritten = row("memories", "hand");
+  assert.equal(rewritten.content, "咲咲平时叫我老公，场内叫先生。");
+  assert.deepEqual([rewritten.authored_by, rewritten.response_tendency], ["旦九", "接住"]);
+
+  // The nightly judge supersedes it; the new version carries the signature on.
+  env.CLEF_AUTO_REVIEW = "on";
+  candidate("c-judge", "咲咲场内叫我先生，平时叫老公。", { source: "dream_update", fact_key: "boundary:naming" });
+  clefAnswers.push({ grounded: 0.9, worth: 0.7 });
+  assert.equal((await runCandidateJudge(env, "default")).approved, 1);
+  assert.equal(row("memories", "hand").status, "superseded");
+  const next = row("memories", row("memory_candidates", "c-judge").target_memory_id);
+  assert.deepEqual([next.content, next.authored_by, next.response_tendency, next.source], ["咲咲场内叫我先生，平时叫老公。", "旦九", "接住", "judge"]);
 });

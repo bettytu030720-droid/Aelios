@@ -23,7 +23,6 @@ import {
   fetchMemoryLifecycleRows,
   getDailyLog,
   getMemoryCandidateById,
-  HandAuthoredProtectedError,
   listGlossary,
   listJudgeDecisionsSince,
   listMemoryCandidates,
@@ -36,6 +35,7 @@ import {
   upsertMemoryByFactKey
 } from "../db/v2";
 import { parseJudgeNote, undoJudgeDecision } from "../memory/candidateJudge";
+import { isClefReviewOn } from "../memory/clefJudge";
 import { withImpressionDisclaimer } from "../memory/impression";
 import { isV2Enabled, runRecall } from "../memory/v2/recall";
 
@@ -762,16 +762,6 @@ async function createApprovedMemoryFromCandidate(
   return { id: created.id, action: "created" };
 }
 
-// E 轴保护撞到候选处置路径时，给 reviewer 一个可读的 409 而不是裸 500 (#33)。
-function handAuthoredConflict(error: unknown): Response | null {
-  if (!(error instanceof HandAuthoredProtectedError)) return null;
-  return openAiError(
-    "目标记忆是亲笔写入（E 轴保护），审核链只可提案、不可覆写。这条候选请选「丢弃」；确要更新原文，去重要记忆页亲手编辑或取代那条记忆。",
-    409,
-    "hand_authored_protected"
-  );
-}
-
 export async function handleMemoryCandidates(request: Request, env: Env): Promise<Response> {
   const auth = await authenticate(request, env);
   if (!auth.ok) return openAiError("Unauthorized", 401, "authentication_error");
@@ -803,7 +793,8 @@ export async function handleMemoryCandidates(request: Request, env: Env): Promis
       sinceIso: new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString(),
       limit: readPositiveInt(url.searchParams.get("limit"), 200, 500)
     });
-    return json({ data: rows.map(toJudgeDecisionRecord) });
+    // auto_review 告诉审核页 clef 每天自动审开没开 (后台设置里的开关)。
+    return json({ data: rows.map(toJudgeDecisionRecord), auto_review: isClefReviewOn(env) ? "clef" : null });
   }
 
   const scopeError = requireScope(auth.profile, "memory:write");
@@ -824,14 +815,7 @@ export async function handleMemoryCandidates(request: Request, env: Env): Promis
     : parseJsonArray(candidate.source_message_ids);
 
   if (action === "undo") {
-    let result: Awaited<ReturnType<typeof undoJudgeDecision>>;
-    try {
-      result = await undoJudgeDecision(env, namespace, candidate);
-    } catch (error) {
-      const conflict = handAuthoredConflict(error);
-      if (conflict) return conflict;
-      throw error;
-    }
+    const result = await undoJudgeDecision(env, namespace, candidate);
     if (!result.ok) return openAiError(result.error, result.httpStatus);
     return json({
       data: {
@@ -869,26 +853,19 @@ export async function handleMemoryCandidates(request: Request, env: Env): Promis
         target.status === "active" &&
         target.version_status !== "superseded";
       if (targetActive) {
-        let result: Awaited<ReturnType<typeof supersedeMemory>>;
-        try {
-          result = await supersedeMemory(env, {
-            namespace,
-            oldId: candidate.target_memory_id,
-            newContent: content,
-            newType: type,
-            newFactKey: factKey,
-            confidence,
-            importance,
-            tags,
-            source: "review",
-            sourceMessageIds,
-            reason: "approve_update"
-          });
-        } catch (error) {
-          const conflict = handAuthoredConflict(error);
-          if (conflict) return conflict;
-          throw error;
-        }
+        const result = await supersedeMemory(env, {
+          namespace,
+          oldId: candidate.target_memory_id,
+          newContent: content,
+          newType: type,
+          newFactKey: factKey,
+          confidence,
+          importance,
+          tags,
+          source: "review",
+          sourceMessageIds,
+          reason: "approve_update"
+        });
         const updated = await updateMemoryCandidateStatus(env.DB, {
           namespace,
           id,
@@ -910,25 +887,18 @@ export async function handleMemoryCandidates(request: Request, env: Env): Promis
     const fallbackNote = candidate.target_memory_id
       ? `${readString(body.decision_note) || "approved"}; target_gone_fallback`
       : readString(body.decision_note) || "approved";
-    let approval: Awaited<ReturnType<typeof createApprovedMemoryFromCandidate>>;
-    try {
-      approval = await createApprovedMemoryFromCandidate(env, {
-        namespace,
-        type,
-        content,
-        factKey,
-        confidence,
-        importance,
-        tags,
-        sourceMessageIds,
-        source: "review",
-        excludeIds: candidate.target_memory_id ? [candidate.target_memory_id] : undefined
-      });
-    } catch (error) {
-      const conflict = handAuthoredConflict(error);
-      if (conflict) return conflict;
-      throw error;
-    }
+    const approval = await createApprovedMemoryFromCandidate(env, {
+      namespace,
+      type,
+      content,
+      factKey,
+      confidence,
+      importance,
+      tags,
+      sourceMessageIds,
+      source: "review",
+      excludeIds: candidate.target_memory_id ? [candidate.target_memory_id] : undefined
+    });
     const updated = await updateMemoryCandidateStatus(env.DB, {
       namespace,
       id,
@@ -988,26 +958,19 @@ export async function handleMemoryCandidates(request: Request, env: Env): Promis
   if (action === "supersede") {
     const oldId = readString(body.target_id);
     if (!oldId) return openAiError("target_id is required", 400);
-    let result: Awaited<ReturnType<typeof supersedeMemory>>;
-    try {
-      result = await supersedeMemory(env, {
-        namespace,
-        oldId,
-        newContent: content,
-        newType: type,
-        newFactKey: factKey,
-        confidence,
-        importance,
-        tags,
-        source: "review",
-        sourceMessageIds,
-        reason: readString(body.decision_note) || "candidate_supersede"
-      });
-    } catch (error) {
-      const conflict = handAuthoredConflict(error);
-      if (conflict) return conflict;
-      throw error;
-    }
+    const result = await supersedeMemory(env, {
+      namespace,
+      oldId,
+      newContent: content,
+      newType: type,
+      newFactKey: factKey,
+      confidence,
+      importance,
+      tags,
+      source: "review",
+      sourceMessageIds,
+      reason: readString(body.decision_note) || "candidate_supersede"
+    });
     const updated = await updateMemoryCandidateStatus(env.DB, {
       namespace,
       id,

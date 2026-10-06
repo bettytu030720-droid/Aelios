@@ -5,7 +5,10 @@
 //   后台"这周助手自己定的"能逐条撤回。
 // - 代审（JUDGE_MODEL / DREAM_MODEL）：明显靠谱的自动 approve，明显不靠谱的自动 discard，
 //   模棱两可的留给人工。
-// 默认开启 (CANDIDATE_JUDGE_ENABLED === "false" 时关闭)。Dream 抽完候选后由 cron / 手动入口跑一轮。
+// - clef（CLEF_AUTO_REVIEW 开着时，盖过上面两种）：每条候选问 clef 几道是非题，只分记住/放下，
+//   不留给人工，见 clefJudge.ts。
+// 默认开启 (CANDIDATE_JUDGE_ENABLED === "false" 时关闭，但 clef 开关开着照跑)。
+// Dream 抽完候选后由 cron / 手动入口跑一轮。
 
 import { getMessagesByIds } from "../db/messages";
 import {
@@ -22,6 +25,7 @@ import {
 import { callModelWithRetry } from "../utils/modelCall";
 import type { Env, MessageRecord } from "../types";
 import { extractJsonObject } from "../utils/parse";
+import { askClef, buildClefInput, CLEF_JUDGE_NAME, CLEF_MODEL, isClefReviewOn } from "./clefJudge";
 import { askOwnModel, resolveJudgeVoice, type JudgeVoice } from "./judgeVoice";
 import { createVectorMemory } from "./vectorStore";
 import { formatSpeakerTranscript, judgeSpeakerRules, loadSpeakersForNamespace, type DreamSpeakers } from "./speakers";
@@ -30,6 +34,8 @@ import { formatSpeakerTranscript, judgeSpeakerRules, loadSpeakersForNamespace, t
 // 不用再为 judge 单独建一个查询。
 
 const DEFAULT_MAX_CANDIDATES = 20;
+// clef 一条只花几百 token、不生成文字，开了就一晚把积压清干净，不再按 20 条慢慢挪。
+const CLEF_DEFAULT_MAX_CANDIDATES = 100;
 const MAX_CANDIDATES_CAP = 100;
 const DEFAULT_APPROVE_MIN = 0.8;
 const DEFAULT_DISCARD_MAX = 0.3;
@@ -302,6 +308,35 @@ async function callJudgeModel(env: Env, voice: JudgeVoice, prompt: string, meta:
   return parseJudgeModelResult(extractJsonObject(text));
 }
 
+async function callClef(
+  env: Env,
+  namespace: string,
+  candidate: MemoryCandidateRow,
+  messages: MessageRecord[],
+  speakers: DreamSpeakers | null
+): Promise<JudgeModelResult | null> {
+  const kind = judgeKindFor(candidate.source);
+  // 更新提案带上被替换的旧记忆，clef 才看得出是不是实质修正。
+  let oldMemory: string | null = null;
+  if (kind === "update") {
+    const factKey = candidate.fact_key?.trim();
+    const target = candidate.target_memory_id
+      ? await env.DB.prepare("SELECT content FROM memories WHERE namespace = ? AND id = ?")
+          .bind(namespace, candidate.target_memory_id)
+          .first<{ content: string }>()
+      : factKey
+        ? await getActiveMemoryByFactKey(env.DB, { namespace, factKey })
+        : null;
+    oldMemory = target?.content ?? null;
+  }
+  try {
+    return await askClef(env, buildClefInput(kind, candidate, messages, speakers, oldMemory), kind);
+  } catch (error) {
+    console.error("candidate judge: clef call failed", { id: candidate.id, error });
+    return null;
+  }
+}
+
 // approve 的落库语义跟 dream 候选队列的 fact_key 分支一致：
 // 有 fact_key 先查是否已有 active 同 key 记忆，有就 supersede (保留历史链)，没有就 upsert 新建；
 // 没有 fact_key 就走向量库直接建条目。admin 后台 /v1/candidates/:id/approve 的私有
@@ -375,18 +410,24 @@ export async function runCandidateJudge(
   namespace: string,
   options: { limit?: number } = {}
 ): Promise<JudgeRunResult> {
-  if (env.CANDIDATE_JUDGE_ENABLED === "false") {
+  // 后台开了 clef 自动审：不管上面的总闸和谁的声音，全交给 clef。
+  const clef = isClefReviewOn(env);
+  if (!clef && env.CANDIDATE_JUDGE_ENABLED === "false") {
     return { ran: false, judged: 0, approved: 0, discarded: 0, kept: 0, failed: 0, reason: "judge_disabled" };
   }
 
-  const voice = await resolveJudgeVoice(env, namespace);
-  if (!voice) {
+  const voice = clef ? null : await resolveJudgeVoice(env, namespace);
+  if (!clef && !voice) {
     return { ran: false, judged: 0, approved: 0, discarded: 0, kept: 0, failed: 0, reason: "missing_model" };
   }
-  const model = voice.model;
-  const judgedBy = voice.kind === "self" ? voice.name : undefined;
+  const model = voice ? voice.model : CLEF_MODEL;
+  const judgedBy = clef ? CLEF_JUDGE_NAME : voice?.kind === "self" ? voice.name : undefined;
 
-  const limit = readPositiveInt(options.limit ?? env.JUDGE_MAX_CANDIDATES, DEFAULT_MAX_CANDIDATES, MAX_CANDIDATES_CAP);
+  const limit = readPositiveInt(
+    options.limit ?? env.JUDGE_MAX_CANDIDATES,
+    clef ? CLEF_DEFAULT_MAX_CANDIDATES : DEFAULT_MAX_CANDIDATES,
+    MAX_CANDIDATES_CAP
+  );
   const approveMin = readUnitFloat(env.JUDGE_APPROVE_MIN, DEFAULT_APPROVE_MIN);
   const discardMax = readUnitFloat(env.JUDGE_DISCARD_MAX, DEFAULT_DISCARD_MAX);
 
@@ -403,7 +444,7 @@ export async function runCandidateJudge(
   let kept = 0;
   let failed = 0;
 
-  const deadline = voice.kind === "self" ? Date.now() + SELF_JUDGE_BUDGET_MS : Number.POSITIVE_INFINITY;
+  const deadline = voice?.kind === "self" ? Date.now() + SELF_JUDGE_BUDGET_MS : Number.POSITIVE_INFINITY;
 
   for (const candidate of candidates) {
     if (Date.now() > deadline) {
@@ -436,8 +477,9 @@ export async function runCandidateJudge(
           reason: "没有可核对的原始消息，无法确认是否有据"
         };
       } else {
-        const prompt = buildJudgePrompt(candidate, messages, speakers, judgedBy ?? null);
-        const modelResult = await callJudgeModel(env, voice, prompt, { id: candidate.id });
+        const modelResult = voice
+          ? await callJudgeModel(env, voice, buildJudgePrompt(candidate, messages, speakers, judgedBy ?? null), { id: candidate.id })
+          : await callClef(env, namespace, candidate, messages, speakers);
         if (!modelResult) {
           failed += 1;
           console.error("candidate judge: model call failed or returned invalid JSON", { namespace, id: candidate.id });
@@ -583,7 +625,7 @@ export async function undoJudgeDecision(
   }
 
   const target = await env.DB.prepare(
-    `SELECT m.status, m.version_status, m.created_at, m.content, m.authored_by, lc.supersedes_id
+    `SELECT m.status, m.version_status, m.created_at, m.content, lc.supersedes_id
      FROM memories m
      LEFT JOIN memory_lifecycle lc ON lc.memory_id = m.id
      WHERE m.namespace = ? AND m.id = ?`
@@ -594,7 +636,6 @@ export async function undoJudgeDecision(
       version_status: string | null;
       created_at: string;
       content: string;
-      authored_by: string | null;
       supersedes_id: string | null;
     }>();
   if (!target) return { ok: false, httpStatus: 404, error: "记住的那条记忆已经不在了" };
@@ -611,11 +652,6 @@ export async function undoJudgeDecision(
   if (target.content.trim() !== candidate.content.trim()) {
     return { ok: false, httpStatus: 409, error: "记住之后这条记忆又被改过，撤回会把改动一起收走，请到记忆页手动改" };
   }
-  // 亲笔记忆不归自动流程收：archiveMemory 不查 authored_by，这里先挡。
-  if (target.authored_by) {
-    return { ok: false, httpStatus: 409, error: "这条记忆现在是亲笔的，撤回不了，请到记忆页手动改" };
-  }
-
   // 先确认被顶掉的旧版本还能放回来，再动新条；否则收回新条后两头都不在。
   const previousId = target.supersedes_id;
   if (previousId && !await checkMemoryRestorable(env.DB, { namespace, id: previousId, supersededBy: targetId })) {
