@@ -122,7 +122,6 @@ export const STARMAP_HTML = String.raw`<!doctype html>
     background: transparent !important;
     box-shadow: inset 0 0 0 1.2px rgba(170, 175, 200, .55);
   }
-  .chips-toggle { display: none; }
 
   .btn {
     height: 32px; min-width: 32px; padding: 0 12px; border-radius: 999px;
@@ -132,6 +131,7 @@ export const STARMAP_HTML = String.raw`<!doctype html>
     backdrop-filter: blur(10px); transition: border-color .15s;
   }
   .btn:hover { border-color: rgba(232, 200, 138, .6); }
+  .chips-toggle { display: none; }
 
   /* ── corner text ── */
   .stats {
@@ -241,7 +241,8 @@ export const STARMAP_HTML = String.raw`<!doctype html>
   .skip-hint.show { opacity: 1; }
   @media (max-width: 767px) {
     .title-main { font-size: 19px; }
-    .title-block { max-width: 50vw; }
+    /* below the icon row, so the title and the buttons don't overlap on phones */
+    .title-block { top: max(58px, calc(env(safe-area-inset-top) + 48px)); max-width: 92vw; }
     .caption { display: none; }
     .stats { left: 14px; right: auto; }
     .chips {
@@ -496,46 +497,88 @@ controls.maxPolarAngle = Math.PI * 0.49;
 controls.target.set(0, 2.2, 2);
 controls.update();
 
+// cut a stretch out of a curve (u = control-point parameter) as its own curve, so the
+// pieces share one path and meet without a kink
+function subCurve(curve, u0, u1) {
+  var pts = [];
+  var n = 48;
+  for (var i = 0; i <= n; i++) pts.push(curve.getPoint(u0 + (u1 - u0) * i / n));
+  return new THREE.CatmullRomCurve3(pts, false, 'centripetal');
+}
+
+// 长江 is one continuous main stem that sweeps through the confluence. 汉江 is thinner and
+// more winding; it slants in from the left, then runs along the bank for a stretch, drawing
+// toward mid-channel as the two waters mix (the merge stretch, where recent memories sit).
 function buildCurves() {
-  var han = new THREE.CatmullRomCurve3([
-    new THREE.Vector3(-52, 0.2, -48),
-    new THREE.Vector3(-44, 1.2, -36),
-    new THREE.Vector3(-36, -0.4, -26),
-    new THREE.Vector3(-28, 1.0, -18),
-    new THREE.Vector3(-20, 0.2, -12),
-    new THREE.Vector3(-12, 0.6, -6),
-    new THREE.Vector3(-5, 0.1, -2),
-    new THREE.Vector3(0, 0, 0)
-  ], false, 'catmullrom', 0.35);
-  var yang = new THREE.CatmullRomCurve3([
-    new THREE.Vector3(56, 0.1, -52),
-    new THREE.Vector3(46, 0.8, -40),
-    new THREE.Vector3(36, -0.2, -30),
-    new THREE.Vector3(26, 0.5, -20),
-    new THREE.Vector3(16, 0.0, -12),
-    new THREE.Vector3(9, 0.3, -6),
-    new THREE.Vector3(4, 0.0, -2),
-    new THREE.Vector3(0, 0, 0)
-  ], false, 'catmullrom', 0.28);
-  var down = new THREE.CatmullRomCurve3([
+  var trunkPts = [
+    new THREE.Vector3(60.6, 0.5, -25.9),
+    new THREE.Vector3(50, 0.6, -31.5),
+    new THREE.Vector3(37.1, 0.5, -32.9),
+    new THREE.Vector3(24.9, 0.35, -28.4),
+    new THREE.Vector3(15.7, 0.2, -20.7),
+    new THREE.Vector3(8.6, 0.1, -12.3),
+    new THREE.Vector3(3.9, 0.05, -5.8),
     new THREE.Vector3(0, 0, 0),
-    new THREE.Vector3(1.5, -0.2, 10),
-    new THREE.Vector3(-1.0, -0.6, 24),
-    new THREE.Vector3(2.0, -1.2, 40),
-    new THREE.Vector3(-0.5, -2.0, 58),
-    new THREE.Vector3(0, -3.0, 78)
-  ], false, 'catmullrom', 0.3);
-  var merge = new THREE.CatmullRomCurve3([
-    new THREE.Vector3(-1.5, 0.3, -1.2),
-    new THREE.Vector3(0.2, 0.5, 1.8),
-    new THREE.Vector3(0.8, 0.15, 5.5),
-    new THREE.Vector3(0, -0.1, 9.5)
-  ], false, 'catmullrom', 0.4);
-  return { han: han, yang: yang, down: down, merge: merge };
+    new THREE.Vector3(-3.4, -0.3, 8.3),
+    new THREE.Vector3(-4.8, -0.6, 18.2),
+    new THREE.Vector3(-3.2, -1, 29.1),
+    new THREE.Vector3(0.8, -1.5, 41.5),
+    new THREE.Vector3(4.2, -2.2, 55.1),
+    new THREE.Vector3(3.6, -3, 71.1)
+  ];
+  var CONF = 7; // trunkPts index of the confluence
+  var trunk = new THREE.CatmullRomCurve3(trunkPts, false, 'centripetal');
+  var uConf = CONF / (trunkPts.length - 1);
+  var yang = subCurve(trunk, 0, uConf);
+  var down = subCurve(trunk, uConf, 1);
+
+  var hanPts = [
+    new THREE.Vector3(-38.2, 0.5, -76.1),
+    new THREE.Vector3(-34.5, 0.65, -71.4),
+    new THREE.Vector3(-30.8, 0.7, -66.6),
+    new THREE.Vector3(-27.3, 0.6, -61.8),
+    new THREE.Vector3(-23.8, 0.45, -55.7),
+    new THREE.Vector3(-21.6, 0.3, -49.1),
+    new THREE.Vector3(-20.9, 0.25, -42.1),
+    new THREE.Vector3(-18.9, 0.3, -35.4),
+    new THREE.Vector3(-14.6, 0.45, -29.9),
+    new THREE.Vector3(-8.8, 0.5, -26),
+    new THREE.Vector3(-3.5, 0.4, -21.5),
+    new THREE.Vector3(-0.1, 0.25, -16.5),
+    new THREE.Vector3(1.3, 0.12, -10.7),
+    new THREE.Vector3(0.9, 0.05, -5.2)
+  ];
+  // along the bank below the confluence: start beside the main stem, ease in to mid-channel
+  var downLen = down.getLength();
+  var up = new THREE.Vector3(0, 1, 0);
+  var BANK = 9;
+  for (var i = 0; i <= BANK; i++) {
+    var k = i / BANK;
+    var s = (k * 16) / downLen;
+    var p = down.getPointAt(s);
+    var side = new THREE.Vector3().crossVectors(down.getTangentAt(s), up).normalize();
+    hanPts.push(p.addScaledVector(side, 1.15 * (1 - 0.85 * k * k)));
+  }
+  var JOIN = hanPts.length - BANK - 1; // index where 汉江 reaches the main stem
+  var hanFull = new THREE.CatmullRomCurve3(hanPts, false, 'centripetal');
+  var uJoin = JOIN / (hanPts.length - 1);
+  var han = subCurve(hanFull, 0, uJoin);
+  var merge = subCurve(hanFull, uJoin, 1);
+
+  var yangLen = yang.getLength();
+  var hanLen = han.getLength();
+  return {
+    han: han, yang: yang, down: down, merge: merge,
+    trunk: trunk, hanFull: hanFull,
+    // where the confluence falls along each full river, as a fraction of its length
+    trunkSplit: yangLen / (yangLen + downLen),
+    hanSplit: hanLen / (hanLen + merge.getLength())
+  };
 }
 var curves = buildCurves();
 
-// river ribbons: soft luminous water with a slow flowing shimmer
+// river ribbons: luminous water. A bright thread runs down the mid-channel and swells of
+// light travel downstream; a wide faint copy underneath gives the river its bloom.
 var ribbonMaterials = [];
 var ribbonVertexShader = [
   'varying vec2 vUv;',
@@ -546,21 +589,41 @@ var ribbonVertexShader = [
 ].join('\n');
 var ribbonFragmentShader = [
   'uniform vec3 uColor;',
+  'uniform vec3 uColor2;',
+  'uniform float uSplit;',
   'uniform float uTime;',
   'uniform float uOpacity;',
   'uniform float uEndFade;',
+  'uniform float uFadeFrom;',
+  'uniform float uCrest;',
+  'uniform float uLen;',
   'varying vec2 vUv;',
   'void main() {',
-  '  float edge = sin(vUv.y * 3.14159);',
-  '  edge *= edge;',
-  '  float flow = 0.7 + 0.3 * sin(vUv.x * 55.0 - uTime * 0.8 + sin(vUv.y * 6.283) * 0.8);',
-  '  float along = 1.0 - uEndFade * vUv.x * 0.65;',
-  '  gl_FragColor = vec4(uColor, edge * flow * along * uOpacity);',
+  '  float y = vUv.y * 2.0 - 1.0;',
+  '  float body = exp(-y * y * 3.0) * (1.0 - y * y);',
+  '  float crest = exp(-y * y * 70.0) * uCrest;',
+  // x in world units, so swells keep one spacing on every river
+  '  float x = vUv.x * uLen;',
+  '  float swell = pow(0.5 + 0.5 * sin(x * 0.21 - uTime * 1.05), 4.0);',
+  '  float swell2 = pow(0.5 + 0.5 * sin(x * 0.47 - uTime * 1.7 + 1.9), 6.0);',
+  '  float ripple = 0.78 + 0.22 * sin(x * 2.1 - uTime * 2.4 + y * 2.5);',
+  '  float glow = body * (0.5 + 0.55 * swell + 0.35 * swell2) * ripple;',
+  '  float thread = crest * (0.45 + 1.1 * swell + 0.5 * swell2);',
+  '  float along = smoothstep(0.0, 0.04, vUv.x) * (1.0 - smoothstep(0.96, 1.0, vUv.x));',
+  '  along *= 1.0 - uEndFade * clamp((vUv.x - uFadeFrom) / (1.0 - uFadeFrom), 0.0, 1.0);',
+  // below the confluence the water turns from its own colour to the mixed colour
+  '  vec3 base = mix(uColor, uColor2, smoothstep(uSplit, uSplit + 0.1, vUv.x));',
+  '  vec3 col = mix(base, vec3(1.0, 0.97, 0.9), clamp(thread * 0.35, 0.0, 1.0));',
+  '  gl_FragColor = vec4(col, (glow + thread) * along * uOpacity);',
   '}'
 ].join('\n');
 
-function makeRiverRibbon(curve, width, colorHex, opacity, endFade) {
-  var segs = 120;
+// opts: widthAt(t) (width profile along the river), color2 + split (colour below t = split),
+// endFade + fadeFrom (how much to dim from t = fadeFrom to the far end),
+// crest (strength of the mid-channel thread, default 1)
+function makeRiverRibbon(curve, width, colorHex, opacity, opts) {
+  opts = opts || {};
+  var segs = Math.max(120, Math.round(curve.getLength() * 1.5));
   var pts = curve.getSpacedPoints(segs);
   var positions = [];
   var uvs = [];
@@ -574,7 +637,7 @@ function makeRiverRibbon(curve, width, colorHex, opacity, endFade) {
     var side = new THREE.Vector3().crossVectors(tangent, new THREE.Vector3(0, 1, 0));
     if (side.lengthSq() < 1e-8) side.set(1, 0, 0);
     else side.normalize();
-    var w = width * (0.55 + 0.45 * Math.sin(t * Math.PI));
+    var w = width * (opts.widthAt ? opts.widthAt(t) : 0.55 + 0.45 * Math.sin(t * Math.PI));
     var a = p.clone().addScaledVector(side, w);
     var b = p.clone().addScaledVector(side, -w);
     a.y -= 0.4;
@@ -594,9 +657,14 @@ function makeRiverRibbon(curve, width, colorHex, opacity, endFade) {
   var mat = new THREE.ShaderMaterial({
     uniforms: {
       uColor: { value: new THREE.Color(colorHex) },
+      uColor2: { value: new THREE.Color(opts.color2 == null ? colorHex : opts.color2) },
+      uSplit: { value: opts.split == null ? 1 : opts.split },
       uTime: { value: 0 },
       uOpacity: { value: opacity },
-      uEndFade: { value: endFade ? 1 : 0 }
+      uEndFade: { value: opts.endFade || 0 },
+      uFadeFrom: { value: opts.fadeFrom || 0 },
+      uCrest: { value: opts.crest == null ? 1 : opts.crest },
+      uLen: { value: curve.getLength() }
     },
     vertexShader: ribbonVertexShader,
     fragmentShader: ribbonFragmentShader,
@@ -609,11 +677,25 @@ function makeRiverRibbon(curve, width, colorHex, opacity, endFade) {
   return new THREE.Mesh(geo, mat);
 }
 
+// 长江 widens all the way down and never pinches at the confluence; 汉江 is narrow at its
+// source, fullest where it meets the main stem, then thins out as it mixes in
+function trunkWidth(t) {
+  var sp = curves.trunkSplit;
+  var source = 0.35 + 0.65 * Math.min(t / 0.08, 1);
+  return source * (t < sp ? 0.5 + 0.5 * (t / sp) : 1 + 0.3 * (t - sp) / (1 - sp));
+}
+function hanWidth(t) {
+  var sp = curves.hanSplit;
+  return t < sp ? 0.35 + 0.65 * (t / sp) : 1 - 0.75 * (t - sp) / (1 - sp);
+}
+var trunkOpts = { widthAt: trunkWidth, split: curves.trunkSplit, endFade: 0.72, fadeFrom: curves.trunkSplit };
+var hanOpts = { widthAt: hanWidth, endFade: 1, fadeFrom: curves.hanSplit };
 var riverGroup = new THREE.Group();
-riverGroup.add(makeRiverRibbon(curves.han, 1.15, 0x5f9ed8, 0.16, false));
-riverGroup.add(makeRiverRibbon(curves.yang, 2.05, 0xeab058, 0.17, false));
-riverGroup.add(makeRiverRibbon(curves.merge, 1.7, 0xc9b06a, 0.13, false));
-riverGroup.add(makeRiverRibbon(curves.down, 2.7, 0x8a90b0, 0.10, true));
+// wide faint bloom first, then the water itself
+riverGroup.add(makeRiverRibbon(curves.hanFull, 3.0, 0x3a78d0, 0.12, Object.assign({ crest: 0 }, hanOpts)));
+riverGroup.add(makeRiverRibbon(curves.trunk, 6.2, 0xd89a40, 0.1, Object.assign({ crest: 0, color2: 0x4a5478 }, trunkOpts)));
+riverGroup.add(makeRiverRibbon(curves.hanFull, 1.4, 0x5f9ed8, 0.42, hanOpts));
+riverGroup.add(makeRiverRibbon(curves.trunk, 3.2, 0xeab058, 0.42, Object.assign({ color2: 0x5f6580 }, trunkOpts)));
 scene.add(riverGroup);
 
 var cityLight = new THREE.PointLight(0xffd090, 1.5, 42, 2);
@@ -636,6 +718,20 @@ function makeGlowTexture() {
   return new THREE.CanvasTexture(c);
 }
 var glowTex = makeGlowTexture();
+function makeDotTexture() {
+  var c = document.createElement('canvas');
+  c.width = c.height = 32;
+  var ctx = c.getContext('2d');
+  var g = ctx.createRadialGradient(16, 16, 0, 16, 16, 16);
+  g.addColorStop(0, 'rgba(255,255,255,1)');
+  g.addColorStop(0.35, 'rgba(255,255,255,0.75)');
+  g.addColorStop(0.7, 'rgba(255,255,255,0.12)');
+  g.addColorStop(1, 'rgba(255,255,255,0)');
+  ctx.fillStyle = g;
+  ctx.fillRect(0, 0, 32, 32);
+  return new THREE.CanvasTexture(c);
+}
+var dotTex = makeDotTexture();
 
 // far dust: dense warm micro-dust on a tilted band + sparse brighter far stars
 (function makeDust() {
@@ -644,7 +740,7 @@ var glowTex = makeGlowTexture();
   var cc = new THREE.Color();
   var rnd = mulberry32(0xD057);
   // micro gold dust on a tilted slab, like a distant galaxy plane
-  var n1 = 700;
+  var n1 = 560;
   var pos = new Float32Array(n1 * 3);
   var col = new Float32Array(n1 * 3);
   for (var i = 0; i < n1; i++) {
@@ -662,13 +758,13 @@ var glowTex = makeGlowTexture();
   geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
   geo.setAttribute('color', new THREE.BufferAttribute(col, 3));
   var mat = new THREE.PointsMaterial({
-    size: 0.3, sizeAttenuation: true, vertexColors: true,
+    size: 0.42, sizeAttenuation: true, vertexColors: true, map: dotTex,
     transparent: true, opacity: 0.55, depthWrite: false,
     blending: THREE.AdditiveBlending
   });
   scene.add(new THREE.Points(geo, mat));
   // sparse brighter far stars
-  var n2 = 250;
+  var n2 = 200;
   var pos2 = new Float32Array(n2 * 3);
   var col2 = new Float32Array(n2 * 3);
   for (var j = 0; j < n2; j++) {
@@ -686,7 +782,7 @@ var glowTex = makeGlowTexture();
   geo2.setAttribute('position', new THREE.BufferAttribute(pos2, 3));
   geo2.setAttribute('color', new THREE.BufferAttribute(col2, 3));
   var mat2 = new THREE.PointsMaterial({
-    size: 0.62, sizeAttenuation: true, vertexColors: true,
+    size: 0.85, sizeAttenuation: true, vertexColors: true, map: dotTex,
     transparent: true, opacity: 0.7, depthWrite: false,
     blending: THREE.AdditiveBlending
   });
@@ -727,8 +823,11 @@ var starVertexShader = [
   'attribute float aCore;',
   'attribute float aKind;',
   'attribute vec3 aColor;',
+  'attribute vec3 aFlow;',
+  'attribute float aBob;',
   'uniform float uTime;',
   'uniform float uPixelRatio;',
+  'uniform float uSway;',
   'varying vec3 vColor;',
   'varying float vAlpha;',
   'varying float vCore;',
@@ -737,11 +836,9 @@ var starVertexShader = [
   '  vCore = aCore;',
   '  float breathe = 0.82 + 0.18 * sin(uTime * 1.7 + aPhase);',
   '  vAlpha = aAlpha * breathe;',
-  '  vec3 pos = position;',
-  '  if (aKind > 0.5 && aKind < 1.5) {',
-  '    // city lights gently float above the confluence',
-  '    pos.y += sin(uTime * 0.55 + aPhase * 3.1) * 0.16;',
-  '  }',
+  // river stars ride the current back and forth; city lights float above the confluence.
+  // starSway() in JS mirrors this so edge lines stay attached.
+  '  vec3 pos = position + (aFlow * sin(uTime * 0.42 + aPhase * 1.7) + vec3(0.0, aBob * sin(uTime * 0.55 + aPhase * 3.1), 0.0)) * uSway;',
   '  if (aKind > 1.5) {',
   '    // easter-egg stars breathe slower and deeper',
   '    vAlpha = aAlpha * (0.72 + 0.28 * sin(uTime * 0.9 + aPhase));',
@@ -771,7 +868,8 @@ var starFragmentShader = [
 var starMaterial = new THREE.ShaderMaterial({
   uniforms: {
     uTime: { value: 0 },
-    uPixelRatio: { value: Math.min(window.devicePixelRatio || 1, 2) }
+    uPixelRatio: { value: Math.min(window.devicePixelRatio || 1, 2) },
+    uSway: { value: 1 }
   },
   vertexShader: starVertexShader,
   fragmentShader: starFragmentShader,
@@ -789,17 +887,18 @@ var haloVertexShader = [
   'attribute float aSize;',
   'attribute float aPhase;',
   'attribute float aAlpha;',
-  'attribute float aKind;',
   'attribute vec3 aColor;',
+  'attribute vec3 aFlow;',
+  'attribute float aBob;',
   'uniform float uTime;',
   'uniform float uPixelRatio;',
+  'uniform float uSway;',
   'varying vec3 vColor;',
   'varying float vAlpha;',
   'void main() {',
   '  vColor = aColor;',
   '  vAlpha = aAlpha * (0.82 + 0.18 * sin(uTime * 0.8 + aPhase));',
-  '  vec3 pos = position;',
-  '  if (aKind > 0.5) pos.y += sin(uTime * 0.55 + aPhase * 3.1) * 0.16;',
+  '  vec3 pos = position + (aFlow * sin(uTime * 0.42 + aPhase * 1.7) + vec3(0.0, aBob * sin(uTime * 0.55 + aPhase * 3.1), 0.0)) * uSway;',
   '  vec4 mv = modelViewMatrix * vec4(pos, 1.0);',
   '  gl_PointSize = aSize * uPixelRatio * (150.0 / -mv.z);',
   '  gl_Position = projectionMatrix * mv;',
@@ -818,6 +917,7 @@ var haloMaterial = new THREE.ShaderMaterial({
   uniforms: {
     uTime: { value: 0 },
     uPixelRatio: { value: Math.min(window.devicePixelRatio || 1, 2) },
+    uSway: { value: 1 },
     uMap: { value: glowTex }
   },
   vertexShader: haloVertexShader,
@@ -834,7 +934,9 @@ var targetHaloSizes = null;
 var targetHaloAlphas = null;
 var animActive = false;
 
-// particle flow (GPU): curves baked into float textures, drift runs in shader
+// particle flow (GPU): curves baked into float textures, drift runs in shader.
+// Water sits in centre-weighted lanes and the mid-channel runs faster than the banks;
+// a share of particles is mist that lifts off the surface and fades, like spray off a shore.
 var flowMaterials = [];
 var CURVE_SAMPLES = 256;
 
@@ -869,15 +971,20 @@ function curveTexture(arr) {
 }
 
 var flowVertexShader = [
-  'attribute vec4 aSeed;', // t0, speed, radius, sizeFactor
+  'attribute vec4 aSeed;', // t0, speed, lane (-1..1, centre-weighted), sizeFactor
   'attribute float aTint;',
   'attribute float aAng;',
+  'attribute float aSpray;', // 0 water, 1 mist
   'uniform float uTime;',
   'uniform float uPixelRatio;',
   'uniform float uSize;',
   'uniform float uOpacity;',
   'uniform float uMixToMid;',
   'uniform float uEndFade;',
+  'uniform float uWidth;',
+  'uniform vec2 uWidthAt;', // width multiplier at the start and end of the curve
+  'uniform vec2 uFade;', // fade-in and fade-out lengths, as fractions of the curve
+  'uniform float uLen;',
   'uniform vec3 uColorA;',
   'uniform vec3 uColorB;',
   'uniform sampler2D uCurvePos;',
@@ -893,23 +1000,34 @@ var flowVertexShader = [
   '  return mix(s0, s1, fract(ft));',
   '}',
   'void main() {',
-  '  float t = fract(aSeed.x + uTime * aSeed.y);',
+  '  float lane = aSeed.z;',
+  '  float pace = aSeed.y * (1.3 - 0.75 * lane * lane);',
+  '  float t = fract(aSeed.x + uTime * pace);',
   '  vec3 bp = bakeSample(uCurvePos, t);',
   '  vec3 bt = bakeSample(uCurveTan, t);',
   '  vec3 side = cross(bt, vec3(0.0, 1.0, 0.0));',
   '  if (dot(side, side) < 1e-6) side = vec3(1.0, 0.0, 0.0);',
   '  else side = normalize(side);',
   '  vec3 up = normalize(cross(side, bt));',
-  '  float ang = aAng + t * 10.0;',
-  '  vec3 pos = bp + side * cos(ang) * aSeed.z + up * sin(ang) * aSeed.z * 0.35;',
+  '  float drift = sin(uTime * 0.9 + aAng * 5.0) * 0.1;',
+  '  float wid = uWidth * mix(uWidthAt.x, uWidthAt.y, t);',
+  '  vec3 pos = bp + side * (lane + drift) * wid + up * (sin(aAng + t * 18.0) * 0.18 - 0.22);',
+  '  float lift = 0.0;',
+  '  if (aSpray > 0.5) {',
+  '    lift = fract(aAng * 0.159 + uTime * 0.05);',
+  '    pos += up * (0.15 + lift * 2.6) + side * lane * wid * 0.7 * lift;',
+  '  }',
   // two lineages start pure, then blend toward each other downstream
   '  float mixT = mix(aTint, 0.5, uMixToMid * smoothstep(0.10, 0.75, t));',
   '  vColor = mix(uColorA, uColorB, mixT);',
-  '  float head = smoothstep(0.0, 0.05, t) * (1.0 - smoothstep(0.93, 1.0, t));',
-  '  float shimmer = 0.6 + 0.4 * sin(uTime * 0.9 + aAng * 7.0);',
-  '  vAlpha = uOpacity * head * (1.0 - uEndFade * t * 0.6) * shimmer;',
+  '  float head = smoothstep(0.0, uFade.x, t) * (1.0 - smoothstep(1.0 - uFade.y, 1.0, t));',
+  // brighten as the ribbon swells pass (same wave as the ribbon shader)
+  '  float swell = pow(0.5 + 0.5 * sin(t * uLen * 0.21 - uTime * 1.05), 4.0);',
+  '  float sparkle = 0.55 + 0.45 * sin(uTime * (1.6 + aTint * 2.6) + aAng * 7.0);',
+  '  float mist = aSpray > 0.5 ? (1.0 - lift) * smoothstep(0.0, 0.15, lift) * 0.5 : 1.0;',
+  '  vAlpha = uOpacity * head * (1.0 - uEndFade * t * 0.6) * sparkle * (0.55 + 0.75 * swell) * mist;',
   '  vec4 mv = modelViewMatrix * vec4(pos, 1.0);',
-  '  gl_PointSize = uSize * aSeed.w * uPixelRatio * (180.0 / -mv.z);',
+  '  gl_PointSize = uSize * aSeed.w * (1.0 + aSpray * 0.4) * uPixelRatio * (180.0 / -mv.z);',
   '  gl_Position = projectionMatrix * mv;',
   '}'
 ].join('\n');
@@ -932,19 +1050,22 @@ function makeFlowParticles(curve, opts) {
   var seed = new Float32Array(count * 4);
   var tint = new Float32Array(count);
   var ang = new Float32Array(count);
+  var spray = new Float32Array(count);
   for (var i = 0; i < count; i++) {
     seed[i * 4] = rnd();
-    seed[i * 4 + 1] = opts.speed * (0.6 + rnd() * 0.8);
-    seed[i * 4 + 2] = 0.25 + rnd() * 1.7;
+    seed[i * 4 + 1] = opts.speed * (0.75 + rnd() * 0.5);
+    seed[i * 4 + 2] = (rnd() + rnd() + rnd()) / 1.5 - 1; // centre-weighted lane
     seed[i * 4 + 3] = 0.6 + rnd() * 0.9;
     tint[i] = rnd();
     ang[i] = rnd() * Math.PI * 2;
+    spray[i] = rnd() < 0.16 ? 1 : 0;
   }
   var geo = new THREE.BufferGeometry();
   geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
   geo.setAttribute('aSeed', new THREE.BufferAttribute(seed, 4));
   geo.setAttribute('aTint', new THREE.BufferAttribute(tint, 1));
   geo.setAttribute('aAng', new THREE.BufferAttribute(ang, 1));
+  geo.setAttribute('aSpray', new THREE.BufferAttribute(spray, 1));
   var mat = new THREE.ShaderMaterial({
     uniforms: {
       uTime: { value: 0 },
@@ -953,6 +1074,10 @@ function makeFlowParticles(curve, opts) {
       uOpacity: { value: opts.opacity },
       uMixToMid: { value: opts.mixToMid ? 1 : 0 },
       uEndFade: { value: opts.endFade ? 1 : 0 },
+      uWidth: { value: opts.width },
+      uWidthAt: { value: new THREE.Vector2(opts.widthFrom == null ? 1 : opts.widthFrom, opts.widthTo == null ? 1 : opts.widthTo) },
+      uFade: { value: new THREE.Vector2(opts.fadeIn == null ? 0.05 : opts.fadeIn, opts.fadeOut == null ? 0.07 : opts.fadeOut) },
+      uLen: { value: curve.getLength() },
       uColorA: { value: new THREE.Color(opts.colorA) },
       uColorB: { value: new THREE.Color(opts.colorB) },
       uCurvePos: { value: curveTexture(baked.pos) },
@@ -970,17 +1095,66 @@ function makeFlowParticles(curve, opts) {
   flowMaterials.push(mat);
 }
 
-// slow night water: full traverse ~60-80s, densest on the 长江 main stem
-makeFlowParticles(curves.han, { count: 500, colorA: 0x7cb3e8, colorB: 0xe9eef8, speed: 0.014, size: 0.30, opacity: 0.5, seed: 'han' });
-makeFlowParticles(curves.yang, { count: 700, colorA: 0xf0c062, colorB: 0xf0977f, speed: 0.012, size: 0.34, opacity: 0.48, seed: 'yang' });
-makeFlowParticles(curves.merge, { count: 360, colorA: 0x7cb3e8, colorB: 0xf0c062, speed: 0.018, size: 0.32, opacity: 0.6, mixToMid: true, seed: 'merge' });
-makeFlowParticles(curves.down, { count: 380, colorA: 0x9fb6d8, colorB: 0xf0c890, speed: 0.013, size: 0.30, opacity: 0.42, mixToMid: true, endFade: true, seed: 'down' });
-// flow 1940 + dust 950 ≈ 2890, within the 3000 particle budget
+// night water: mid-channel crosses each stretch in roughly half a minute; where one stretch
+// hands over to the next the fades are short so the water runs on without a gap.
+// Lane width follows the ribbon's width profile.
+makeFlowParticles(curves.han, { count: 460, colorA: 0x7cb3e8, colorB: 0xe9eef8, speed: 0.03, size: 0.48, opacity: 0.62, width: 1.2, widthFrom: 0.4, fadeOut: 0.015, seed: 'han' });
+makeFlowParticles(curves.yang, { count: 720, colorA: 0xf0c062, colorB: 0xf0977f, speed: 0.026, size: 0.56, opacity: 0.6, width: 2.7, widthFrom: 0.35, fadeOut: 0.015, seed: 'yang' });
+makeFlowParticles(curves.merge, { count: 340, colorA: 0x7cb3e8, colorB: 0xbcd0ee, speed: 0.04, size: 0.5, opacity: 0.66, width: 1.2, widthTo: 0.35, fadeIn: 0.015, fadeOut: 0.25, seed: 'merge' });
+makeFlowParticles(curves.down, { count: 680, colorA: 0x9fb6d8, colorB: 0xf0c890, speed: 0.024, size: 0.52, opacity: 0.52, width: 2.9, widthTo: 1.45, mixToMid: true, endFade: true, fadeIn: 0.015, seed: 'down' });
+// flow 2200 + dust 760 = 2960, within the 3000 particle budget
 
 // edges as lines
 var edgesGroup = new THREE.Group();
 scene.add(edgesGroup);
 var edgeObjects = [];
+var EDGE_SEGMENTS = 24;
+
+// motion: stars sway with the water (uSway), the water runs on its own clock so
+// prefers-reduced-motion can slow it without freezing the page
+var reduceMotion = !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+var swayAmount = reduceMotion ? 0 : 1;
+var flowRate = reduceMotion ? 0.3 : 1;
+var flowClock = 0;
+starMaterial.uniforms.uSway.value = swayAmount;
+haloMaterial.uniforms.uSway.value = swayAmount;
+
+// same displacement as the star vertex shader
+function starSway(node, tSec, out) {
+  var s1 = Math.sin(tSec * 0.42 + node._phase * 1.7) * swayAmount;
+  var s2 = Math.sin(tSec * 0.55 + node._phase * 3.1) * swayAmount;
+  return out.set(node._flow.x * s1, node._flow.y * s1 + node._bob * s2, node._flow.z * s1);
+}
+
+var _swA = new THREE.Vector3();
+var _swB = new THREE.Vector3();
+var _swP = new THREE.Vector3();
+var _swQ = new THREE.Vector3();
+var _swM = new THREE.Vector3();
+function updateEdgeSway(tSec) {
+  if (!swayAmount) return;
+  for (var i = 0; i < edgeObjects.length; i++) {
+    var eo = edgeObjects[i];
+    starSway(eo.a, tSec, _swA);
+    starSway(eo.b, tSec, _swB);
+    _swP.copy(eo.a._pos).add(_swA);
+    _swQ.copy(eo.b._pos).add(_swB);
+    _swM.copy(eo.mid).addScaledVector(_swA, 0.5).addScaledVector(_swB, 0.5);
+    var attr = eo.line.geometry.getAttribute('position');
+    for (var k = 0; k <= EDGE_SEGMENTS; k++) {
+      var t = k / EDGE_SEGMENTS;
+      var u = 1 - t;
+      attr.setXYZ(
+        k,
+        u * u * _swP.x + 2 * u * t * _swM.x + t * t * _swQ.x,
+        u * u * _swP.y + 2 * u * t * _swM.y + t * t * _swQ.y,
+        u * u * _swP.z + 2 * u * t * _swM.z + t * t * _swQ.z
+      );
+    }
+    attr.needsUpdate = true;
+    if (eo.dashed) eo.line.computeLineDistances();
+  }
+}
 
 // ── layout stars along rivers ─────────────────────────────────
 function offsetOnCurve(curve, t, id, radiusScale) {
@@ -1049,8 +1223,13 @@ function layoutStars(rawNodes) {
       var wobble = Math.sin(hashStr(node.id) * 0.0001 + i * 0.7) * 0.012;
       t = clamp(t + wobble, 0.02, 0.98);
       var pos = offsetOnCurve(curve, t, node.id, 1);
+      var flow = curve.getTangentAt(t);
+      if (flow.lengthSq() < 1e-8) flow.set(0, 0, 1); else flow.normalize();
+      flow.multiplyScalar(0.3 * (0.75 + mulberry32(hashStr(node.id + ':sway'))() * 0.5));
       laid.push(Object.assign({}, node, {
         _pos: pos,
+        _flow: flow,
+        _bob: 0.07,
         _river: riverOf(node.type),
         _easter: false,
         _special: false
@@ -1077,6 +1256,7 @@ function layoutStars(rawNodes) {
     );
     laid.push(Object.assign({}, pn, {
       _pos: pos,
+      _bob: 0.16,
       _river: 'city',
       _easter: false,
       _special: false
@@ -1143,13 +1323,16 @@ function rebuildStars(laid) {
   var alphas = new Float32Array(n);
   var cores = new Float32Array(n);
   var kinds = new Float32Array(n);
+  var flows = new Float32Array(n * 3);
+  var bobs = new Float32Array(n);
 
   var haloPos = [];
   var haloCol = [];
   var haloSize = [];
   var haloPhase = [];
   var haloAlpha = [];
-  var haloKind = [];
+  var haloFlow = [];
+  var haloBob = [];
   var haloCount = 0;
   var white = new THREE.Color(0xffffff);
   var tmpC = new THREE.Color();
@@ -1175,6 +1358,13 @@ function rebuildStars(laid) {
     var imp = clamp(Number(node.importance) || 0, 0, 1);
     cores[i] = node.pinned || node._special ? 0.85 : 0.25 + imp * 0.5;
     kinds[i] = node.pinned ? 1 : (node._special ? 2 : 0);
+    if (!node._flow) node._flow = new THREE.Vector3();
+    if (node._bob == null) node._bob = 0;
+    flows[i * 3] = node._flow.x;
+    flows[i * 3 + 1] = node._flow.y;
+    flows[i * 3 + 2] = node._flow.z;
+    bobs[i] = node._bob;
+    node._phase = phases[i];
     node._index = i;
     node._baseColor = col;
     node._baseSize = sizes[i];
@@ -1192,7 +1382,8 @@ function rebuildStars(laid) {
       haloSize.push(sizes[i] * hk);
       haloPhase.push(phases[i]);
       haloAlpha.push(ha);
-      haloKind.push(node.pinned ? 1 : 0);
+      haloFlow.push(node._flow.x, node._flow.y, node._flow.z);
+      haloBob.push(node._bob);
       node._halo = haloCount++;
       node._haloBaseSize = sizes[i] * hk;
       node._haloBaseAlpha = ha;
@@ -1207,6 +1398,8 @@ function rebuildStars(laid) {
   geo.setAttribute('aAlpha', new THREE.BufferAttribute(alphas, 1));
   geo.setAttribute('aCore', new THREE.BufferAttribute(cores, 1));
   geo.setAttribute('aKind', new THREE.BufferAttribute(kinds, 1));
+  geo.setAttribute('aFlow', new THREE.BufferAttribute(flows, 3));
+  geo.setAttribute('aBob', new THREE.BufferAttribute(bobs, 1));
   starsPoints = new THREE.Points(geo, starMaterial);
   starsGroup.add(starsPoints);
 
@@ -1217,7 +1410,8 @@ function rebuildStars(laid) {
     hgeo.setAttribute('aSize', new THREE.BufferAttribute(new Float32Array(haloSize), 1));
     hgeo.setAttribute('aPhase', new THREE.BufferAttribute(new Float32Array(haloPhase), 1));
     hgeo.setAttribute('aAlpha', new THREE.BufferAttribute(new Float32Array(haloAlpha), 1));
-    hgeo.setAttribute('aKind', new THREE.BufferAttribute(new Float32Array(haloKind), 1));
+    hgeo.setAttribute('aFlow', new THREE.BufferAttribute(new Float32Array(haloFlow), 3));
+    hgeo.setAttribute('aBob', new THREE.BufferAttribute(new Float32Array(haloBob), 1));
     haloPoints = new THREE.Points(hgeo, haloMaterial);
     starsGroup.add(haloPoints);
   }
@@ -1285,7 +1479,7 @@ function rebuildEdges() {
     if (!showAllEdges && focus && edge.src !== focus && edge.dst !== focus) continue;
 
     var curve = bezierArc(a._pos, b._pos, hashStr(edge.src + '>' + edge.dst + edge.rel_type));
-    var pts = curve.getPoints(24);
+    var pts = curve.getPoints(EDGE_SEGMENTS);
     var geo = new THREE.BufferGeometry().setFromPoints(pts);
     var col = (REL_COLORS[edge.rel_type] || REL_COLORS.supports).clone();
     var isFocusEdge = focus && (edge.src === focus || edge.dst === focus);
@@ -1306,11 +1500,11 @@ function rebuildEdges() {
       var line = new THREE.Line(geo, mat);
       line.computeLineDistances();
       edgesGroup.add(line);
-      edgeObjects.push(line);
+      edgeObjects.push({ line: line, a: a, b: b, mid: curve.v1.clone(), dashed: true });
     } else {
       var line2 = new THREE.Line(geo, mat);
       edgesGroup.add(line2);
-      edgeObjects.push(line2);
+      edgeObjects.push({ line: line2, a: a, b: b, mid: curve.v1.clone(), dashed: false });
     }
   }
 }
@@ -1760,8 +1954,10 @@ function frame(now) {
   var tSec = now * 0.001;
   starMaterial.uniforms.uTime.value = tSec;
   haloMaterial.uniforms.uTime.value = tSec;
-  for (var fm = 0; fm < flowMaterials.length; fm++) flowMaterials[fm].uniforms.uTime.value = tSec;
-  for (var rb = 0; rb < ribbonMaterials.length; rb++) ribbonMaterials[rb].uniforms.uTime.value = tSec;
+  flowClock += dt * flowRate;
+  for (var fm = 0; fm < flowMaterials.length; fm++) flowMaterials[fm].uniforms.uTime.value = flowClock;
+  for (var rb = 0; rb < ribbonMaterials.length; rb++) ribbonMaterials[rb].uniforms.uTime.value = flowClock;
+  updateEdgeSway(tSec);
   for (var f = 0; f < fogSprites.length; f++) {
     var fs = fogSprites[f];
     fs.mat.opacity = fs.base * (0.8 + 0.2 * Math.sin(tSec * fs.speed + fs.phase));
