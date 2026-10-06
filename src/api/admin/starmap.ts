@@ -497,43 +497,83 @@ controls.maxPolarAngle = Math.PI * 0.49;
 controls.target.set(0, 2.2, 2);
 controls.update();
 
+// cut a stretch out of a curve (u = control-point parameter) as its own curve, so the
+// pieces share one path and meet without a kink
+function subCurve(curve, u0, u1) {
+  var pts = [];
+  var n = 48;
+  for (var i = 0; i <= n; i++) pts.push(curve.getPoint(u0 + (u1 - u0) * i / n));
+  return new THREE.CatmullRomCurve3(pts, false, 'centripetal');
+}
+
+// 长江 is one continuous main stem that sweeps through the confluence. 汉江 is thinner and
+// more winding; it slants in from the left, then runs along the bank for a stretch, drawing
+// toward mid-channel as the two waters mix (the merge stretch, where recent memories sit).
 function buildCurves() {
-  var han = new THREE.CatmullRomCurve3([
-    new THREE.Vector3(-52, 0.2, -48),
-    new THREE.Vector3(-44, 1.2, -36),
-    new THREE.Vector3(-36, -0.4, -26),
-    new THREE.Vector3(-28, 1.0, -18),
-    new THREE.Vector3(-20, 0.2, -12),
-    new THREE.Vector3(-12, 0.6, -6),
-    new THREE.Vector3(-5, 0.1, -2),
-    new THREE.Vector3(0, 0, 0)
-  ], false, 'catmullrom', 0.35);
-  var yang = new THREE.CatmullRomCurve3([
-    new THREE.Vector3(56, 0.1, -52),
-    new THREE.Vector3(46, 0.8, -40),
-    new THREE.Vector3(36, -0.2, -30),
-    new THREE.Vector3(26, 0.5, -20),
-    new THREE.Vector3(16, 0.0, -12),
-    new THREE.Vector3(9, 0.3, -6),
-    new THREE.Vector3(4, 0.0, -2),
-    new THREE.Vector3(0, 0, 0)
-  ], false, 'catmullrom', 0.28);
-  var down = new THREE.CatmullRomCurve3([
+  var trunkPts = [
+    new THREE.Vector3(60.6, 0.5, -25.9),
+    new THREE.Vector3(50, 0.6, -31.5),
+    new THREE.Vector3(37.1, 0.5, -32.9),
+    new THREE.Vector3(24.9, 0.35, -28.4),
+    new THREE.Vector3(15.7, 0.2, -20.7),
+    new THREE.Vector3(8.6, 0.1, -12.3),
+    new THREE.Vector3(3.9, 0.05, -5.8),
     new THREE.Vector3(0, 0, 0),
-    new THREE.Vector3(1.5, -0.2, 10),
-    new THREE.Vector3(-1.0, -0.6, 24),
-    new THREE.Vector3(2.0, -1.2, 40),
-    new THREE.Vector3(-0.5, -2.0, 58),
-    new THREE.Vector3(0, -3.0, 78)
-  ], false, 'catmullrom', 0.3);
-  // ends on the 'down' curve so the bright confluence water hands off without a fork
-  var merge = new THREE.CatmullRomCurve3([
-    new THREE.Vector3(-1.5, 0.3, -1.2),
-    new THREE.Vector3(0.2, 0.5, 1.8),
-    new THREE.Vector3(0.9, 0.1, 5.2),
-    new THREE.Vector3(1.45, -0.18, 9.5)
-  ], false, 'catmullrom', 0.4);
-  return { han: han, yang: yang, down: down, merge: merge };
+    new THREE.Vector3(-3.4, -0.3, 8.3),
+    new THREE.Vector3(-4.8, -0.6, 18.2),
+    new THREE.Vector3(-3.2, -1, 29.1),
+    new THREE.Vector3(0.8, -1.5, 41.5),
+    new THREE.Vector3(4.2, -2.2, 55.1),
+    new THREE.Vector3(3.6, -3, 71.1)
+  ];
+  var CONF = 7; // trunkPts index of the confluence
+  var trunk = new THREE.CatmullRomCurve3(trunkPts, false, 'centripetal');
+  var uConf = CONF / (trunkPts.length - 1);
+  var yang = subCurve(trunk, 0, uConf);
+  var down = subCurve(trunk, uConf, 1);
+
+  var hanPts = [
+    new THREE.Vector3(-38.2, 0.5, -76.1),
+    new THREE.Vector3(-34.5, 0.65, -71.4),
+    new THREE.Vector3(-30.8, 0.7, -66.6),
+    new THREE.Vector3(-27.3, 0.6, -61.8),
+    new THREE.Vector3(-23.8, 0.45, -55.7),
+    new THREE.Vector3(-21.6, 0.3, -49.1),
+    new THREE.Vector3(-20.9, 0.25, -42.1),
+    new THREE.Vector3(-18.9, 0.3, -35.4),
+    new THREE.Vector3(-14.6, 0.45, -29.9),
+    new THREE.Vector3(-8.8, 0.5, -26),
+    new THREE.Vector3(-3.5, 0.4, -21.5),
+    new THREE.Vector3(-0.1, 0.25, -16.5),
+    new THREE.Vector3(1.3, 0.12, -10.7),
+    new THREE.Vector3(0.9, 0.05, -5.2)
+  ];
+  // along the bank below the confluence: start beside the main stem, ease in to mid-channel
+  var downLen = down.getLength();
+  var up = new THREE.Vector3(0, 1, 0);
+  var BANK = 9;
+  for (var i = 0; i <= BANK; i++) {
+    var k = i / BANK;
+    var s = (k * 16) / downLen;
+    var p = down.getPointAt(s);
+    var side = new THREE.Vector3().crossVectors(down.getTangentAt(s), up).normalize();
+    hanPts.push(p.addScaledVector(side, 1.15 * (1 - 0.85 * k * k)));
+  }
+  var JOIN = hanPts.length - BANK - 1; // index where 汉江 reaches the main stem
+  var hanFull = new THREE.CatmullRomCurve3(hanPts, false, 'centripetal');
+  var uJoin = JOIN / (hanPts.length - 1);
+  var han = subCurve(hanFull, 0, uJoin);
+  var merge = subCurve(hanFull, uJoin, 1);
+
+  var yangLen = yang.getLength();
+  var hanLen = han.getLength();
+  return {
+    han: han, yang: yang, down: down, merge: merge,
+    trunk: trunk, hanFull: hanFull,
+    // where the confluence falls along each full river, as a fraction of its length
+    trunkSplit: yangLen / (yangLen + downLen),
+    hanSplit: hanLen / (hanLen + merge.getLength())
+  };
 }
 var curves = buildCurves();
 
@@ -549,9 +589,12 @@ var ribbonVertexShader = [
 ].join('\n');
 var ribbonFragmentShader = [
   'uniform vec3 uColor;',
+  'uniform vec3 uColor2;',
+  'uniform float uSplit;',
   'uniform float uTime;',
   'uniform float uOpacity;',
   'uniform float uEndFade;',
+  'uniform float uFadeFrom;',
   'uniform float uCrest;',
   'uniform float uLen;',
   'varying vec2 vUv;',
@@ -566,16 +609,21 @@ var ribbonFragmentShader = [
   '  float ripple = 0.78 + 0.22 * sin(x * 2.1 - uTime * 2.4 + y * 2.5);',
   '  float glow = body * (0.5 + 0.55 * swell + 0.35 * swell2) * ripple;',
   '  float thread = crest * (0.45 + 1.1 * swell + 0.5 * swell2);',
-  '  float along = smoothstep(0.0, 0.04, vUv.x) * (1.0 - smoothstep(0.96, 1.0, vUv.x)) * (1.0 - uEndFade * vUv.x * 0.7);',
-  '  vec3 col = mix(uColor, vec3(1.0, 0.97, 0.9), clamp(thread * 0.35, 0.0, 1.0));',
+  '  float along = smoothstep(0.0, 0.04, vUv.x) * (1.0 - smoothstep(0.96, 1.0, vUv.x));',
+  '  along *= 1.0 - uEndFade * clamp((vUv.x - uFadeFrom) / (1.0 - uFadeFrom), 0.0, 1.0);',
+  // below the confluence the water turns from its own colour to the mixed colour
+  '  vec3 base = mix(uColor, uColor2, smoothstep(uSplit, uSplit + 0.1, vUv.x));',
+  '  vec3 col = mix(base, vec3(1.0, 0.97, 0.9), clamp(thread * 0.35, 0.0, 1.0));',
   '  gl_FragColor = vec4(col, (glow + thread) * along * uOpacity);',
   '}'
 ].join('\n');
 
-// opts: endFade (dim toward the far end), crest (strength of the mid-channel thread, default 1)
+// opts: widthAt(t) (width profile along the river), color2 + split (colour below t = split),
+// endFade + fadeFrom (how much to dim from t = fadeFrom to the far end),
+// crest (strength of the mid-channel thread, default 1)
 function makeRiverRibbon(curve, width, colorHex, opacity, opts) {
   opts = opts || {};
-  var segs = 120;
+  var segs = Math.max(120, Math.round(curve.getLength() * 1.5));
   var pts = curve.getSpacedPoints(segs);
   var positions = [];
   var uvs = [];
@@ -589,7 +637,7 @@ function makeRiverRibbon(curve, width, colorHex, opacity, opts) {
     var side = new THREE.Vector3().crossVectors(tangent, new THREE.Vector3(0, 1, 0));
     if (side.lengthSq() < 1e-8) side.set(1, 0, 0);
     else side.normalize();
-    var w = width * (0.55 + 0.45 * Math.sin(t * Math.PI));
+    var w = width * (opts.widthAt ? opts.widthAt(t) : 0.55 + 0.45 * Math.sin(t * Math.PI));
     var a = p.clone().addScaledVector(side, w);
     var b = p.clone().addScaledVector(side, -w);
     a.y -= 0.4;
@@ -609,9 +657,12 @@ function makeRiverRibbon(curve, width, colorHex, opacity, opts) {
   var mat = new THREE.ShaderMaterial({
     uniforms: {
       uColor: { value: new THREE.Color(colorHex) },
+      uColor2: { value: new THREE.Color(opts.color2 == null ? colorHex : opts.color2) },
+      uSplit: { value: opts.split == null ? 1 : opts.split },
       uTime: { value: 0 },
       uOpacity: { value: opacity },
-      uEndFade: { value: opts.endFade ? 1 : 0 },
+      uEndFade: { value: opts.endFade || 0 },
+      uFadeFrom: { value: opts.fadeFrom || 0 },
       uCrest: { value: opts.crest == null ? 1 : opts.crest },
       uLen: { value: curve.getLength() }
     },
@@ -626,16 +677,25 @@ function makeRiverRibbon(curve, width, colorHex, opacity, opts) {
   return new THREE.Mesh(geo, mat);
 }
 
+// 长江 widens all the way down and never pinches at the confluence; 汉江 is narrow at its
+// source, fullest where it meets the main stem, then thins out as it mixes in
+function trunkWidth(t) {
+  var sp = curves.trunkSplit;
+  var source = 0.35 + 0.65 * Math.min(t / 0.08, 1);
+  return source * (t < sp ? 0.5 + 0.5 * (t / sp) : 1 + 0.3 * (t - sp) / (1 - sp));
+}
+function hanWidth(t) {
+  var sp = curves.hanSplit;
+  return t < sp ? 0.35 + 0.65 * (t / sp) : 1 - 0.75 * (t - sp) / (1 - sp);
+}
+var trunkOpts = { widthAt: trunkWidth, split: curves.trunkSplit, endFade: 0.72, fadeFrom: curves.trunkSplit };
+var hanOpts = { widthAt: hanWidth, endFade: 1, fadeFrom: curves.hanSplit };
 var riverGroup = new THREE.Group();
 // wide faint bloom first, then the water itself
-riverGroup.add(makeRiverRibbon(curves.han, 4.6, 0x3a78d0, 0.12, { crest: 0 }));
-riverGroup.add(makeRiverRibbon(curves.yang, 6.6, 0xd89a40, 0.12, { crest: 0 }));
-riverGroup.add(makeRiverRibbon(curves.merge, 3.6, 0xb8a060, 0.1, { crest: 0 }));
-riverGroup.add(makeRiverRibbon(curves.down, 8.0, 0x6a78a8, 0.08, { crest: 0, endFade: true }));
-riverGroup.add(makeRiverRibbon(curves.han, 1.9, 0x5f9ed8, 0.42));
-riverGroup.add(makeRiverRibbon(curves.yang, 3.0, 0xeab058, 0.42));
-riverGroup.add(makeRiverRibbon(curves.merge, 1.8, 0xc9b06a, 0.34));
-riverGroup.add(makeRiverRibbon(curves.down, 3.8, 0x8a90b0, 0.28, { endFade: true }));
+riverGroup.add(makeRiverRibbon(curves.hanFull, 3.0, 0x3a78d0, 0.12, Object.assign({ crest: 0 }, hanOpts)));
+riverGroup.add(makeRiverRibbon(curves.trunk, 6.2, 0xd89a40, 0.1, Object.assign({ crest: 0, color2: 0x4a5478 }, trunkOpts)));
+riverGroup.add(makeRiverRibbon(curves.hanFull, 1.4, 0x5f9ed8, 0.42, hanOpts));
+riverGroup.add(makeRiverRibbon(curves.trunk, 3.2, 0xeab058, 0.42, Object.assign({ color2: 0x5f6580 }, trunkOpts)));
 scene.add(riverGroup);
 
 var cityLight = new THREE.PointLight(0xffd090, 1.5, 42, 2);
@@ -922,6 +982,8 @@ var flowVertexShader = [
   'uniform float uMixToMid;',
   'uniform float uEndFade;',
   'uniform float uWidth;',
+  'uniform vec2 uWidthAt;', // width multiplier at the start and end of the curve
+  'uniform vec2 uFade;', // fade-in and fade-out lengths, as fractions of the curve
   'uniform float uLen;',
   'uniform vec3 uColorA;',
   'uniform vec3 uColorB;',
@@ -948,16 +1010,17 @@ var flowVertexShader = [
   '  else side = normalize(side);',
   '  vec3 up = normalize(cross(side, bt));',
   '  float drift = sin(uTime * 0.9 + aAng * 5.0) * 0.1;',
-  '  vec3 pos = bp + side * (lane + drift) * uWidth + up * (sin(aAng + t * 18.0) * 0.18 - 0.22);',
+  '  float wid = uWidth * mix(uWidthAt.x, uWidthAt.y, t);',
+  '  vec3 pos = bp + side * (lane + drift) * wid + up * (sin(aAng + t * 18.0) * 0.18 - 0.22);',
   '  float lift = 0.0;',
   '  if (aSpray > 0.5) {',
   '    lift = fract(aAng * 0.159 + uTime * 0.05);',
-  '    pos += up * (0.15 + lift * 2.6) + side * lane * uWidth * 0.7 * lift;',
+  '    pos += up * (0.15 + lift * 2.6) + side * lane * wid * 0.7 * lift;',
   '  }',
   // two lineages start pure, then blend toward each other downstream
   '  float mixT = mix(aTint, 0.5, uMixToMid * smoothstep(0.10, 0.75, t));',
   '  vColor = mix(uColorA, uColorB, mixT);',
-  '  float head = smoothstep(0.0, 0.05, t) * (1.0 - smoothstep(0.93, 1.0, t));',
+  '  float head = smoothstep(0.0, uFade.x, t) * (1.0 - smoothstep(1.0 - uFade.y, 1.0, t));',
   // brighten as the ribbon swells pass (same wave as the ribbon shader)
   '  float swell = pow(0.5 + 0.5 * sin(t * uLen * 0.21 - uTime * 1.05), 4.0);',
   '  float sparkle = 0.55 + 0.45 * sin(uTime * (1.6 + aTint * 2.6) + aAng * 7.0);',
@@ -1012,6 +1075,8 @@ function makeFlowParticles(curve, opts) {
       uMixToMid: { value: opts.mixToMid ? 1 : 0 },
       uEndFade: { value: opts.endFade ? 1 : 0 },
       uWidth: { value: opts.width },
+      uWidthAt: { value: new THREE.Vector2(opts.widthFrom == null ? 1 : opts.widthFrom, opts.widthTo == null ? 1 : opts.widthTo) },
+      uFade: { value: new THREE.Vector2(opts.fadeIn == null ? 0.05 : opts.fadeIn, opts.fadeOut == null ? 0.07 : opts.fadeOut) },
       uLen: { value: curve.getLength() },
       uColorA: { value: new THREE.Color(opts.colorA) },
       uColorB: { value: new THREE.Color(opts.colorB) },
@@ -1030,12 +1095,13 @@ function makeFlowParticles(curve, opts) {
   flowMaterials.push(mat);
 }
 
-// night water: mid-channel traverses a tributary in ~30s, the confluence pool turns slower,
-// densest on the 长江 main stem; width matches the water ribbon
-makeFlowParticles(curves.han, { count: 520, colorA: 0x7cb3e8, colorB: 0xe9eef8, speed: 0.032, size: 0.5, opacity: 0.62, width: 1.6, seed: 'han' });
-makeFlowParticles(curves.yang, { count: 700, colorA: 0xf0c062, colorB: 0xf0977f, speed: 0.028, size: 0.56, opacity: 0.6, width: 2.5, seed: 'yang' });
-makeFlowParticles(curves.merge, { count: 420, colorA: 0x7cb3e8, colorB: 0xf0c062, speed: 0.05, size: 0.52, opacity: 0.7, width: 1.5, mixToMid: true, seed: 'merge' });
-makeFlowParticles(curves.down, { count: 560, colorA: 0x9fb6d8, colorB: 0xf0c890, speed: 0.022, size: 0.5, opacity: 0.5, width: 3.2, mixToMid: true, endFade: true, seed: 'down' });
+// night water: mid-channel crosses each stretch in roughly half a minute; where one stretch
+// hands over to the next the fades are short so the water runs on without a gap.
+// Lane width follows the ribbon's width profile.
+makeFlowParticles(curves.han, { count: 460, colorA: 0x7cb3e8, colorB: 0xe9eef8, speed: 0.03, size: 0.48, opacity: 0.62, width: 1.2, widthFrom: 0.4, fadeOut: 0.015, seed: 'han' });
+makeFlowParticles(curves.yang, { count: 720, colorA: 0xf0c062, colorB: 0xf0977f, speed: 0.026, size: 0.56, opacity: 0.6, width: 2.7, widthFrom: 0.35, fadeOut: 0.015, seed: 'yang' });
+makeFlowParticles(curves.merge, { count: 340, colorA: 0x7cb3e8, colorB: 0xbcd0ee, speed: 0.04, size: 0.5, opacity: 0.66, width: 1.2, widthTo: 0.35, fadeIn: 0.015, fadeOut: 0.25, seed: 'merge' });
+makeFlowParticles(curves.down, { count: 680, colorA: 0x9fb6d8, colorB: 0xf0c890, speed: 0.024, size: 0.52, opacity: 0.52, width: 2.9, widthTo: 1.45, mixToMid: true, endFade: true, fadeIn: 0.015, seed: 'down' });
 // flow 2200 + dust 760 = 2960, within the 3000 particle budget
 
 // edges as lines
