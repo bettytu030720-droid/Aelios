@@ -733,7 +733,7 @@ document.documentElement.dataset.theme = localStorage.getItem('aelios.admin.colo
       <section x-show="page === 'more'" class="space-y-4">
         <div>
           <h1 class="text-2xl font-semibold">更多</h1>
-          <p class="mt-1 text-sm text-zinc-400">珍贵、黑话、世界知识和维护入口。</p>
+          <p class="mt-1 text-sm text-zinc-400">珍贵、黑话、小本本、世界知识和维护入口。</p>
         </div>
         <div class="grid grid-cols-2 gap-2 sm:flex">
           <template x-for="item in moreNav" :key="item.id">
@@ -773,6 +773,46 @@ document.documentElement.dataset.theme = localStorage.getItem('aelios.admin.colo
               </div>
               <p class="mt-3 text-sm leading-7" x-text="item.definition"></p>
             </article>
+          </template>
+        </div>
+
+        <div x-show="moreView === 'notebook'" class="space-y-3">
+          <article class="rounded-2xl border border-zinc-800 bg-zinc-900 p-4 shadow-sm">
+            <p class="text-xs leading-6 text-zinc-500">助手按页名读写的笔记，比如备考进度：做完哪几章、哪里薄弱、下一步做什么。不会被自动召回，夜里不会被改写，也不会过期；用完删掉，或者整本清空。每个空间最多 50 页，每页 2 万字。</p>
+            <div class="mt-3 flex flex-wrap gap-2">
+              <button type="button" @click="newNotebookPage()" class="tap inline-flex items-center gap-2 rounded-2xl bg-coral px-4 text-sm font-semibold text-zinc-950">
+                <i data-lucide="plus" class="h-4 w-4"></i><span>新建一页</span>
+              </button>
+              <button type="button" @click="clearNotebook()" :disabled="notebookPages.length === 0" class="tap ml-auto inline-flex items-center gap-2 rounded-2xl border border-zinc-800 px-4 text-sm text-zinc-400 transition duration-150 ease-in-out hover:border-coral hover:text-zinc-100 disabled:cursor-not-allowed disabled:opacity-40">
+                <i data-lucide="trash-2" class="h-4 w-4"></i><span>全部清空</span>
+              </button>
+            </div>
+          </article>
+          <template x-if="notebookDraft">
+            <article class="rounded-2xl border border-zinc-800 bg-zinc-900 p-4 shadow-sm">
+              <input x-model="notebookDraft.name" maxlength="60" class="h-11 w-full rounded-2xl border border-zinc-800 bg-[#0a0a0b] px-3 text-sm outline-none focus:border-coral" placeholder="页名，比如 经济师进度">
+              <textarea x-model="notebookDraft.content" class="mt-3 min-h-64 w-full resize-y rounded-2xl border border-zinc-800 bg-[#0a0a0b] p-3 text-sm leading-7 outline-none focus:border-coral" placeholder="这一页记什么"></textarea>
+              <div class="mt-2 flex flex-wrap items-center gap-2">
+                <span class="text-xs text-zinc-500" x-text="notebookDraftLabel()"></span>
+                <button type="button" @click="saveNotebookPage()" :disabled="saving" class="tap ml-auto inline-flex items-center gap-2 rounded-2xl bg-coral px-4 text-sm font-semibold text-zinc-950 disabled:opacity-50">
+                  <i data-lucide="save" class="h-4 w-4"></i><span>保存</span>
+                </button>
+                <button type="button" x-show="notebookDraft.id" @click="deleteNotebookPage()" class="tap inline-flex items-center gap-2 rounded-2xl border border-zinc-800 px-3 text-sm text-zinc-400 transition duration-150 ease-in-out hover:border-coral hover:text-zinc-100">
+                  <i data-lucide="trash-2" class="h-4 w-4"></i><span>删除</span>
+                </button>
+                <button type="button" @click="notebookDraft = null" class="tap rounded-2xl border border-zinc-800 px-3 text-sm text-zinc-400 hover:border-coral">收起</button>
+              </div>
+            </article>
+          </template>
+          <p x-show="notebookLoaded && notebookPages.length === 0 && !notebookDraft" class="px-1 text-sm text-zinc-500">小本本还是空的。</p>
+          <template x-for="item in notebookPages" :key="item.id">
+            <button type="button" @click="openNotebookPage(item)" class="tap block w-full rounded-2xl border border-zinc-800 bg-zinc-900 p-4 text-left shadow-sm transition duration-150 ease-in-out hover:border-coral">
+              <div class="flex items-center gap-3">
+                <i data-lucide="file-text" class="h-4 w-4 shrink-0 text-coral"></i>
+                <span class="min-w-0 flex-1 truncate font-semibold" x-text="item.name"></span>
+                <span class="shrink-0 text-xs text-zinc-400" x-text="fmt(item.updated_at) + ' · ' + item.size + ' 字'"></span>
+              </div>
+            </button>
           </template>
         </div>
 
@@ -1591,6 +1631,7 @@ function memoryAdmin() {
     moreNav: [
       { id: 'precious', label: '珍贵' },
       { id: 'glossary', label: '黑话' },
+      { id: 'notebook', label: '小本本' },
       { id: 'world', label: '世界知识' },
       { id: 'transfer', label: '导入导出' },
       { id: 'maintenance', label: '维护' }
@@ -1643,6 +1684,9 @@ function memoryAdmin() {
     memories: [],
     precious: [],
     glossary: [],
+    notebookPages: [],
+    notebookDraft: null,
+    notebookLoaded: false,
 
     diaryDailies: [],
     diaryWeeklies: [],
@@ -1924,6 +1968,7 @@ function memoryAdmin() {
       this.boot = {}; this.stats = {};
       this.todayMessages = []; this.candidates = []; this.judgeDecisions = []; this.memories = [];
       this.precious = []; this.glossary = [];
+      this.notebookPages = []; this.notebookDraft = null; this.notebookLoaded = false;
       this.diaryDailies = []; this.diaryWeeklies = []; this.diaryExpanded = {};
       this.worldItems = []; this.worldSelection = {}; this.worldQuery = '';
       this.importReview = { batches: [], importId: '', filter: 'all', items: [], counts: { pending: 0, clef_yes: 0, clef_no: 0 }, offset: 0, more: false, loading: false, bulk: null };
@@ -2141,6 +2186,7 @@ function memoryAdmin() {
       if (this.page === 'settings') tasks.push(this.loadRecallHistory());
       if (this.page === 'diary') tasks.push(this.loadDiary());
       if (this.page === 'more' && this.moreView === 'world') tasks.push(this.loadWorldFacts());
+      if (this.page === 'more' && this.moreView === 'notebook') tasks.push(this.loadNotebook());
       if (this.page === 'more' && this.moreView === 'transfer') tasks.push(this.loadTransferInfo(), this.loadImportBatches());
       if (this.page === 'review' && this.reviewTab === 'import') tasks.push(this.loadImportBatches(), this.loadImportCandidates(true));
       if (this.page === 'dream') {
@@ -2255,6 +2301,8 @@ function memoryAdmin() {
     loadMoreView() {
       if (this.moreView === 'world') {
         this.loadWorldFacts();
+      } else if (this.moreView === 'notebook') {
+        this.loadNotebook();
       } else if (this.moreView === 'transfer') {
         this.loadTransferInfo();
         this.loadImportBatches();
@@ -2575,6 +2623,93 @@ function memoryAdmin() {
         await this.request(this.withNamespace('/v1/glossary/' + encodeURIComponent(item.id)), { method: 'DELETE' });
         await this.loadBoot();
         this.notify('黑话已删除');
+      } catch (error) {
+        this.notify(error.message);
+      }
+    },
+    async loadNotebook() {
+      const revision = this.spaceRevision;
+      try {
+        const data = await this.request(this.withNamespace('/v1/notebook'));
+        if (revision !== this.spaceRevision) return;
+        this.notebookPages = data.data || [];
+        this.notebookLoaded = true;
+      } catch (error) {
+        if (revision !== this.spaceRevision) return;
+        this.notify(error.message);
+      }
+      this.icons();
+    },
+    newNotebookPage() {
+      this.notebookDraft = { id: '', name: '', content: '', updated_at: '' };
+      this.icons();
+    },
+    async openNotebookPage(item) {
+      const revision = this.spaceRevision;
+      try {
+        const data = await this.request(this.withNamespace('/v1/notebook/' + encodeURIComponent(item.id)));
+        if (revision !== this.spaceRevision) return;
+        const page = data.data || {};
+        this.notebookDraft = { id: page.id, name: page.name, content: page.content, updated_at: page.updated_at };
+      } catch (error) {
+        this.notify(error.message);
+      }
+      this.icons();
+    },
+    notebookDraftLabel() {
+      const draft = this.notebookDraft;
+      if (!draft) return '';
+      const size = Array.from(draft.content || '').length + ' / 20000 字';
+      return draft.updated_at ? size + ' · 改于 ' + this.fmt(draft.updated_at) : size + ' · 新的一页';
+    },
+    async saveNotebookPage() {
+      const draft = this.notebookDraft;
+      if (!draft) return;
+      // 和服务端一样：去头尾空白，中间连续空白并成一个空格。
+      const name = String(draft.name || '').replace(/\s+/g, ' ').trim();
+      if (!name || !String(draft.content || '').trim()) {
+        this.notify('页名和内容都要填');
+        return;
+      }
+      if (!draft.id && this.notebookPages.some(function(item) { return item.name === name; })) {
+        if (!window.confirm('已经有一页叫「' + name + '」，确认用这次写的整页替换它？')) return;
+      }
+      this.saving = true;
+      try {
+        const body = JSON.stringify({ namespace: this.namespace, name: name, content: draft.content });
+        const data = draft.id
+          ? await this.request(this.withNamespace('/v1/notebook/' + encodeURIComponent(draft.id)), { method: 'PATCH', body: body })
+          : await this.request(this.withNamespace('/v1/notebook'), { method: 'POST', body: body });
+        const page = data.data || {};
+        this.notebookDraft = { id: page.id, name: page.name, content: page.content, updated_at: page.updated_at };
+        await this.loadNotebook();
+        this.notify('这一页已保存');
+      } catch (error) {
+        this.notify(error.message);
+      }
+      this.saving = false;
+    },
+    async deleteNotebookPage() {
+      const draft = this.notebookDraft;
+      if (!draft || !draft.id) return;
+      if (!window.confirm('确认删除「' + draft.name + '」这一页？')) return;
+      try {
+        await this.request(this.withNamespace('/v1/notebook/' + encodeURIComponent(draft.id)), { method: 'DELETE' });
+        this.notebookDraft = null;
+        await this.loadNotebook();
+        this.notify('这一页已删除');
+      } catch (error) {
+        this.notify(error.message);
+      }
+    },
+    async clearNotebook() {
+      if (this.notebookPages.length === 0) return;
+      if (!window.confirm('确认清空小本本？「' + this.namespace + '」里的 ' + this.notebookPages.length + ' 页会全部删掉，找不回来。')) return;
+      try {
+        const data = await this.request(this.withNamespace('/v1/notebook?confirm=all'), { method: 'DELETE' });
+        this.notebookDraft = null;
+        await this.loadNotebook();
+        this.notify('小本本已清空，删了 ' + ((data.data && data.data.deleted) || 0) + ' 页');
       } catch (error) {
         this.notify(error.message);
       }

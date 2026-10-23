@@ -6,13 +6,13 @@ import { timingSafeEqual } from "node:crypto";
 import worker from "../src/index";
 import { invalidateSettingsCache } from "../src/gateway/config";
 
-// MCP tool list as the Claude app sees it: nine everyday tools named after the moment they are for,
+// MCP tool list as the Claude app sees it: ten everyday tools named after the moment they are for,
 // usage guidance both in initialize and in wake_up (the Claude app ignores instructions), old names still callable.
 (crypto.subtle as any).timingSafeEqual = (a: Uint8Array, b: Uint8Array) => timingSafeEqual(a, b);
 let sqlite: DatabaseSync;
 let env: any;
 
-const CORE = ["wake_up", "recall", "remember", "keep_moment", "forget", "learn_word", "read_diary", "log_conversation", "list_memories"];
+const CORE = ["wake_up", "recall", "remember", "keep_moment", "forget", "learn_word", "read_diary", "log_conversation", "list_memories", "notebook"];
 
 beforeEach(() => {
   sqlite?.close(); sqlite = new DatabaseSync(":memory:");
@@ -64,9 +64,10 @@ test("initialize carries the usage guidance for clients that read instructions",
   assert.match(result.instructions, /wake_up/);
   assert.match(result.instructions, /recall/);
   assert.match(result.instructions, /log_conversation/);
+  assert.match(result.instructions, /notebook/);
 });
 
-test("the default list is the nine everyday tools; review shows only with clef off, maintenance only with tools=all", async () => {
+test("the default list is the ten everyday tools; review shows only with clef off, maintenance only with tools=all", async () => {
   assert.deepEqual(await listNames(), CORE);
   env.CLEF_AUTO_REVIEW = "off";
   assert.deepEqual(await listNames(), [...CORE, "memory_candidates", "memory_review"]);

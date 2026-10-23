@@ -27,6 +27,7 @@ import {
   handleDiaryApi
 } from "./api/memories";
 import { handleMcp } from "./api/mcp";
+import { handleNotebookApi } from "./api/notebook";
 import { handleImportApi } from "./api/transfer";
 import { handleModels } from "./api/models";
 import { handleRelationsGraph } from "./api/relations";
@@ -183,6 +184,10 @@ export default {
 
     if (url.pathname === "/v1/glossary" || url.pathname.startsWith("/v1/glossary/")) {
       return handleGlossaryApi(request, env);
+    }
+
+    if (url.pathname === "/v1/notebook" || url.pathname.startsWith("/v1/notebook/")) {
+      return handleNotebookApi(request, env);
     }
 
     if (url.pathname.startsWith("/v1/longtail/")) {
