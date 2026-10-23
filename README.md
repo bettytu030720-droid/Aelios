@@ -122,7 +122,7 @@ Open `/admin`. The bottom tabs:
 | **Today** | What you talked about today |
 | **Review queue** | Candidate memories consolidated overnight. Cloudflare's clef reviews them every night by default; the week's decisions are listed here with an undo. With clef switched off they wait here, or the assistant reviews them itself over MCP. Anything imported from elsewhere sits in its own "Imported" tab and waits for you alone |
 | **Important memories** | Browse, search, edit, delete; a memory rewritten in place keeps its earlier versions under "Old versions", where you can restore one |
-| **More** | Precious originals, glossary, import / export, maintenance tools |
+| **More** | Precious originals, glossary, notebook, import / export, maintenance tools |
 | **Settings** | Upstream, assistants, environment parameters |
 
 Want the AI to remember, forget, or fix something? It's all point-and-click.
@@ -167,7 +167,7 @@ You have the Aelios memory connector: it is your long-term memory of me. In ever
 ```
 
 - Conversations in the Claude app do not pass through Aelios, so the nightly diary and candidates only see what the assistant hands over with `log_conversation`. Clients that go through the gateway don't need it.
-- Only the nine everyday tools are listed by default. For maintenance tools such as `memory_get` and `memory_export`, add `&tools=all` to the address.
+- Only the ten everyday tools are listed by default. For maintenance tools such as `memory_get` and `memory_export`, add `&tools=all` to the address.
 
 If you only have a Claude subscription and cannot use API mode, get automatic per-message recall and batch write-back in Claude Code with the Hook in this repo: [`integrations/claude-code/`](integrations/claude-code/README.md).
 
@@ -228,6 +228,7 @@ Configuration has three layers, all under `/admin` Settings: upstream, assistant
 | GET | `/v1/memory_boot` | Cold-start pack |
 | GET | `/v1/diary`, `/v1/diary/recent` | Diary |
 | GET / POST / DELETE | `/v1/precious`, `/v1/glossary` | Precious originals / glossary |
+| GET / POST / PATCH / DELETE | `/v1/notebook` | Notebook pages; `/:id` opens, edits or deletes one, `DELETE ?confirm=all` clears the space's notebook |
 | GET / POST | `/v1/candidates` | Review queue; `?scope=daily` for the nightly ones only, `/decisions?days=7` lists automatic decisions, `/:id/undo` reverses one, `/:id/sources` shows the quoted lines |
 | GET | `/v1/memories/export?format=md\|jsonl` | Export the space's memories and precious lines (`memory:read` is enough) |
 | GET | `/v1/memories/:id/revisions` | Earlier versions of a memory rewritten in place |
@@ -237,7 +238,9 @@ Everything except `/health` and `/admin` requires `Authorization: Bearer <key>`.
 
 ### MCP tools
 
-`wake_up` `recall` `remember` `keep_moment` `forget` `learn_word` `read_diary` `log_conversation` `list_memories`
+`wake_up` `recall` `remember` `keep_moment` `forget` `learn_word` `read_diary` `log_conversation` `list_memories` `notebook`
+
+`notebook` keeps named pages the assistants read and rewrite themselves, such as progress on a long task. Pages are never recalled automatically, changed overnight or expired; you can edit, delete or clear them under "More → Notebook".
 
 With the clef review switched off, `memory_candidates` and `memory_review` are listed too; `&tools=all` on the address adds `memory_get` and `memory_export`. The old names (`memory_boot`, `memory_recall`, `memory_search`, `memory_upsert`, `memory_supersede`, `memory_archive`, `memory_delete`, `memory_ingest`, `memory_pin`, `glossary_set`, `diary_get`, `memory_list`) are no longer listed but still work when called.
 

@@ -118,7 +118,7 @@ GitHub 不会自己更新 Fork。有新版本时：
 | **今日** | 今天聊了什么 |
 | **审核队列** | 夜间整理出来的候选记忆。默认每晚由 Cloudflare 的 clef 审完，这周定下的都列在这里，不对就撤回。设置里关掉 clef 后候选留在这里等你批，也可以让助手用 MCP 自己审。从别处导进来的单独放在「导入的」一栏，只等你自己点 |
 | **重要记忆** | 浏览、搜索、改、删；被原地改写过的记忆点「旧版」能看到改之前的样子，也能恢复 |
-| **更多** | 珍贵原文、术语表、导入导出、维护工具 |
+| **更多** | 珍贵原文、术语表、小本本、导入导出、维护工具 |
 | **设置** | 上游、助手、环境参数 |
 
 想让 AI 记住、忘掉、改掉什么，在面板点就行。
@@ -167,7 +167,7 @@ https://<Worker 地址>/mcp?token=<CHATBOX_API_KEY>
 ```
 
 - 官方 App 的对话不经过 Aelios，夜里的日记和候选靠助手调 `log_conversation` 交过来；走网关的客户端不用调。
-- 默认只列 9 个常用工具；要 `memory_get`、`memory_export` 这类维护工具，地址后面加 `&tools=all`。
+- 默认只列 10 个常用工具；要 `memory_get`、`memory_export` 这类维护工具，地址后面加 `&tools=all`。
 
 只有 Claude 订阅、走不了 API 时，想让 Claude Code 每条消息自动召回、批量写回，用仓库里的 Hook：[`integrations/claude-code/`](./integrations/claude-code/README.md)。
 
@@ -237,6 +237,7 @@ CF 上游：chat 走 compat（全厂商，BYOK）；messages / responses 走各�
 | GET | `/v1/memory_boot` | 冷启动包 |
 | GET | `/v1/diary` `/v1/diary/recent` | 日记 |
 | GET / POST / DELETE | `/v1/precious` `/v1/glossary` | 珍贵原文 / 术语表 |
+| GET / POST / PATCH / DELETE | `/v1/notebook` | 小本本；`/:id` 打开、改、删一页，`DELETE ?confirm=all` 清空当前空间的小本本 |
 | GET / POST | `/v1/candidates` | 审核队列；`?scope=daily` 只要日常整理的，`/decisions?days=7` 自动决定清单，`/:id/undo` 撤回，`/:id/sources` 挂的原话 |
 | GET | `/v1/memories/export?format=md\|jsonl` | 导出当前空间的记忆和珍贵（`memory:read` 就够） |
 | GET | `/v1/memories/:id/revisions` | 这条记忆原地改写前的旧版 |
@@ -246,7 +247,9 @@ CF 上游：chat 走 compat（全厂商，BYOK）；messages / responses 走各�
 
 ### MCP 工具
 
-`wake_up` `recall` `remember` `keep_moment` `forget` `learn_word` `read_diary` `log_conversation` `list_memories`
+`wake_up` `recall` `remember` `keep_moment` `forget` `learn_word` `read_diary` `log_conversation` `list_memories` `notebook`
+
+`notebook` 是小本本：助手按页名自己读、自己改的笔记，比如备考进度。不会被自动召回，夜里不会被改写，也不会过期；在「更多 → 小本本」能看、能改、能删、能整本清空。
 
 clef 自动审关着时多列 `memory_candidates` `memory_review`；地址加 `&tools=all` 再多列 `memory_get` `memory_export`。旧名字（`memory_boot`、`memory_recall`、`memory_search`、`memory_upsert`、`memory_supersede`、`memory_archive`、`memory_delete`、`memory_ingest`、`memory_pin`、`glossary_set`、`diary_get`、`memory_list`）不再列出，按旧名调用照样能用。
 

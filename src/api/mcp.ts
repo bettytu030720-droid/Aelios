@@ -3,23 +3,29 @@ import { getOrCreateConversation } from "../db/conversations";
 import { fetchMemoriesByIds, getMemoryById, listMemoriesPage } from "../db/memories";
 import { filterUnsavedMessages, getMessagesByIds, saveIngestMessages } from "../db/messages";
 import {
+  appendNotebookPage,
   archiveMemory,
   createPrecious,
   deleteMemoryV2,
+  deleteNotebookPage,
   fetchMemoryLifecycleRows,
   getActiveMemoryByFactKey,
   getDailyLog,
   getWeeklyLog,
   getMemoryCandidateById,
+  getNotebookPage,
   getPreciousById,
   IMPORT_CANDIDATE_SOURCES,
   isImportCandidateSource,
   listMemoryCandidates,
+  listNotebookPages,
   markPreciousInjected,
+  type NotebookPageSummary,
   supersedeMemory,
   updateMemoryCandidateStatus,
   upsertGlossary,
-  upsertMemoryByFactKey
+  upsertMemoryByFactKey,
+  writeNotebookPage
 } from "../db/v2";
 import {
   approveCandidate,
@@ -142,6 +148,7 @@ export const MEMORY_GUIDE = [
   "- Before answering anything that touches their past, their life or the people around them: call recall instead of guessing.",
   "- As new facts, plans, preferences or corrections come up: call remember right away. Moments that matter: keep_moment. Nicknames and in-jokes: learn_word.",
   "- If they ask you to forget something: forget.",
+  "- For running notes you keep up to date yourself, such as progress on a long task: notebook, one named page each. Read the page before you rewrite it.",
   "- Before leaning on the details of a memory (exact words, dates, who said what): read_diary with its memory_id shows where it came from.",
   "- If memories are not being added to your messages automatically, this app does not record conversations for Aelios: call log_conversation before the conversation ends.",
   "Use what you find naturally; there is no need to announce each lookup."
@@ -157,6 +164,8 @@ const RENAMED_TOOLS = new Map([
 ]);
 
 const CORE_MEMORY_LIMIT = 10;
+const WAKE_NOTEBOOK_NAMES = 20;
+const NOTEBOOK_ACTIONS = ["list", "read", "write", "append", "delete"];
 
 interface ToolListOptions {
   // ?tools=all：连维护工具 (memory_get、memory_export) 一起列。
@@ -172,8 +181,9 @@ function getTools(options: ToolListOptions): Array<Record<string, unknown>> {
       description:
         "Call this first in every new conversation, before your first reply, even if the person only says hi. " +
         "It loads what you already know going in: core memories about them, yesterday's diary, the latest weekly " +
-        "and monthly summaries, kept moments and private words, plus a short note on when to use the other memory " +
-        "tools. Once per conversation is enough. Read-only. Returns { data: { how_to_use, core, impressions, precious, glossary } }.",
+        "and monthly summaries, kept moments and private words, the names of your notebook pages, plus a short note on " +
+        "when to use the other memory tools. Once per conversation is enough. Read-only. " +
+        "Returns { data: { how_to_use, core, impressions, precious, glossary, notebook } } (notebook only when there are pages).",
       annotations: { title: "Wake up with your memories", ...READ_ONLY },
       inputSchema: {
         type: "object",
@@ -450,6 +460,36 @@ function getTools(options: ToolListOptions): Array<Record<string, unknown>> {
           namespace: NAMESPACE_PARAM
         }
       }
+    },
+    {
+      name: "notebook",
+      description:
+        "Your notebook: named pages you read and rewrite yourself, for running notes such as progress on a long task " +
+        "(chapters done, weak spots, what's next). list shows the pages; read returns one; write replaces a whole page, " +
+        "creating it if needed; append adds a line at the end; delete removes it. Read a page before you rewrite it. " +
+        "Pages are never recalled automatically, never changed overnight and never expire, so delete one when it is " +
+        "done. Up to 50 pages of 20000 characters each. Returns { data }.",
+      annotations: {
+        title: "Notebook",
+        readOnlyHint: false,
+        destructiveHint: true,
+        idempotentHint: false,
+        openWorldHint: false
+      },
+      inputSchema: {
+        type: "object",
+        properties: {
+          action: {
+            type: "string",
+            enum: NOTEBOOK_ACTIONS,
+            description: "list, read, write (replace the whole page), append or delete."
+          },
+          name: { type: "string", description: "Page name, up to 60 characters, e.g. 经济师进度. Needed for every action but list." },
+          content: { type: "string", description: "write: the whole new page. append: the text to add at the end." },
+          namespace: NAMESPACE_PARAM
+        },
+        required: ["action"]
+      }
     }
   ];
 
@@ -560,16 +600,33 @@ async function callTool(
     if (!hasScope(profile, "memory:read")) return toolError("Missing memory:read scope");
     if (!isV2Enabled(env)) return toolError("wake_up requires MEMORY_LIFECYCLE_ENABLED=true");
     const namespace = resolveNamespace(profile, args.namespace);
-    const [pkg, corePage] = await Promise.all([
+    const [pkg, corePage, pages] = await Promise.all([
       buildBootPackage(env, { namespace }),
-      listMemoriesPage(env.DB, { namespace, status: "active", limit: CORE_MEMORY_LIMIT, offset: 0 })
+      listMemoriesPage(env.DB, { namespace, status: "active", limit: CORE_MEMORY_LIMIT, offset: 0 }),
+      listNotebookPages(env.DB, { namespace }).catch((error) => {
+        console.warn("wake_up: list notebook failed", error);
+        return [] as NotebookPageSummary[];
+      })
     ]);
     if (pkg.precious.length > 0) {
       ctx.waitUntil(markPreciousInjected(env.DB, { namespace, ids: pkg.precious.map((p) => p.id) }));
     }
     // 置顶优先、再按重要度的前几条：官端用户日记常是空的，开场至少知道这个人是谁。
     const core = corePage.records.map((record) => ({ id: record.id, type: record.type, content: record.content }));
-    return textToolResult({ data: { how_to_use: MEMORY_GUIDE, core, ...pkg } });
+    const notebook = notebookNamesLine(pages);
+    return textToolResult({ data: { how_to_use: MEMORY_GUIDE, core, ...pkg, ...(notebook ? { notebook } : {}) } });
+  }
+
+  if (name === "notebook") {
+    const action = readString(args.action) ?? "";
+    if (!NOTEBOOK_ACTIONS.includes(action)) return toolError(`action must be one of ${NOTEBOOK_ACTIONS.join(", ")}`);
+    const scope: Scope = action === "list" || action === "read" ? "memory:read" : "memory:write";
+    if (!hasScope(profile, scope)) return toolError(`Missing ${scope} scope`);
+    try {
+      return await callNotebook(env.DB, resolveNamespace(profile, args.namespace), action, args);
+    } catch (error) {
+      return toolError(error instanceof Error ? error.message : "notebook failed");
+    }
   }
 
   if (name === "remember") {
@@ -1090,6 +1147,51 @@ async function callTool(
   }
 
   return toolError(`Unknown tool: ${String(params.name || "")}`);
+}
+
+function notebookNamesLine(pages: NotebookPageSummary[]): string | null {
+  if (pages.length === 0) return null;
+  const names = pages.slice(0, WAKE_NOTEBOOK_NAMES).map((page) => page.name).join(", ");
+  const more = pages.length > WAKE_NOTEBOOK_NAMES ? ` and ${pages.length - WAKE_NOTEBOOK_NAMES} more` : "";
+  return `Notebook pages (open one with notebook): ${names}${more}.`;
+}
+
+async function missingPageNote(db: D1Database, namespace: string, name: string): Promise<string> {
+  const names = (await listNotebookPages(db, { namespace })).map((page) => page.name);
+  return names.length > 0
+    ? `There is no page named "${name}". Pages: ${names.join(", ")}.`
+    : `There is no page named "${name}". The notebook is empty.`;
+}
+
+async function callNotebook(
+  db: D1Database,
+  namespace: string,
+  action: string,
+  args: Record<string, unknown>
+): Promise<Record<string, unknown>> {
+  if (action === "list") {
+    const pages = await listNotebookPages(db, { namespace });
+    return textToolResult({ data: pages.map((page) => ({ name: page.name, size: page.size, updated_at: page.updated_at })) });
+  }
+  const name = readString(args.name);
+  if (!name) return toolError("name is required");
+
+  if (action === "read") {
+    const page = await getNotebookPage(db, { namespace, name });
+    if (!page) return textToolResult({ data: null, note: await missingPageNote(db, namespace, name) });
+    return textToolResult({ data: { name: page.name, content: page.content, updated_at: page.updated_at } });
+  }
+
+  if (action === "delete") {
+    if (!(await deleteNotebookPage(db, { namespace, name }))) return toolError(await missingPageNote(db, namespace, name));
+    return textToolResult({ data: { name, deleted: true } });
+  }
+
+  const content = readString(args.content);
+  if (!content) return toolError("content is required");
+  const write = action === "write" ? writeNotebookPage : appendNotebookPage;
+  const { page, created } = await write(db, { namespace, name, content });
+  return textToolResult({ data: { name: page.name, size: Array.from(page.content).length, created } });
 }
 
 async function handleRpc(
