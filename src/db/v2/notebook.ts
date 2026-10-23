@@ -29,6 +29,11 @@ export interface NotebookPageSummary {
 // 超限、重名：调用方把 message 原样交给对方。
 export class NotebookError extends Error {}
 
+// 另一边刚好同时建了同名的页：插入撞上 UNIQUE(namespace, name)。
+function isNameClash(error: unknown): boolean {
+  return error instanceof Error && /UNIQUE constraint failed/i.test(error.message);
+}
+
 // 按字符数，和 SQLite 的 length() 一致。
 function charCount(text: string): number {
   return Array.from(text).length;
@@ -114,7 +119,15 @@ export async function writeNotebookPage(
   const name = normalizeNotebookName(input.name);
   checkContent(input.content);
   const existing = await getNotebookPage(db, { namespace: input.namespace, name });
-  if (!existing) return { page: await insertPage(db, input.namespace, name, input.content), created: true };
+  if (!existing) {
+    try {
+      return { page: await insertPage(db, input.namespace, name, input.content), created: true };
+    } catch (error) {
+      // 刚被另一边建好了：照常整页替换它。
+      if (!isNameClash(error)) throw error;
+      return writeNotebookPage(db, input);
+    }
+  }
 
   const updatedAt = nowIso();
   await db
@@ -133,7 +146,13 @@ export async function appendNotebookPage(
   const existing = await getNotebookPage(db, { namespace: input.namespace, name });
   if (!existing) {
     checkContent(input.content);
-    return { page: await insertPage(db, input.namespace, name, input.content), created: true };
+    try {
+      return { page: await insertPage(db, input.namespace, name, input.content), created: true };
+    } catch (error) {
+      // 刚被另一边建好了：接在它后面。
+      if (!isNameClash(error)) throw error;
+      return appendNotebookPage(db, input);
+    }
   }
 
   const addition = existing.content ? `\n${input.content}` : input.content;
@@ -174,10 +193,16 @@ export async function updateNotebookPage(
   }
 
   const updatedAt = nowIso();
-  await db
-    .prepare("UPDATE notebook_pages SET name = ?, content = ?, updated_at = ? WHERE namespace = ? AND id = ?")
-    .bind(name, content, updatedAt, input.namespace, input.id)
-    .run();
+  try {
+    await db
+      .prepare("UPDATE notebook_pages SET name = ?, content = ?, updated_at = ? WHERE namespace = ? AND id = ?")
+      .bind(name, content, updatedAt, input.namespace, input.id)
+      .run();
+  } catch (error) {
+    // 查过之后另一页刚改成了这个名字。
+    if (isNameClash(error)) throw new NotebookError(`There is already a page named "${name}"`);
+    throw error;
+  }
   return { ...existing, name, content, updated_at: updatedAt };
 }
 

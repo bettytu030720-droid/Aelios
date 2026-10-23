@@ -268,3 +268,34 @@ test("the admin panel opens, saves, deletes and clears pages through the REST ro
   assert.match(ADMIN_HTML, /x-text="item\.name"/);
   assert.match(ADMIN_HTML, /x-model="notebookDraft\.content"/);
 });
+
+test("a page another call creates or renames in between is replaced, appended to or refused, never a raw error", async () => {
+  const { writeNotebookPage, appendNotebookPage, updateNotebookPage, NotebookError } = await import("../src/db/v2");
+  await data({ action: "write", name: "进度", content: "旧" });
+  await data({ action: "write", name: "错题", content: "第 1 道" });
+  // The look by name misses once, as if the other call's insert landed right after it.
+  let misses = 0;
+  const racy = { ...env.DB, prepare(sql: string) {
+    if (misses > 0 && /^SELECT \* FROM notebook_pages WHERE namespace = \? AND name = \?/.test(sql)) {
+      misses--;
+      const miss = { bind() { return miss; }, async first() { return null; } };
+      return miss;
+    }
+    return env.DB.prepare(sql);
+  } };
+
+  misses = 1;
+  const written = await writeNotebookPage(racy as any, { namespace: "default", name: "进度", content: "新" });
+  assert.equal(written.created, false);
+  misses = 1;
+  await appendNotebookPage(racy as any, { namespace: "default", name: "进度", content: "再加一行" });
+  assert.equal(pages().find((page) => page.name === "进度").content, "新\n再加一行");
+  assert.equal(pages().length, 2);
+
+  misses = 1;
+  const wrong = pages().find((page) => page.name === "错题");
+  await assert.rejects(
+    updateNotebookPage(racy as any, { namespace: "default", id: wrong.id, name: "进度" }),
+    (error: unknown) => error instanceof NotebookError && /already a page named "进度"/.test((error as Error).message)
+  );
+});
