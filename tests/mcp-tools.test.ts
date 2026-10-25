@@ -145,13 +145,17 @@ test("forget archives by default and erases only when asked", async () => {
   assert.equal((await call("forget", { id: "nope" })).isError, true);
 });
 
-test("log_conversation opens its own conversation and skips lines it already has", async () => {
+test("log_conversation opens its own conversation and skips lines it already has", async (t) => {
+  // seq is turn-local: make these two separate requests occur at distinct, deterministic times.
+  const startedAt = Date.now();
+  t.mock.timers.enable({ apis: ["Date"], now: startedAt });
   const first = (await call("log_conversation", { messages: [
     { role: "user", content: "今天考了一套题。" },
     { role: "assistant", content: "考得怎么样？" }
   ] })).structuredContent.data;
   assert.match(first.conversation_id, /^conv_/);
   assert.equal(first.saved, 2);
+  t.mock.timers.setTime(startedAt + 1000);
 
   const second = (await call("log_conversation", { conversation_id: first.conversation_id, messages: [
     { role: "user", content: "今天考了一套题。" },

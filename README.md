@@ -143,6 +143,17 @@ Under "More → Import / export", each one works on the space you have selected:
 
 One assistant can write to one space and read from several. A fresh conversation can write `coder` while also reading the old vault `coder-old` and a shared `shared-docs`. Leave the recall spaces empty and it only reads its own.
 
+### Dream execution and failure status
+
+The admin Dream console submits non-dry manual Dream runs to the existing durable `MEMORY_QUEUE`. Acceptance returns a run ID immediately; after acceptance, closing the browser does not cancel the queued work. The panel polls status every five seconds and can find the task again after a reload. Queue batches contain one message so several expensive Dream jobs do not share one invocation's execution budget.
+
+API clients opt in with `POST /v1/dream/run` and `{"background":true}` (plus the usual optional namespace, date and force). A successful enqueue returns HTTP **202** with `data.run_id` and `data.status="queued"`; use `GET /v1/dream/status` to follow it. As with the legacy endpoint, each manual job handles one batch, not necessarily the whole date; use the cursor to check whether more batches remain. Missing queues and failed acceptance return **503**. Without `background:true`, the old synchronous contract remains; dry-runs also stay synchronous.
+
+- A queued/running task blocks another background admission in the same space; `force` does not bypass it. This is not a global lease covering cron and legacy synchronous callers.
+- A single digest/extraction call has a 120-second deadline, including its response body. The two-stage extraction phase has an eight-minute budget and at most three batch reductions. Invalid JSON/schema causes both stages to restart on the same smaller prefix; the suffix remains for a later batch. Empty valid candidates differ from malformed output. Model/format failure does not advance the cursor or actively delete that batch's raw messages; the separate retention policy still applies.
+- Records older than 20 minutes without confirmed completion are labelled **possibly interrupted / unconfirmed**, not endlessly presented as healthy work. This is a read-only hint, not proof that execution stopped. Old unresolved records require log inspection and explicit operator reconciliation; they are not silently cleared to permit another run.
+- A conditional claim prevents duplicate delivery of one job from re-executing its pipeline. This is **not exactly-once completion or automatic crash recovery**: after a claim, ambiguous or partial writes are not automatically replayed. Inspect the run before retrying. The manual follow-up candidate review is retained; its failure does not undo an already completed Dream.
+
 ## Optional features
 
 **Full chat gateway** — let Aelios forward to every vendor's models, billed against your own keys:

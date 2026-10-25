@@ -1095,7 +1095,7 @@ document.documentElement.dataset.theme = localStorage.getItem('aelios.admin.colo
 
         <article class="rounded-2xl border border-zinc-800 bg-zinc-900 p-4 shadow-sm">
           <h2 class="text-base font-semibold">现在做梦</h2>
-          <p class="mt-1 text-xs text-zinc-400">预演只看不落库；关掉预演才是真跑。force 会重做已经梦过的夜晚。</p>
+          <p class="mt-1 text-xs text-zinc-400">预演只看不落库；预演需保持页面打开。关掉预演才是真跑，确认入队后可关页。force 会重做已经梦过的夜晚。</p>
           <div class="mt-3 grid gap-3 md:grid-cols-[170px_1fr_1fr_auto]">
             <input type="date" x-model="dreamDate" class="h-11 rounded-2xl border border-zinc-800 bg-[#0a0a0b] px-3 text-sm text-zinc-100 outline-none transition duration-150 ease-in-out focus:border-coral">
             <label class="tap flex items-center gap-2 rounded-2xl border border-zinc-800 px-3 text-sm text-zinc-300">
@@ -1104,12 +1104,20 @@ document.documentElement.dataset.theme = localStorage.getItem('aelios.admin.colo
             <label class="tap flex items-center gap-2 rounded-2xl border border-zinc-800 px-3 text-sm text-zinc-300">
               <input type="checkbox" x-model="dreamForce" class="h-4 w-4 shrink-0 accent-[#ff7a66]"><span>force 重跑</span>
             </label>
-            <button type="button" @click="triggerDream()" :disabled="dreamTriggering" class="tap inline-flex items-center justify-center gap-2 rounded-2xl bg-coral px-4 text-sm font-semibold text-zinc-950 transition duration-150 ease-in-out disabled:opacity-50">
-              <i data-lucide="moon-star" class="h-4 w-4"></i><span x-text="dreamTriggering ? '做梦中…' : '现在做梦'"></span>
+            <button type="button" @click="triggerDream()" :disabled="dreamTriggering || (!dreamDryRun && dreamActiveRun)" class="tap inline-flex items-center justify-center gap-2 rounded-2xl bg-coral px-4 text-sm font-semibold text-zinc-950 transition duration-150 ease-in-out disabled:opacity-50">
+              <i data-lucide="moon-star" class="h-4 w-4"></i><span x-text="dreamTriggering ? (dreamDryRun ? '预演中，请保持页面打开…' : '提交中…') : '现在做梦'"></span>
             </button>
           </div>
 
+          <p x-show="dreamStatusError" class="mt-3 text-xs text-amber-400" x-text="dreamStatusError"></p>
+          <div x-show="dreamActiveRun" class="mt-4 rounded-2xl border border-zinc-800 bg-[#0a0a0b] p-3 text-sm text-zinc-300">
+            <div x-text="dreamActiveRun && ('任务 ' + dreamActiveRun.id + ' · ' + dreamStatusLabel(dreamActiveRun.status, dreamActiveRun.stale))"></div>
+            <p class="mt-1 text-xs text-amber-400" x-show="dreamActiveRun && dreamActiveRun.stale">任务可能已中断，完成状态未确认。不会自动重跑；force 也不能覆盖，请先核查。</p>
+          </div>
           <div x-show="dreamRunResult" class="mt-4 space-y-3">
+            <template x-if="dreamRunResult && dreamRunResult.run_id">
+              <div class="rounded-2xl border border-zinc-800 bg-[#0a0a0b] p-3 text-xs text-zinc-300" x-text="'任务 ' + dreamRunResult.run_id + ' · ' + dreamStatusLabel(dreamRunResult.status, dreamRunResult.stale)"></div>
+            </template>
             <template x-if="dreamRunResult && dreamRunResult.result && !dreamRunResult.result.ran">
               <div class="rounded-2xl border border-zinc-800 bg-[#0a0a0b] p-3 text-sm text-zinc-300" x-text="'这一夜没有做梦：' + dreamReasonLabel(dreamRunResult.result.reason)"></div>
             </template>
@@ -1192,13 +1200,13 @@ document.documentElement.dataset.theme = localStorage.getItem('aelios.admin.colo
           </template>
           <div class="dream-rail space-y-3">
             <template x-for="run in dreamRuns" :key="run.id">
-              <article class="dream-rail-item" :class="dreamRailClass(run.status)">
+              <article class="dream-rail-item" :class="dreamRailClass(run.stale ? 'stale' : run.status)">
                 <div class="rounded-2xl border border-zinc-800 bg-zinc-900 p-4 shadow-sm">
                   <div class="mb-2 flex flex-wrap items-center gap-2">
                     <span class="text-sm font-semibold text-zinc-100" x-text="run.date_label"></span>
                     <span class="chip" :class="dreamStatusChipClass(run.status)">
-                      <span x-show="run.status === 'running'" class="breathe inline-block h-1.5 w-1.5 rounded-full bg-current"></span>
-                      <span x-text="dreamStatusLabel(run.status)"></span>
+                      <span x-show="run.status === 'running' && !run.stale" class="breathe inline-block h-1.5 w-1.5 rounded-full bg-current"></span>
+                      <span x-text="dreamStatusLabel(run.status, run.stale)"></span>
                     </span>
                     <span class="chip chip-dim" x-text="dreamTriggerLabel(run.trigger)"></span>
                     <span class="ml-auto text-xs text-zinc-400" x-text="dreamDuration(run)"></span>
@@ -1773,6 +1781,9 @@ function memoryAdmin() {
 
     dreamStatus: null,
     dreamRuns: [],
+    dreamActiveRun: null,
+    dreamPollTimer: null,
+    dreamStatusError: '',
     dreamLoading: false,
     dreamTriggering: false,
     dreamDate: '',
@@ -2133,10 +2144,12 @@ function memoryAdmin() {
       this.memoryCreateOpen = false;
       this.memoryDraft = { type: 'fact', content: '', fact_key: '', importance: 0.7, confidence: 0.85 };
       this.glossaryDraft = { term: '', definition: '', aliasesText: '' };
-      this.dreamStatus = null; this.dreamRuns = []; this.dreamHarvest = null;
+      this.stopDreamPolling();
+      this.dreamStatus = null; this.dreamRuns = []; this.dreamActiveRun = null; this.dreamHarvest = null;
       this.dreamExpanded = {}; this.dreamRunResult = null;
       this.dreamDate = ''; this.dreamHarvestDate = '';
       this.dreamLoading = false; this.dreamHarvestLoading = false;
+      this.dreamTriggering = false; this.dreamStatusError = '';
       this.debugOutput = '尚未运行维护操作';
     },
     icons() {
@@ -2932,6 +2945,7 @@ function memoryAdmin() {
       }
     },
     go(id) {
+      this.stopDreamPolling();
       // 星图 v2 为独立 Three.js 页，从面板跳转而非内嵌 section
       if (id === 'starmap') {
         window.location.href = '/admin/starmap';
@@ -2980,19 +2994,50 @@ function memoryAdmin() {
     dreamAnchorDate() {
       return (this.dreamStatus && this.dreamStatus.anchor_date_label) || this.yesterdayLabel();
     },
+    stopDreamPolling() {
+      if (this.dreamPollTimer != null) window.clearTimeout(this.dreamPollTimer);
+      this.dreamPollTimer = null;
+    },
+    scheduleDreamPolling() {
+      this.stopDreamPolling();
+      if (this.page !== 'dream' || !this.dreamActiveRun || this.dreamActiveRun.stale) return;
+      const revision = this.spaceRevision;
+      this.dreamPollTimer = window.setTimeout(() => {
+        this.dreamPollTimer = null;
+        if (revision === this.spaceRevision && this.page === 'dream') this.loadDreamStatus();
+      }, 5000);
+    },
     async loadDreamStatus() {
       const revision = this.spaceRevision;
+      this.stopDreamPolling();
       this.dreamLoading = true;
+      this.dreamStatusError = '';
       try {
         const data = await this.request(this.withNamespace('/v1/dream/status'));
         if (revision !== this.spaceRevision) return;
         const payload = data.data || {};
         this.dreamStatus = payload;
         this.dreamRuns = payload.dream_runs || [];
+        this.dreamActiveRun = payload.active_run || this.dreamRuns.find(function(run) {
+          return run.status === 'queued' || run.status === 'running';
+        }) || null;
+        const tracked = this.dreamRunResult && this.dreamRunResult.run_id;
+        const run = tracked && (this.dreamRuns.find(function(item) { return item.id === tracked; })
+          || (this.dreamActiveRun && this.dreamActiveRun.id === tracked ? this.dreamActiveRun : null));
+        if (run) {
+          const previousStatus = this.dreamRunResult.status;
+          this.dreamRunResult.status = run.status;
+          this.dreamRunResult.stale = run.stale;
+          if ((previousStatus === 'queued' || previousStatus === 'running') && run.status !== 'queued' && run.status !== 'running') {
+            this.loadDreamHarvest();
+          }
+        }
+        this.scheduleDreamPolling();
         if (!this.dreamDate) this.dreamDate = this.dreamAnchorDate();
         if (!this.dreamHarvestDate) this.dreamHarvestDate = this.dreamAnchorDate();
       } catch (error) {
         if (revision !== this.spaceRevision) return;
+        this.dreamStatusError = '状态读取失败，任务是否完成尚未确认。请刷新核查，不要直接重跑。';
         this.notify(error.message);
       }
       this.dreamLoading = false;
@@ -3019,7 +3064,9 @@ function memoryAdmin() {
       this.loadDreamHarvest();
     },
     async triggerDream() {
-      if (this.dreamTriggering) return;
+      if (this.dreamTriggering || (!this.dreamDryRun && this.dreamActiveRun)) return;
+      const revision = this.spaceRevision;
+      const dryRun = this.dreamDryRun;
       const date = this.dreamDate || this.dreamAnchorDate();
       if (this.dreamForce && !this.dreamDryRun) {
         if (!window.confirm('force + 真跑会重做 ' + date + ' 这一夜的梦境，已经梦过的也会重跑。确认继续？')) return;
@@ -3029,16 +3076,21 @@ function memoryAdmin() {
       try {
         const data = await this.request('/v1/dream/run', {
           method: 'POST',
-          body: JSON.stringify({ namespace: this.namespace, date: date, force: this.dreamForce, dry_run: this.dreamDryRun })
+          body: JSON.stringify({ namespace: this.namespace, date: date, force: this.dreamForce, dry_run: dryRun, background: true })
         });
+        if (revision !== this.spaceRevision) return;
         this.dreamRunResult = data.data || null;
-        if (!this.dreamDryRun) {
+        if (!dryRun) {
           this.dreamHarvestDate = date;
-          await Promise.all([this.loadDreamStatus(), this.loadDreamHarvest()]);
-          this.notify('这一夜梦完了');
+          if (this.dreamRunResult && this.dreamRunResult.run_id) {
+            this.notify('已排队，任务 ' + this.dreamRunResult.run_id);
+          }
+          await this.loadDreamStatus();
         }
       } catch (error) {
+        if (revision !== this.spaceRevision) return;
         this.notify(error.message);
+        if (!dryRun) await this.loadDreamStatus();
       }
       this.dreamTriggering = false;
       this.icons();
@@ -3048,7 +3100,7 @@ function memoryAdmin() {
     },
     dreamLatestLabel() {
       const run = this.dreamLatestRun();
-      return run ? this.dreamStatusLabel(run.status) : '还没有记录';
+      return run ? this.dreamStatusLabel(run.status, run.stale) : '还没有记录';
     },
     dreamLatestSub() {
       const run = this.dreamLatestRun();
@@ -3093,11 +3145,12 @@ function memoryAdmin() {
         };
       });
     },
-    dreamStatusLabel(status) {
-      return { ok: '完成', error: '出错', skipped: '跳过', running: '进行中' }[status] || status || '未知';
+    dreamStatusLabel(status, stale) {
+      if (stale && (status === 'queued' || status === 'running')) return '可能中断 / 状态未确认';
+      return { ok: '完成', error: '出错', skipped: '跳过', queued: '排队中', running: '进行中' }[status] || status || '未知';
     },
     dreamStatusChipClass(status) {
-      return { ok: 'chip-ok', error: 'chip-err', skipped: 'chip-dim', running: 'chip-warn' }[status] || 'chip-dim';
+      return { ok: 'chip-ok', error: 'chip-err', skipped: 'chip-dim', queued: 'chip-warn', running: 'chip-warn' }[status] || 'chip-dim';
     },
     dreamRailClass(status) {
       return { ok: 'dot-ok', error: 'dot-err', skipped: 'dot-dim', running: 'dot-run' }[status] || 'dot-dim';
@@ -3106,7 +3159,8 @@ function memoryAdmin() {
       return { cron: '定时', manual: '手动' }[trigger] || trigger || '—';
     },
     dreamDuration(run) {
-      if (!run.finished_at) return run.status === 'running' ? '进行中' : '—';
+      if (run.stale) return '状态未确认';
+      if (!run.finished_at) return run.status === 'running' ? '进行中' : (run.status === 'queued' ? '等待中' : '—');
       const ms = new Date(run.finished_at).getTime() - new Date(run.started_at).getTime();
       if (!Number.isFinite(ms) || ms < 0) return '—';
       const sec = Math.round(ms / 1000);
@@ -3120,14 +3174,21 @@ function memoryAdmin() {
         dry_run: '只是预演',
         dream_disabled: '梦境未启用',
         model_error: '模型出错',
-        model_invalid_json: '模型返回无法解析',
+        model_timeout: '模型请求超时',
+        model_invalid_json: '模型返回格式不合要求',
         extract_model_error: '抽取模型出错',
+        extract_model_timeout: '抽取模型请求超时',
+        extract_invalid_json: '抽取结果格式不合要求',
+        run_failed: '整理异常退出，请先核查是否部分落库',
+        enqueue_failed: '任务未确认入队',
+        execution_failed: '后台任务异常退出',
         v2_disabled: 'v2 未启用'
       };
       return map[reason] || reason || '原因未知';
     },
     dreamRunNote(run) {
       const parts = [];
+      if (run.stale) parts.push('超过 20 分钟未确认完成，可能中断；不会自动重跑');
       if (run.reason) parts.push(this.dreamReasonLabel(run.reason));
       if (run.error) {
         let text = run.error;

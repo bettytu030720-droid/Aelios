@@ -94,7 +94,9 @@ export type DailyDigestSkipReason =
   | "no_messages"
   | "missing_model"
   | "model_error"
+  | "model_timeout"
   | "model_invalid_json"
+  | "extract_model_timeout"
   | "extract_model_error"
   | "extract_invalid_json"
   | "v2_disabled";
@@ -128,11 +130,13 @@ export type DailyDigestRunOptions = {
   force?: boolean;
   dryRun?: boolean;
   trigger?: DreamRunTrigger;
+  /** Internal durable-job identity; never accepted directly from an API request. */
+  runId?: string;
 };
 
 export interface DigestModelCallResult {
   digest: DailyDigestResult | null;
-  reason?: Extract<DailyDigestSkipReason, "missing_model" | "model_error" | "model_invalid_json">;
+  reason?: Extract<DailyDigestSkipReason, "missing_model" | "model_error" | "model_timeout" | "model_invalid_json">;
   model?: string;
   status?: number;
   finishReason?: string | null;

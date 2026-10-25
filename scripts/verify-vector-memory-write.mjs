@@ -115,7 +115,9 @@ assert.match(digestSource, /async function selectDreamMemoryContext/);
 assert.match(digestSource, /existingMemories = await selectDreamMemoryContext\(env, \{/);
 assert.match(digestSource, /const results = await searchMemories\(env, \{/);
 assert.match(digestSource, /const page = await listMemoriesPage\(env\.DB, \{/);
-assert.match(digestSource, /modelResult\.reason !== "model_invalid_json" \|\| modelResult\.finishReason !== "length"/);
+// Both stages now reduce together on invalid JSON/schema, including providers that report "stop" on truncation.
+assert.match(digestSource, /const invalidJson = modelResult\.reason === "model_invalid_json" \|\| extractResult\?\.reason === "model_invalid_json"/);
+assert.match(digestSource, /reductions < MAX_BATCH_REDUCTIONS && Date\.now\(\) < deadlineAt/);
 assert.match(digestSource, /messages = messages\.slice\(0, nextSize\);/);
 
 assert.match(recallSource, /function readRecallMinScore\(env: Env, override\?: number\): number/);

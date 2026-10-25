@@ -1,5 +1,5 @@
-import { callOpenAICompat } from "../../proxy/openaiAdapter";
-import type { Env, MemoryApiRecord, MessageRecord, OpenAIChatRequest, OpenAIChatResponse } from "../../types";
+import type { Env, MemoryApiRecord, MessageRecord, OpenAIChatRequest } from "../../types";
+import { callDreamModelJson, DreamModelTimeoutError } from "./modelCall";
 import { extractJsonObject } from "../../utils/parse";
 import { CHAT_MATERIAL_RULES } from "../chatMaterial";
 import { extractDreamMemoriesFromMessages } from "../dreamExtract";
@@ -15,6 +15,8 @@ import {
 } from "./helpers";
 
 const DREAM_MODEL_RETRY_BACKOFF_MS = [2000, 8000];
+const MAX_BATCH_REDUCTIONS = 3;
+const EXTRACT_PHASE_BUDGET_MS = 8 * 60_000;
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -103,10 +105,31 @@ export function buildDigestPrompt(input: {
   ].join("\n");
 }
 
+function consumableDigestLists(raw: DailyDigestResult, normalized: DailyDigestResult): boolean {
+  const keys = ["sections", "memories_to_add", "memories_to_update", "memories_to_delete"] as const;
+  if (!keys.every((key) => raw[key]?.length === normalized[key]?.length)) return false;
+  const text = (value: unknown) => value == null || (typeof value === "string" && Boolean(value.trim()));
+  const strings = (value: unknown) => value == null || (Array.isArray(value)
+    && value.every((item) => typeof item === "string" && Boolean(item.trim())));
+  const score = (value: unknown) => value == null || (typeof value === "number" && Number.isFinite(value));
+  const metadata = (value: unknown) => {
+    const item = value as Record<string, unknown>;
+    return text(item.content) && text(item.type) && text(item.fact_key)
+      && strings(item.tags) && strings(item.source_message_ids)
+      && score(item.importance) && score(item.confidence);
+  };
+  return (raw.sections ?? []).every((item) => text(item.heading) && text(item.content))
+    && (raw.memories_to_add ?? []).every(metadata)
+    && (raw.memories_to_update ?? []).every(metadata)
+    && (raw.memories_to_delete ?? []).every((item) => text(item.reason))
+    && (normalized.memories_to_update ?? []).every((item) =>
+      [item.content, item.type, item.importance, item.confidence, item.tags].some((value) => value !== undefined));
+}
+
 export async function callDigestModel(
   env: Env,
   prompt: string,
-  meta: { dateLabel: string; messageCount: number; memoryCount: number; hasMore: boolean }
+  meta: { dateLabel: string; messageCount: number; memoryCount: number; hasMore: boolean; deadlineAt?: number }
 ): Promise<DigestModelCallResult> {
   const model = readDreamModel(env);
   if (!model) {
@@ -142,6 +165,9 @@ export async function callDigestModel(
   const maxAttempts = 1 + DREAM_MODEL_RETRY_BACKOFF_MS.length;
 
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    if (meta.deadlineAt !== undefined && meta.deadlineAt <= Date.now()) {
+      return { digest: null, reason: "model_timeout", model };
+    }
     if (attempt > 0) {
       const backoffMs = DREAM_MODEL_RETRY_BACKOFF_MS[attempt - 1] ?? DREAM_MODEL_RETRY_BACKOFF_MS.at(-1) ?? 8000;
       console.warn("dream: retrying model call after non-ok response", {
@@ -151,11 +177,15 @@ export async function callDigestModel(
         maxAttempts,
         backoffMs
       });
+      if (meta.deadlineAt !== undefined && Date.now() + backoffMs >= meta.deadlineAt) {
+        return { digest: null, reason: "model_timeout", model };
+      }
       await delay(backoffMs);
     }
 
     try {
-      const response = await callOpenAICompat(env, request);
+      const response = await callDreamModelJson(env, request,
+        meta.deadlineAt === undefined ? undefined : Math.min(120_000, meta.deadlineAt - Date.now()));
       const elapsedMs = Date.now() - startedAt;
       if (!response.ok) {
         const retriable = isRetriableModelStatus(response.status);
@@ -171,13 +201,17 @@ export async function callDigestModel(
         if (retriable && attempt < maxAttempts - 1) continue;
         return { digest: null, reason: "model_error", model, status: response.status };
       }
-      const parsed = (await response.json()) as OpenAIChatResponse;
-      const choice = parsed.choices?.[0];
+      const choice = response.parsed?.choices?.[0];
       const message = choice?.message as ({ content?: unknown; reasoning_content?: unknown }) | undefined;
       const content = typeof message?.content === "string" ? message.content.trim() : "";
       const reasoning = typeof message?.reasoning_content === "string" ? message.reasoning_content.trim() : "";
       const json = extractJsonObject(content || reasoning);
-      if (!json) {
+      const shape = json as DailyDigestResult | null;
+      const lists = shape && [shape.sections, shape.memories_to_add, shape.memories_to_update, shape.memories_to_delete];
+      if (!shape || typeof shape !== "object" || Array.isArray(shape)
+        || typeof shape.title !== "string" || !shape.title.trim()
+        || typeof shape.summary !== "string" || !shape.summary.trim()
+        || !lists?.every((list) => Array.isArray(list) && list.every((item) => item && typeof item === "object" && !Array.isArray(item)))) {
         console.error("dream: model returned invalid JSON", {
           date: meta.dateLabel,
           model,
@@ -185,6 +219,13 @@ export async function callDigestModel(
           finishReason: choice?.finish_reason ?? null,
           contentChars: content.length,
           reasoningChars: reasoning.length
+        });
+        return { digest: null, reason: "model_invalid_json", model, finishReason: choice?.finish_reason };
+      }
+      const digest = normalizeDigestResult(shape);
+      if (!consumableDigestLists(shape, digest)) {
+        console.error("dream: digest contains unusable list items; no proposal accepted", {
+          date: meta.dateLabel, model, finishReason: choice?.finish_reason ?? null
         });
         return { digest: null, reason: "model_invalid_json", model, finishReason: choice?.finish_reason };
       }
@@ -197,7 +238,7 @@ export async function callDigestModel(
         reasoningChars: reasoning.length,
         attempt: attempt + 1
       });
-      return { digest: normalizeDigestResult(json), model };
+      return { digest, model };
     } catch (error) {
       const elapsedMs = Date.now() - startedAt;
       const message = error instanceof Error && error.message ? error.message : String(error);
@@ -208,7 +249,8 @@ export async function callDigestModel(
         attempt: attempt + 1,
         error: message
       });
-      // Thrown fetch errors are almost always network-level and worth retrying.
+      // A deadline is not automatically retried: the provider may still be completing a billed request.
+      if (error instanceof DreamModelTimeoutError) return { digest: null, reason: "model_timeout", model };
       if (attempt < maxAttempts - 1) continue;
       return { digest: null, reason: "model_error", model };
     }
@@ -217,7 +259,7 @@ export async function callDigestModel(
   return { digest: null, reason: "model_error", model };
 }
 
-/** Run digest model (with length-truncation shrink) then dream extract on the same batch. */
+/** Run digest and extraction on exactly the same batch; only a fully valid batch may advance the cursor. */
 export async function runExtractPhase(
   env: Env,
   input: {
@@ -234,13 +276,15 @@ export async function runExtractPhase(
   hasMore: boolean;
   modelResult: DigestModelCallResult;
   extractedMemories: ExtractedMemory[];
-  extractReason?: "model_error" | "model_invalid_json" | "missing_model";
+  extractReason?: "model_error" | "model_timeout" | "model_invalid_json" | "missing_model";
   extractModel?: string;
   extractStatus?: number;
+  extractFinishReason?: string | null;
 }> {
   let messages = input.messages;
   let hasMore = input.hasMore;
-  let modelResult: DigestModelCallResult;
+  let reductions = 0;
+  const deadlineAt = Date.now() + EXTRACT_PHASE_BUDGET_MS;
   const speakers = speakersForNamespace(await loadConfig(env), input.namespace);
 
   for (;;) {
@@ -253,52 +297,48 @@ export async function runExtractPhase(
       hasMore,
       speakers
     });
-    modelResult = await callDigestModel(env, prompt, {
+    const modelResult = await callDigestModel(env, prompt, {
       dateLabel: input.dateLabel,
       messageCount: messages.length,
       memoryCount: input.existingMemories.length,
-      hasMore
+      hasMore,
+      deadlineAt
     });
-    if (modelResult.digest) break;
-    if (modelResult.reason !== "model_invalid_json" || modelResult.finishReason !== "length" || messages.length <= 1) break;
-
-    const nextSize = Math.max(1, Math.floor(messages.length / 2));
-    if (nextSize >= messages.length) break;
-    console.warn("dream: retrying with smaller batch after length-truncated JSON", {
-      date: input.dateLabel,
-      previousMessageCount: messages.length,
-      nextMessageCount: nextSize,
-      model: modelResult.model
-    });
-    messages = messages.slice(0, nextSize);
-    hasMore = true;
-  }
-
-  if (!modelResult.digest) {
+    let extractResult: Awaited<ReturnType<typeof extractDreamMemoriesFromMessages>> | undefined;
+    if (modelResult.digest) {
+      extractResult = await extractDreamMemoriesFromMessages(env, {
+        namespace: input.namespace,
+        messages,
+        speakers,
+        dateLabel: input.dateLabel,
+        deadlineAt
+      });
+    }
+    const invalidJson = modelResult.reason === "model_invalid_json" || extractResult?.reason === "model_invalid_json";
+    if (invalidJson && messages.length > 1 && reductions < MAX_BATCH_REDUCTIONS && Date.now() < deadlineAt) {
+      const nextSize = Math.max(1, Math.floor(messages.length / 2));
+      console.warn("dream: retrying both stages on a smaller batch after invalid JSON", {
+        date: input.dateLabel,
+        phase: modelResult.digest ? "extract" : "digest",
+        previousMessageCount: messages.length,
+        nextMessageCount: nextSize
+      });
+      messages = messages.slice(0, nextSize);
+      hasMore = true;
+      reductions += 1;
+      continue;
+    }
     return {
       messages,
       hasMore,
       modelResult,
-      extractedMemories: []
+      extractedMemories: extractResult?.memories ?? [],
+      extractReason: extractResult?.reason,
+      extractModel: extractResult?.model,
+      extractStatus: extractResult?.status,
+      extractFinishReason: extractResult?.finishReason
     };
   }
-
-  const extractResult = await extractDreamMemoriesFromMessages(env, {
-    namespace: input.namespace,
-    messages,
-    speakers,
-    dateLabel: input.dateLabel
-  });
-
-  return {
-    messages,
-    hasMore,
-    modelResult,
-    extractedMemories: extractResult.memories,
-    extractReason: extractResult.reason,
-    extractModel: extractResult.model,
-    extractStatus: extractResult.status
-  };
 }
 
 // Keep DailyDigestResult type re-export for local consumers if needed
