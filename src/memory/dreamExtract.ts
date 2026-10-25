@@ -10,7 +10,9 @@ import { clampMemoryType } from "./canonicalTypes";
 import { speakerLabel } from "./speakers";
 import type { ExtractedMemory } from "./extract";
 
-const DEFAULT_DREAM_EXTRACT_MAX_TOKENS = 1200;
+// Same budget as the digest call: a smaller extract cap truncated the candidate list (and any reasoning tokens) of a full batch.
+const DEFAULT_DREAM_EXTRACT_MAX_TOKENS = 3000;
+const MAX_DREAM_EXTRACT_MAX_TOKENS = 8000;
 const DEFAULT_WORKERS_AI_DREAM_MODEL = "workers-ai/@cf/openai/gpt-oss-120b";
 
 export interface DreamExtractModelResult {
@@ -68,11 +70,19 @@ function parseExtractModelOutput(text: string): ExtractedMemory[] | null {
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
   const raw = parsed as Record<string, unknown>;
   const memories = Array.isArray(raw.memories) ? raw.memories : Array.isArray(raw.candidates) ? raw.candidates : null;
-  // Missing/wrong-shaped fields are not a valid empty extraction. Never advance past rejected candidates.
+  // A missing/wrong-shaped list is not a valid empty extraction: never advance the cursor on it.
   if (!memories) return null;
-  const normalized = memories.map(normalizeCandidate);
-  if (normalized.some((candidate) => candidate === null)) return null;
-  return normalized.filter((candidate): candidate is ExtractedMemory => candidate !== null);
+  const kept = memories.flatMap((item): ExtractedMemory[] => {
+    const candidate = normalizeCandidate(item);
+    return candidate ? [candidate] : [];
+  });
+  // Individual bad entries (blank, over-long, wrong type) are dropped and counted so one of them cannot stall the batch.
+  // Only a non-empty list in which nothing was usable is treated as malformed output rather than "nothing to remember".
+  if (memories.length > 0 && kept.length === 0) return null;
+  if (kept.length < memories.length) {
+    console.warn("dream extract: dropped unusable candidates", { dropped: memories.length - kept.length, kept: kept.length });
+  }
+  return kept;
 }
 
 function formatTranscript(messages: MessageRecord[], speakers: DreamSpeakers | null): string {
@@ -215,7 +225,7 @@ async function callDreamExtractModel(
       { role: "user", content: buildDreamExtractPrompt(messages, existingFactKeys, speakers, background) }
     ],
     temperature: 0,
-    max_tokens: readPositiveInt(env.DREAM_MAX_TOKENS, DEFAULT_DREAM_EXTRACT_MAX_TOKENS, 4000),
+    max_tokens: readPositiveInt(env.DREAM_MAX_TOKENS, DEFAULT_DREAM_EXTRACT_MAX_TOKENS, MAX_DREAM_EXTRACT_MAX_TOKENS),
     response_format: { type: "json_object" },
     stream: false
   };

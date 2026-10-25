@@ -105,25 +105,31 @@ export function buildDigestPrompt(input: {
   ].join("\n");
 }
 
-function consumableDigestLists(raw: DailyDigestResult, normalized: DailyDigestResult): boolean {
-  const keys = ["sections", "memories_to_add", "memories_to_update", "memories_to_delete"] as const;
-  if (!keys.every((key) => raw[key]?.length === normalized[key]?.length)) return false;
-  const text = (value: unknown) => value == null || (typeof value === "string" && Boolean(value.trim()));
-  const strings = (value: unknown) => value == null || (Array.isArray(value)
-    && value.every((item) => typeof item === "string" && Boolean(item.trim())));
-  const score = (value: unknown) => value == null || (typeof value === "number" && Number.isFinite(value));
-  const metadata = (value: unknown) => {
-    const item = value as Record<string, unknown>;
-    return text(item.content) && text(item.type) && text(item.fact_key)
-      && strings(item.tags) && strings(item.source_message_ids)
-      && score(item.importance) && score(item.confidence);
-  };
-  return (raw.sections ?? []).every((item) => text(item.heading) && text(item.content))
-    && (raw.memories_to_add ?? []).every(metadata)
-    && (raw.memories_to_update ?? []).every(metadata)
-    && (raw.memories_to_delete ?? []).every((item) => text(item.reason))
-    && (normalized.memories_to_update ?? []).every((item) =>
-      [item.content, item.type, item.importance, item.confidence, item.tags].some((value) => value !== undefined));
+const DIGEST_LIST_KEYS = ["sections", "memories_to_add", "memories_to_update", "memories_to_delete"] as const;
+
+/** A list field of the wrong type means the model ignored the format; a missing one is simply empty. */
+function digestListsWellFormed(raw: DailyDigestResult): boolean {
+  return DIGEST_LIST_KEYS.every((key) => raw[key] == null || Array.isArray(raw[key]));
+}
+
+/**
+ * Entries that cannot be used (blank, wrong type, an update that changes nothing) are dropped and counted rather than
+ * failing the batch: they would never have been applied, and rejecting the whole night over one kept the cursor stuck.
+ */
+function sanitizeDigestItems(raw: DailyDigestResult): { digest: DailyDigestResult; dropped: number } {
+  const normalized = normalizeDigestResult(raw);
+  const digest = normalized.memories_to_update
+    ? {
+        ...normalized,
+        memories_to_update: normalized.memories_to_update.filter((item) =>
+          [item.content, item.type, item.importance, item.confidence, item.tags].some((value) => value !== undefined))
+      }
+    : normalized;
+  const dropped = DIGEST_LIST_KEYS.reduce(
+    (sum, key) => sum + Math.max(0, (raw[key]?.length ?? 0) - (digest[key]?.length ?? 0)),
+    0
+  );
+  return { digest, dropped };
 }
 
 export async function callDigestModel(
@@ -207,11 +213,10 @@ export async function callDigestModel(
       const reasoning = typeof message?.reasoning_content === "string" ? message.reasoning_content.trim() : "";
       const json = extractJsonObject(content || reasoning);
       const shape = json as DailyDigestResult | null;
-      const lists = shape && [shape.sections, shape.memories_to_add, shape.memories_to_update, shape.memories_to_delete];
       if (!shape || typeof shape !== "object" || Array.isArray(shape)
         || typeof shape.title !== "string" || !shape.title.trim()
         || typeof shape.summary !== "string" || !shape.summary.trim()
-        || !lists?.every((list) => Array.isArray(list) && list.every((item) => item && typeof item === "object" && !Array.isArray(item)))) {
+        || !digestListsWellFormed(shape)) {
         console.error("dream: model returned invalid JSON", {
           date: meta.dateLabel,
           model,
@@ -222,12 +227,9 @@ export async function callDigestModel(
         });
         return { digest: null, reason: "model_invalid_json", model, finishReason: choice?.finish_reason };
       }
-      const digest = normalizeDigestResult(shape);
-      if (!consumableDigestLists(shape, digest)) {
-        console.error("dream: digest contains unusable list items; no proposal accepted", {
-          date: meta.dateLabel, model, finishReason: choice?.finish_reason ?? null
-        });
-        return { digest: null, reason: "model_invalid_json", model, finishReason: choice?.finish_reason };
+      const { digest, dropped } = sanitizeDigestItems(shape);
+      if (dropped > 0) {
+        console.warn("dream: dropped unusable digest entries", { date: meta.dateLabel, model, dropped });
       }
       console.log("dream: model returned valid JSON", {
         date: meta.dateLabel,

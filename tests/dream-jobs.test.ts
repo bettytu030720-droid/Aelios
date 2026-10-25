@@ -3,7 +3,7 @@ import { timingSafeEqual } from "node:crypto";
 import { readFileSync, readdirSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, test } from "node:test";
-import { handleDreamRun, handleDreamStatus } from "../src/api/dream";
+import { handleDreamResolve, handleDreamRun, handleDreamStatus } from "../src/api/dream";
 import {
   claimQueuedDreamRun,
   describeDreamRun,
@@ -306,4 +306,56 @@ test("stale threshold is 20 minutes and never marks terminal jobs stale", async 
   assert.equal(describeDreamRun(run, start + DREAM_RUN_STALE_MS - 1).stale, false);
   assert.equal(describeDreamRun(run, start + DREAM_RUN_STALE_MS).stale, true);
   assert.equal(describeDreamRun({ ...run, status: "ok" }, start + DREAM_RUN_STALE_MS).stale, false);
+});
+
+function resolveRequest(body: Record<string, unknown>, authorized = true) {
+  return new Request("https://synthetic.test/v1/dream/resolve", {
+    method: "POST",
+    headers: { ...(authorized ? { authorization: "Bearer synthetic-owner" } : {}), "content-type": "application/json" },
+    body: JSON.stringify({ namespace: "test-space", ...body })
+  });
+}
+
+test("an operator can close a stale task, which releases admission and keeps a late delivery from replaying", async () => {
+  const job = await queued();
+  sqlite.prepare("UPDATE dream_runs SET status = 'running', started_at = ? WHERE id = ?")
+    .run("2020-01-01T00:00:00.000Z", job.runId);
+  assert.equal((await handleDreamRun(request({ background: true }), env)).status, 409);
+
+  const response = await handleDreamResolve(resolveRequest({ run_id: job.runId }), env);
+  assert.equal(response.status, 200);
+  assert.deepEqual((await response.json() as any).data, {
+    namespace: "test-space", run_id: job.runId, status: "error", reason: "marked_interrupted"
+  });
+  const closed = row(job.runId);
+  assert.equal(closed.status, "error");
+  assert.equal(closed.reason, "marked_interrupted");
+  assert.ok(closed.finished_at);
+  assert.match(closed.error ?? "", /earlier writes may already exist/);
+
+  assert.equal((await handleDreamRun(request({ background: true }), env)).status, 202);
+
+  let calls = 0;
+  await runDreamJob(env, job, async () => { calls += 1; throw new Error("must not run"); });
+  assert.equal(calls, 0);
+});
+
+test("closing is refused for a task that may still be running, a finished one, an unknown id or another space", async () => {
+  const job = await queued();
+  const fresh = await handleDreamResolve(resolveRequest({ run_id: job.runId }), env);
+  assert.equal(fresh.status, 409);
+  const payload = await fresh.json() as any;
+  assert.equal(payload.data.run.id, job.runId);
+  assert.equal(payload.data.run.stale, false);
+  assert.equal(row(job.runId).status, "queued");
+
+  // Terminal rows are never rewritten, however old.
+  sqlite.prepare("UPDATE dream_runs SET status = 'ok', started_at = ? WHERE id = ?").run("2020-01-01T00:00:00.000Z", job.runId);
+  assert.equal((await handleDreamResolve(resolveRequest({ run_id: job.runId }), env)).status, 409);
+  assert.equal(row(job.runId).status, "ok");
+
+  assert.equal((await handleDreamResolve(resolveRequest({ run_id: "drm_missing" }), env)).status, 404);
+  assert.equal((await handleDreamResolve(resolveRequest({ run_id: job.runId, namespace: "other-space" }), env)).status, 404);
+  assert.equal((await handleDreamResolve(resolveRequest({}), env)).status, 400);
+  assert.equal((await handleDreamResolve(resolveRequest({ run_id: job.runId }, false), env)).status, 401);
 });

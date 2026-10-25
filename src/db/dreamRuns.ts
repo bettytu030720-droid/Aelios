@@ -146,6 +146,43 @@ export async function failActiveDreamRun(
     .run();
 }
 
+export async function getDreamRun(db: D1Database, input: { id: string; namespace: string }): Promise<DreamRunRow | null> {
+  return db
+    .prepare(
+      `SELECT id, namespace, date_label, started_at, finished_at, status, reason, model,
+              processed_messages, error, trigger
+       FROM dream_runs WHERE id = ? AND namespace = ?`
+    )
+    .bind(input.id, input.namespace)
+    .first<DreamRunRow>();
+}
+
+/**
+ * Operator close-out of an unconfirmed task, so a row that will never finish cannot block admission forever.
+ * Only an active row already past the stale threshold qualifies: a task that may still be executing is never marked,
+ * and a claimed-late queue message finds the row no longer 'queued' and is dropped rather than replayed.
+ */
+export async function resolveStaleDreamRun(
+  db: D1Database,
+  input: { id: string; namespace: string; now?: number }
+): Promise<boolean> {
+  const now = input.now ?? Date.now();
+  const result = await db
+    .prepare(
+      `UPDATE dream_runs SET status = 'error', finished_at = ?, reason = 'marked_interrupted', error = ?
+       WHERE id = ? AND namespace = ? AND status IN ('queued', 'running') AND started_at <= ?`
+    )
+    .bind(
+      new Date(now).toISOString(),
+      "Marked interrupted by the operator; earlier writes may already exist. Inspect Worker logs before retrying.",
+      input.id,
+      input.namespace,
+      new Date(now - DREAM_RUN_STALE_MS).toISOString()
+    )
+    .run();
+  return result.meta.changes === 1;
+}
+
 export async function listDreamRunsForNamespace(
   db: D1Database,
   input: { namespace: string; sinceIso: string; limit?: number }

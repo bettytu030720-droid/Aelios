@@ -1113,6 +1113,9 @@ document.documentElement.dataset.theme = localStorage.getItem('aelios.admin.colo
           <div x-show="dreamActiveRun" class="mt-4 rounded-2xl border border-zinc-800 bg-[#0a0a0b] p-3 text-sm text-zinc-300">
             <div x-text="dreamActiveRun && ('任务 ' + dreamActiveRun.id + ' · ' + dreamStatusLabel(dreamActiveRun.status, dreamActiveRun.stale))"></div>
             <p class="mt-1 text-xs text-amber-400" x-show="dreamActiveRun && dreamActiveRun.stale">任务可能已中断，完成状态未确认。不会自动重跑；force 也不能覆盖，请先核查。</p>
+            <button type="button" x-show="dreamActiveRun && dreamActiveRun.stale" @click="resolveDreamRun()" :disabled="dreamResolving" class="tap mt-3 inline-flex items-center justify-center rounded-2xl border border-amber-500/60 px-3 text-xs font-semibold text-amber-400 transition duration-150 ease-in-out disabled:opacity-50">
+              <span x-text="dreamResolving ? '标记中…' : '核查后标记为已中断'"></span>
+            </button>
           </div>
           <div x-show="dreamRunResult" class="mt-4 space-y-3">
             <template x-if="dreamRunResult && dreamRunResult.run_id">
@@ -1784,6 +1787,7 @@ function memoryAdmin() {
     dreamActiveRun: null,
     dreamPollTimer: null,
     dreamStatusError: '',
+    dreamResolving: false,
     dreamLoading: false,
     dreamTriggering: false,
     dreamDate: '',
@@ -2149,7 +2153,7 @@ function memoryAdmin() {
       this.dreamExpanded = {}; this.dreamRunResult = null;
       this.dreamDate = ''; this.dreamHarvestDate = '';
       this.dreamLoading = false; this.dreamHarvestLoading = false;
-      this.dreamTriggering = false; this.dreamStatusError = '';
+      this.dreamTriggering = false; this.dreamResolving = false; this.dreamStatusError = '';
       this.debugOutput = '尚未运行维护操作';
     },
     icons() {
@@ -3063,6 +3067,28 @@ function memoryAdmin() {
       this.loadDreamStatus();
       this.loadDreamHarvest();
     },
+    async resolveDreamRun() {
+      const run = this.dreamActiveRun;
+      if (this.dreamResolving || !run || !run.stale) return;
+      if (!window.confirm('确认任务 ' + run.id + ' 已经不在执行？标记后可以重新发起，但它可能已经写入了部分记忆，建议先查 Worker 日志。')) return;
+      const revision = this.spaceRevision;
+      this.dreamResolving = true;
+      try {
+        await this.request('/v1/dream/resolve', {
+          method: 'POST',
+          body: JSON.stringify({ namespace: this.namespace, run_id: run.id })
+        });
+        if (revision !== this.spaceRevision) return;
+        this.notify('已标记为已中断：' + run.id);
+        await this.loadDreamStatus();
+      } catch (error) {
+        if (revision !== this.spaceRevision) return;
+        this.notify(error.message);
+        await this.loadDreamStatus();
+      } finally {
+        if (revision === this.spaceRevision) this.dreamResolving = false;
+      }
+    },
     async triggerDream() {
       if (this.dreamTriggering || (!this.dreamDryRun && this.dreamActiveRun)) return;
       const revision = this.spaceRevision;
@@ -3181,6 +3207,7 @@ function memoryAdmin() {
         extract_invalid_json: '抽取结果格式不合要求',
         run_failed: '整理异常退出，请先核查是否部分落库',
         enqueue_failed: '任务未确认入队',
+        marked_interrupted: '已核查并标记为中断',
         execution_failed: '后台任务异常退出',
         v2_disabled: 'v2 未启用'
       };

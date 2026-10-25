@@ -93,14 +93,33 @@ test("deadline includes the HTTP response body, not just response headers", asyn
   assert.equal(signal?.aborted, true);
 });
 
-test("explicit empty memories is valid, but an absent array or rejected item is not empty success", async (t) => {
+test("explicit empty memories is valid; an absent or entirely unusable list is not; stray bad entries are dropped", async (t) => {
   const { env } = fixture(t, () => ({ response: '{"memories":[]}' }));
   const input = { namespace: "default", messages: messages(1), speakers: null };
   assert.equal((await extractDreamMemoriesFromMessages(env, input)).reason, undefined);
-  for (const payload of [{}, { memories: null }, { memories: [{ content: 123 }] }, { memories: [...extraction().memories, { content: 123 }] }]) {
+  const tooLong = { content: "长".repeat(1001) };
+  for (const payload of [{}, { memories: null }, { memories: [{ content: 123 }] }, { memories: [tooLong, { content: "" }] }]) {
     env.AI.run = async () => ({ response: JSON.stringify(payload) });
     assert.equal((await extractDreamMemoriesFromMessages(env, input)).reason, "model_invalid_json");
   }
+  // One over-long or malformed entry used to fail the whole batch and keep the cursor stuck; it is now dropped.
+  env.AI.run = async () => ({ response: JSON.stringify({ memories: [...extraction().memories, { content: 123 }, tooLong] }) });
+  const mixed = await extractDreamMemoriesFromMessages(env, input);
+  assert.equal(mixed.reason, undefined);
+  assert.deepEqual(mixed.memories.map(memory => memory.content), extraction().memories.map(memory => memory.content));
+});
+
+test("the extraction call gets the same output budget as the digest, not a lower cap", async (t) => {
+  const seen: unknown[] = [];
+  const { env } = fixture(t, input => { seen.push(input.max_tokens); return { response: '{"memories":[]}' }; });
+  const input = { namespace: "default", messages: messages(1), speakers: null };
+  env.DREAM_MAX_TOKENS = "8000";
+  await extractDreamMemoriesFromMessages(env, input);
+  delete env.DREAM_MAX_TOKENS;
+  await extractDreamMemoriesFromMessages(env, input);
+  env.DREAM_MAX_TOKENS = "99999";
+  await extractDreamMemoriesFromMessages(env, input);
+  assert.deepEqual(seen, [8000, 3000, 8000]);
 });
 
 test("extract failure halves BOTH stages, retaining the unprocessed suffix", async (t) => {
@@ -208,28 +227,41 @@ test("full invalid extraction never advances its cursor, writes candidates or lo
   assert.equal(sqlite.prepare("SELECT status FROM dream_runs").get()!.status, "error");
 });
 
-test("malformed digest list items cannot normalize into empty success and advance the cursor", async (t) => {
+test("unusable digest entries are dropped without stalling the batch, but a wrong container type is still rejected", async (t) => {
   const target_id = "mem_0123456789abcdef0123456789abcdef";
-  const invalidPlans = [
-    { ...DIGEST, memories_to_add: [{ content: 123 }], memories_to_update: [{}], memories_to_delete: [{}] },
-    { ...DIGEST, memories_to_update: [{ target_id, content: 123 }] },
-    { ...DIGEST, memories_to_update: [{ target_id }] }
-  ];
-  for (const plan of invalidPlans) {
+  const messy = {
+    ...DIGEST,
+    sections: [{}],
+    memories_to_add: [{ content: 123 }],
+    memories_to_update: [{}, { target_id }, { target_id, content: 123 }, { target_id, content: "更新后的合成正文" }],
+    memories_to_delete: [{}]
+  };
+  const accepted = fixture(t, input => ({ response: JSON.stringify(isDigest(input) ? messy : { memories: [] }) }));
+  const result = await runExtractPhase(accepted.env, stageInput(4));
+  assert.equal(result.messages.length, 4, "bad entries must not shrink the batch");
+  assert.equal(result.hasMore, false);
+  assert.equal(result.extractReason, undefined);
+  const digest = result.modelResult.digest!;
+  assert.deepEqual([digest.sections, digest.memories_to_add, digest.memories_to_delete], [[], [], []]);
+  assert.equal(digest.memories_to_update?.length, 1);
+  assert.equal(digest.memories_to_update?.[0].content, "更新后的合成正文");
+
+  // Omitted optional lists are simply empty.
+  const sparse = fixture(t, input => ({ response: JSON.stringify(isDigest(input) ? { title: DIGEST.title, summary: DIGEST.summary } : { memories: [] }) }));
+  const sparseResult = await runExtractPhase(sparse.env, stageInput(4));
+  assert.equal(sparseResult.modelResult.digest?.title, DIGEST.title);
+  assert.equal(sparseResult.messages.length, 4);
+
+  for (const plan of [{ ...DIGEST, memories_to_update: "oops" }, { ...DIGEST, sections: {} }]) {
     let digestCalls = 0;
-    const { env, sqlite } = fixture(t, input => {
+    const rejected = fixture(t, input => {
       assert.equal(isDigest(input), true, "reject the digest before attempting extraction");
       digestCalls++;
       return { response: JSON.stringify(plan) };
     });
-    seedMessages(sqlite, messages(4));
-    const result = await runDailyMemoryDigest(env, "default", { dateLabel: DATE });
-    assert.equal(result.ran, false);
-    if (!result.ran) assert.equal(result.reason, "model_invalid_json");
-    assert.ok(digestCalls <= 4);
-    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM processing_cursors").get()!.n, 0);
-    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM messages").get()!.n, 4);
-    assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM memory_candidates").get()!.n, 0);
-    assert.equal(sqlite.prepare("SELECT status FROM dream_runs").get()!.status, "error");
+    const failed = await runExtractPhase(rejected.env, stageInput(4));
+    assert.equal(failed.modelResult.digest, null);
+    assert.equal(failed.modelResult.reason, "model_invalid_json");
+    assert.ok(digestCalls > 1 && digestCalls <= 4);
   }
 });

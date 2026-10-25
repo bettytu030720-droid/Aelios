@@ -3,8 +3,10 @@ import {
   describeDreamRun,
   failActiveDreamRun,
   findActiveDreamRun,
+  getDreamRun,
   insertQueuedDreamRun,
-  listDreamRunsForNamespace
+  listDreamRunsForNamespace,
+  resolveStaleDreamRun
 } from "../db/dreamRuns";
 import {
   IMPORT_CANDIDATE_SOURCES,
@@ -84,6 +86,40 @@ export async function handleDreamStatus(request: Request, env: Env): Promise<Res
         raw_message_counts: rawMessageCounts
       }
     });
+  } catch (error) {
+    return json({ ok: false, error: error instanceof Error ? error.message : String(error) }, { status: 500 });
+  }
+}
+
+/**
+ * Closes an unconfirmed task so it stops blocking background admission. Deliberately explicit: nothing is cleared
+ * on a timer, and only a task past the stale threshold qualifies.
+ */
+export async function handleDreamResolve(request: Request, env: Env): Promise<Response> {
+  const auth = await authenticate(request, env);
+  if (!auth.ok) return openAiError("Unauthorized", 401, "authentication_error");
+  if (!auth.profile.scopes.includes("memory:write")) {
+    return openAiError("Missing required scope: memory:write", 403);
+  }
+
+  const body = await readJsonObject(request);
+  if (!body) return openAiError("Request body must be a JSON object", 400);
+
+  const namespace = readString(body.namespace) || auth.profile.namespace;
+  const runId = readString(body.run_id);
+  if (!runId) return openAiError("run_id is required", 400);
+
+  try {
+    if (await resolveStaleDreamRun(env.DB, { id: runId, namespace })) {
+      return json({ data: { namespace, run_id: runId, status: "error", reason: "marked_interrupted" } });
+    }
+    const run = await getDreamRun(env.DB, { id: runId, namespace });
+    if (!run) return openAiError("Dream run not found", 404);
+    return json({
+      ok: false,
+      error: "Only a queued/running task that has gone unconfirmed for over 20 minutes can be marked interrupted.",
+      data: { namespace, run: describeDreamRun(run) }
+    }, { status: 409 });
   } catch (error) {
     return json({ ok: false, error: error instanceof Error ? error.message : String(error) }, { status: 500 });
   }

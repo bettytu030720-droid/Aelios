@@ -3,7 +3,7 @@ import { test } from "node:test";
 import { runInNewContext } from "node:vm";
 import { ADMIN_HTML } from "../src/api/admin/ui";
 
-function panel() {
+function panel(confirmAnswer = true) {
   const script = ADMIN_HTML.match(/<script>\s*(function memoryAdmin\(\)[\s\S]*?)<\/script>/)?.[1];
   assert.ok(script);
   let sequence = 0;
@@ -13,7 +13,7 @@ function panel() {
     location: { origin: "https://synthetic.test" },
     document: { documentElement: { dataset: {} } },
     window: {
-      confirm() { return true; },
+      confirm() { return confirmAnswer; },
       setTimeout(callback: () => void) { const id = ++sequence; timers.set(id, callback); return id; },
       clearTimeout(id: number) { timers.delete(id); }
     }
@@ -144,4 +144,45 @@ test("status read failure stops polling and visibly warns that completion is unc
   await app.loadDreamStatus();
   assert.match(app.dreamStatusError, /尚未确认.*不要直接重跑/);
   assert.equal(timers.size, 0);
+});
+
+test("a stale task offers an explicit close-out that confirms, posts the run id, then refreshes and unblocks submission", async () => {
+  assert.match(ADMIN_HTML, /核查后标记为已中断/);
+  const { app, notices } = panel();
+  let state = run("running", true);
+  const calls: string[] = [];
+  app.request = async (path: string, options?: { body: string }) => {
+    calls.push(path);
+    if (path === "/v1/dream/resolve") {
+      assert.deepEqual(JSON.parse(options?.body || "{}"), { namespace: "synthetic-space", run_id: "drm_synthetic" });
+      state = { ...state, status: "error", stale: false };
+      return { data: {} };
+    }
+    if (path.startsWith("/v1/dream/status")) return { data: {
+      dream_runs: [state], active_run: ["queued", "running"].includes(state.status) ? state : null
+    } };
+    throw new Error(`unexpected path ${path}`);
+  };
+  await app.loadDreamStatus();
+  assert.equal(app.dreamActiveRun.stale, true);
+  await app.resolveDreamRun();
+  assert.equal(app.dreamActiveRun, null);
+  assert.equal(app.dreamResolving, false);
+  assert.deepEqual(calls.filter((path) => path === "/v1/dream/resolve"), ["/v1/dream/resolve"]);
+  assert.match(notices.at(-1) ?? "", /已标记为已中断.*drm_synthetic/);
+  assert.equal(app.dreamReasonLabel("marked_interrupted"), "已核查并标记为中断");
+});
+
+test("close-out needs confirmation and is never offered for a task that is not stale", async () => {
+  const declined = panel(false);
+  declined.app.request = async () => { throw new Error("a declined confirmation must not call the API"); };
+  declined.app.dreamActiveRun = run("running", true);
+  await declined.app.resolveDreamRun();
+  assert.equal(declined.app.dreamResolving, false);
+
+  const fresh = panel();
+  fresh.app.request = async () => { throw new Error("a task that may still be running must not be closed"); };
+  fresh.app.dreamActiveRun = run("running", false);
+  await fresh.app.resolveDreamRun();
+  assert.equal(fresh.app.dreamResolving, false);
 });
