@@ -2,8 +2,9 @@ import { authenticate } from "../auth/apiKey";
 import type { Env } from "../types";
 import { json, openAiError } from "../utils/json";
 import { findIdentity, loadConfig, type GatewayConfig } from "../gateway/config";
-import { catalogUrl } from "../gateway/upstream";
+import { callGatewayUpstream, catalogUrl, prepareGatewayRequest } from "../gateway/upstream";
 import { ownerOnly } from "../gateway/admin";
+import { readJsonObject } from "../utils/request";
 import { listChatGptModels, MODEL_PREFIX, TIMEOUTS } from "../chatgpt/client";
 import { loadConnection } from "../chatgpt/store";
 
@@ -117,4 +118,68 @@ export async function handleModelCatalog(request: Request, env: Env, ctx?: Execu
   const extra = (await chatgpt).map(entry => String(entry.id));
   return Response.json({ list: config.modelList || [], models: models.sort(), chatgpt: extra, source: reason ? "unavailable" : "upstream", reason },
     { headers: { "cache-control": "no-store" } });
+}
+
+const TEST_TIMEOUT_MS = 25_000;
+/** The caller of a connectivity test is the owner, not an assistant: no memory, no recording, no thinking policy. */
+const TEST_IDENTITY = { slug: "model-test", keys: [], models: [] };
+
+/** The first words an upstream said about why it refused; capped, so a page of HTML never reaches the panel. */
+function refusalText(text: string): string {
+  try {
+    const data = JSON.parse(text) as { error?: { message?: unknown } | string; message?: unknown };
+    const message = typeof data.error === "string" ? data.error : data.error?.message ?? data.message;
+    if (typeof message === "string" && message.trim()) return message.trim().slice(0, 300);
+  } catch { /* not JSON: fall through to the raw start */ }
+  return text.replace(/\s+/g, " ").trim().slice(0, 300);
+}
+
+/**
+ * One real, tiny chat request to a listed model, sent the way a chat client's request is (same route, same
+ * ChatGPT-plan branch), without recording anything. A pass is a chat.completion back; whatever else came back is
+ * reported with the upstream's own words. OpenAI's reasoning models want max_completion_tokens where others want
+ * max_tokens, so a 400 asking for it is tried once more with it.
+ */
+export async function handleModelTest(request: Request, env: Env, ctx?: ExecutionContext): Promise<Response> {
+  if (!await ownerOnly(request, env)) return Response.json({ error: "Owner key required" }, { status: 401 });
+  const input = await readJsonObject(request);
+  const model = typeof input?.model === "string" ? input.model.trim() : "";
+  if (!model || model.length > 200 || /\s/.test(model)) {
+    return Response.json({ error: "model must be a model name without spaces" }, { status: 400 });
+  }
+  let config: GatewayConfig;
+  try { config = await loadConfig(env); }
+  catch { return Response.json({ error: "Gateway configuration unavailable. Apply migrations." }, { status: 503 }); }
+
+  const started = Date.now();
+  const signal = AbortSignal.any([request.signal, AbortSignal.timeout(TEST_TIMEOUT_MS)]);
+  const attempt = async (capField: "max_tokens" | "max_completion_tokens"): Promise<Response> => {
+    const sent = new Request("https://aelios.invalid/v1/chat/completions", { method: "POST", signal });
+    const prepared = prepareGatewayRequest(env, config, TEST_IDENTITY, "chat", sent, {
+      model, stream: false, [capField]: 32, messages: [{ role: "user", content: "Reply with the single word OK." }]
+    });
+    return callGatewayUpstream(env, "chat", sent, prepared, prepared.body, ctx);
+  };
+  const done = (fields: Record<string, unknown>) =>
+    Response.json({ model, latency_ms: Date.now() - started, ...fields }, { headers: { "cache-control": "no-store" } });
+  try {
+    let response = await attempt("max_tokens");
+    let text = await response.text();
+    // OpenAI's reasoning models answer a max_tokens request with "use max_completion_tokens instead".
+    if (response.status === 400 && /max_completion_tokens/i.test(text)) {
+      response = await attempt("max_completion_tokens");
+      text = await response.text();
+    }
+    if (!response.ok) return done({ ok: false, status: response.status, error: refusalText(text) || `HTTP ${response.status}` });
+    let reply: unknown;
+    try {
+      const data = JSON.parse(text) as { choices?: { message?: { content?: unknown } }[] };
+      if (!Array.isArray(data.choices)) return done({ ok: false, status: response.status, error: "The upstream answered, but not with a chat completion." });
+      reply = data.choices[0]?.message?.content;
+    } catch { return done({ ok: false, status: response.status, error: "The upstream answered, but not with JSON." }); }
+    return done({ ok: true, status: response.status, reply: typeof reply === "string" ? reply.trim().slice(0, 80) : "" });
+  } catch (error) {
+    const timedOut = signal.aborted && !request.signal.aborted;
+    return done({ ok: false, status: 0, error: timedOut ? `No answer within ${TEST_TIMEOUT_MS / 1000} seconds.` : refusalText(error instanceof Error ? error.message : String(error)) });
+  }
 }

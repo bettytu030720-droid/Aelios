@@ -25,6 +25,11 @@ const SETTING_ROW = String.raw`<div class="border-t border-zinc-800 py-3" :title
                 </template>
               </div>`;
 const CHEVRON = `<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>`;
+const SVG_OPEN = '<svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">';
+const ICON_PLUS = SVG_OPEN + '<path d="M12 5v14M5 12h14"/></svg>';
+const ICON_MINUS = SVG_OPEN + '<path d="M5 12h14"/></svg>';
+const ICON_LINK = SVG_OPEN + '<path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>';
+const ICON_SPIN = SVG_OPEN + '<path d="M21 12a9 9 0 1 1-6.22-8.56"/></svg>';
 
 // 导入聊天记录时在浏览器里拆文件、按天切段的那几个函数 (跟服务端是同一份代码)。
 const CHAT_PARSE_SCRIPT = chatParseBrowserScript();
@@ -236,6 +241,10 @@ document.documentElement.dataset.theme = localStorage.getItem('aelios.admin.colo
   .switch:disabled { opacity: .6; }
   .chev { display: inline-grid; place-items: center; flex-shrink: 0; color: var(--text-4); transition: transform .15s ease; }
   .chev.is-open { transform: rotate(180deg); }
+  /* 清单里一行末尾的小圆按钮：加、减、测连通。 */
+  .icon-btn { display: inline-grid; place-items: center; flex-shrink: 0; width: 2rem; height: 2rem; border-radius: 999px; color: var(--text-4); transition: color .15s ease, background-color .15s ease; }
+  .icon-btn:hover:not(:disabled) { color: var(--coral); background: var(--hover-bg); }
+  .icon-btn:disabled { opacity: .5; cursor: default; }
   .savebar { border-color: var(--coral) !important; background: var(--panel-bg-strong); box-shadow: var(--panel-glow); backdrop-filter: blur(12px); }
 
   /* ===== 梦境观测台 ===== */
@@ -1429,10 +1438,19 @@ document.documentElement.dataset.theme = localStorage.getItem('aelios.admin.colo
           </div>
         </article>
 
-        <article x-show="savedApiKey.trim()" class="rounded-2xl border border-zinc-800 bg-zinc-900 p-4 shadow-sm">
+        <article x-show="savedApiKey.trim() && !gwQuery.trim()" class="rounded-2xl border border-zinc-800 bg-zinc-900 shadow-sm">
+          <button type="button" @click="gwToggle('供应商')" :aria-expanded="gwIsOpen('供应商') ? 'true' : 'false'" class="tap flex w-full items-center justify-between gap-3 px-4 py-3 text-left">
+            <span class="min-w-0">
+              <span class="block text-sm font-semibold text-zinc-100">供应商</span>
+              <span class="block truncate text-[11px] text-zinc-500" x-text="providersSummary()"></span>
+            </span>
+            <span class="chev" :class="gwIsOpen('供应商') ? 'is-open' : ''">${CHEVRON}</span>
+          </button>
+          <div x-show="gwIsOpen('供应商')" class="border-t border-zinc-800 p-4">
+            <section>
           <div class="flex items-start justify-between gap-3">
             <div class="min-w-0">
-              <h2 class="text-sm font-semibold text-zinc-100">ChatGPT 套餐</h2>
+              <h3 class="text-sm font-semibold text-zinc-100">ChatGPT 套餐</h3>
               <p class="mt-0.5 text-[11px] leading-5 text-zinc-500">用你自己的 ChatGPT 套餐额度跑 <span class="font-mono">chatgpt/模型名</span>，不走 AI Gateway。只连你自己的账号，别把这条线路分给别人。</p>
             </div>
             <span class="chip shrink-0" :class="chatgptChipClass()" x-text="chatgptChipText()"></span>
@@ -1487,31 +1505,31 @@ document.documentElement.dataset.theme = localStorage.getItem('aelios.admin.colo
               </div>
             </template>
           </div>
-
-          <div x-show="chatgpt.welcomeOpen" class="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4" role="dialog" aria-modal="true" aria-label="You're using your ChatGPT plan">
-            <div class="w-full max-w-sm rounded-2xl border border-zinc-800 bg-zinc-900 p-5 shadow-xl">
-              <h3 class="text-base font-semibold text-zinc-100">You're using your ChatGPT plan</h3>
-              <p class="mt-2 text-xs leading-5 text-zinc-400">符合条件的请求会用你的 ChatGPT 套餐额度，计入套餐的用量限制。可以在 ChatGPT 设置的 Usage 里管理，或给 Aelios 设每周上限。<a href="https://chatgpt.com/#settings/Usage" target="_blank" rel="noopener" class="ml-1 underline hover:text-coral">Manage usage</a></p>
-              <button type="button" @click="chatgptWelcomed()" class="tap mt-4 w-full rounded-2xl bg-coral px-4 text-sm font-semibold text-zinc-950">Got it</button>
-            </div>
-          </div>
-        </article>
-
-        <article x-show="savedApiKey.trim() && !gwQuery.trim()" class="rounded-2xl border border-zinc-800 bg-zinc-900 p-4 shadow-sm">
+            </section>
+            <section class="mt-4 border-t border-zinc-800 pt-4">
           <div class="flex items-start justify-between gap-3">
             <div class="min-w-0">
-              <h2 class="text-sm font-semibold text-zinc-100">模型清单</h2>
+              <h3 class="text-sm font-semibold text-zinc-100">模型清单</h3>
               <p class="mt-0.5 text-[11px] leading-5 text-zinc-500">客户端的模型下拉只显示这里选的，上游几千个模型不再全倒出去。只管显示：清单外的模型照样能调用，能手填的客户端直接手填就行。留空则显示上游目录里的全部。</p>
             </div>
             <span class="chip shrink-0" :class="modelList.items.length ? 'chip-ok' : ''" x-text="!modelList.loaded ? '读取中' : modelList.items.length ? '显示 ' + modelList.items.length + ' 个' : '显示全部'"></span>
           </div>
           <p x-show="modelList.error" class="mt-2 text-xs text-coral" x-text="modelList.error"></p>
 
-          <ul x-show="modelList.items.length" class="mt-3 divide-y divide-zinc-800 rounded-xl border border-zinc-800 bg-[#0a0a0b]">
-            <template x-for="id in modelList.items" :key="id">
-              <li class="flex items-center justify-between gap-2 px-3 py-1.5">
-                <span class="min-w-0 break-all font-mono text-[11px] text-zinc-300" x-text="id"></span>
-                <button type="button" @click="modelListRemove(id)" :disabled="modelList.busy" :aria-label="'移除 ' + id" class="shrink-0 text-xs text-zinc-500 transition hover:text-coral disabled:opacity-50">移除</button>
+          <ul x-show="modelList.items.length" class="mt-3 rounded-xl border border-zinc-800 bg-[#0a0a0b]">
+            <template x-for="(id, index) in modelList.items" :key="id">
+              <li :class="index ? 'border-t border-zinc-800' : ''" class="px-3 py-1.5">
+                <div class="flex items-center gap-1">
+                  <span class="min-w-0 flex-1 break-all font-mono text-[11px] text-zinc-300" x-text="id"></span>
+                  <button type="button" @click="modelListCheck(id)" :disabled="modelListState(id) === 'testing'" :aria-label="'测试连通性 ' + id" :title="modelListCheckTitle(id)" class="icon-btn">
+                    <span x-show="modelListState(id) === 'ok'" class="h-2 w-2 rounded-full" style="background: var(--ok)"></span>
+                    <span x-show="modelListState(id) === 'testing'" class="animate-spin">${ICON_SPIN}</span>
+                    <span x-show="modelListState(id) === 'fail'" style="color: var(--err)">${ICON_LINK}</span>
+                    <span x-show="!modelListState(id)">${ICON_LINK}</span>
+                  </button>
+                  <button type="button" @click="modelListRemove(id)" :disabled="modelList.busy" :aria-label="'移除 ' + id" title="移除" class="icon-btn">${ICON_MINUS}</button>
+                </div>
+                <p x-show="modelListState(id) === 'fail'" class="mt-1 break-words text-[11px] leading-4 text-coral" x-text="modelList.checks[id] && modelList.checks[id].error"></p>
               </li>
             </template>
           </ul>
@@ -1531,14 +1549,16 @@ document.documentElement.dataset.theme = localStorage.getItem('aelios.admin.colo
             <p x-show="modelList.catalogReason" class="mb-2 text-[11px] leading-5 text-zinc-500" x-text="'上游目录没读到（' + modelList.catalogReason + '）。先检查上游地址和 CF 令牌，或者直接手填。'"></p>
             <input x-model="modelList.query" @input="modelListSearch()" aria-label="搜索模型" placeholder="搜索，如 claude、gpt-5、openrouter" class="h-10 w-full rounded-xl border border-zinc-800 bg-zinc-900 px-3 text-sm text-zinc-100 outline-none transition focus:border-coral">
             <p class="mt-1 text-[11px] text-zinc-500" x-text="modelList.total + ' 个可选' + (modelList.total > modelList.shown.length ? '，只列前 ' + modelList.shown.length + ' 个，输入关键词缩小范围' : '')"></p>
-            <ul class="mt-2 max-h-72 divide-y divide-zinc-800 overflow-y-auto">
-              <template x-for="id in modelList.shown" :key="id">
-                <li class="flex items-center justify-between gap-2 py-1.5">
+            <ul class="mt-2 max-h-72 overflow-y-auto">
+              <template x-for="(id, index) in modelList.shown" :key="id">
+                <li :class="index ? 'border-t border-zinc-800' : ''" class="flex items-center justify-between gap-2 py-1">
                   <span class="min-w-0 break-all font-mono text-[11px] text-zinc-300" x-text="id"></span>
-                  <button type="button" @click="modelListAdd([id])" :disabled="modelList.busy" :aria-label="'添加 ' + id" class="shrink-0 text-xs text-coral transition hover:underline disabled:opacity-50">添加</button>
+                  <button type="button" @click="modelListAdd([id])" :disabled="modelList.busy" :aria-label="'添加 ' + id" title="添加" class="icon-btn text-coral">${ICON_PLUS}</button>
                 </li>
               </template>
             </ul>
+          </div>
+            </section>
           </div>
         </article>
 
@@ -1670,6 +1690,15 @@ document.documentElement.dataset.theme = localStorage.getItem('aelios.admin.colo
   </div>
 
   <!-- 查看谁的记忆：平时收成侧栏 / 顶栏里的一行，点开才是完整面板，不再占着每一页的顶上。 -->
+  <!-- 在供应商块外面：块折着时它也要弹出来，而且文章卡片的毛玻璃会把里面的 fixed 困在卡片里、被后面的卡片盖住。 -->
+  <div x-show="chatgpt.welcomeOpen" class="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4" role="dialog" aria-modal="true" aria-label="You're using your ChatGPT plan">
+    <div class="w-full max-w-sm rounded-2xl border border-zinc-800 bg-zinc-900 p-5 shadow-xl">
+      <h3 class="text-base font-semibold text-zinc-100">You're using your ChatGPT plan</h3>
+      <p class="mt-2 text-xs leading-5 text-zinc-400">符合条件的请求会用你的 ChatGPT 套餐额度，计入套餐的用量限制。可以在 ChatGPT 设置的 Usage 里管理，或给 Aelios 设每周上限。<a href="https://chatgpt.com/#settings/Usage" target="_blank" rel="noopener" class="ml-1 underline hover:text-coral">Manage usage</a></p>
+      <button type="button" @click="chatgptWelcomed()" class="tap mt-4 w-full rounded-2xl bg-coral px-4 text-sm font-semibold text-zinc-950">Got it</button>
+    </div>
+  </div>
+
   <div x-show="spaceOpen" x-transition.opacity.duration.150ms @keydown.escape.window="spaceOpen = false" class="fixed inset-0 z-50">
     <div class="absolute inset-0 bg-[#0a0a0b]/70" @click="spaceOpen = false"></div>
     <section role="dialog" aria-modal="true" aria-label="选择助手的记忆" class="absolute inset-x-0 bottom-0 max-h-[85dvh] overflow-y-auto rounded-t-2xl border border-zinc-800 bg-zinc-900/95 p-4 pb-[max(16px,env(safe-area-inset-bottom))] shadow-sm md:bottom-auto md:top-16 md:mx-auto md:w-[34rem] md:rounded-2xl md:pb-4">
@@ -1855,7 +1884,32 @@ function memoryAdmin() {
     transfer: { info: null, exporting: false, entriesText: '', entriesName: '', preview: null, entriesMode: 'direct', entriesBusy: false, entriesRun: null, chat: null, chatLoading: false, chatClef: true, chatRun: null, batches: [] },
 
     // 模型清单：只决定 /v1/models 显示什么，不限制能调用什么。改一下存一下，跟设置项一样走同一条队列。
-    modelList: { items: [], loaded: false, busy: false, error: '', typed: '', catalog: [], catalogLoaded: false, catalogLoading: false, catalogReason: '', query: '', pickerOpen: false, shown: [], total: 0 },
+    modelList: { items: [], loaded: false, busy: false, error: '', typed: '', catalog: [], catalogLoaded: false, catalogLoading: false, catalogReason: '', query: '', pickerOpen: false, shown: [], total: 0, checks: {} },
+    providersSummary() {
+      var list = this.modelList;
+      return 'ChatGPT ' + this.chatgptChipText() + ' · 模型清单 ' + (!list.loaded ? '读取中' : list.items.length ? '显示 ' + list.items.length + ' 个' : '显示全部');
+    },
+    // 连通性：对清单里的一个模型发一条很短的真请求，走和聊天客户端同一条线路。通了变小绿点，没通显示上游的原话。
+    modelListState(id) { return (this.modelList.checks[id] || {}).state || ''; },
+    modelListCheckTitle(id) {
+      var check = this.modelList.checks[id] || {};
+      if (check.state === 'ok') return '通了 · ' + check.ms + ' 毫秒，再点一下重新测';
+      if (check.state === 'testing') return '测试中…';
+      if (check.state === 'fail') return '没通，点一下重试';
+      return '测试连通性（会发一条很短的请求）';
+    },
+    async modelListCheck(id) {
+      if (this.modelListState(id) === 'testing') return;
+      this.modelList.checks[id] = { state: 'testing' };
+      try {
+        var result = await this.request('/api/gateway/models/test', { method: 'POST', body: JSON.stringify({ model: id }) });
+        this.modelList.checks[id] = result.ok
+          ? { state: 'ok', ms: result.latency_ms }
+          : { state: 'fail', error: (result.status ? result.status + ' · ' : '') + (result.error || '没通') };
+      } catch (error) {
+        this.modelList.checks[id] = { state: 'fail', error: error.message };
+      }
+    },
     modelListSearch() {
       var list = this.modelList;
       var query = list.query.trim().toLowerCase();
@@ -1909,6 +1963,7 @@ function memoryAdmin() {
         try {
           var result = await self.request('/api/gateway/config', { method: 'PATCH', body: JSON.stringify({ modelList: next }) });
           list.items = result.modelList || [];
+          Object.keys(list.checks).forEach(function(name) { if (list.items.indexOf(name) < 0) delete list.checks[name]; });
           self.notify(list.items.length ? '清单存好了，现在显示 ' + list.items.length + ' 个模型' : '清单已清空，改回显示全部');
         } catch (error) {
           list.error = '没存上：' + error.message;

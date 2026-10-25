@@ -165,11 +165,11 @@ API clients opt in with `POST /v1/dream/run` and `{"background":true}` (plus the
 
 Skip all of that and memory recall + the overnight Dream still work (via Workers AI). An AI can do these three steps for you: see [Let an AI set it up](#let-an-ai-set-it-up).
 
-**Choose which models your app lists** — AI Gateway has thousands of models, and a chat app that only lets you pick from the list gets all of them. In `/admin` Settings → **Model list**, pick the ones you use from the upstream catalog and type in any name the catalog does not have (custom providers, dynamic routes, suffixes such as `:floor`). `GET /v1/models` then answers with exactly that list, in the order you added the models. It only changes what is shown: a model that is not on the list can still be called by name, as before. Leave it empty and nothing changes (the whole catalog is shown). With a list saved, the `chatgpt/…` models are shown only if you picked them; the picker lists them first.
+**Choose which models your app lists** — AI Gateway has thousands of models, and a chat app that only lets you pick from the list gets all of them. In `/admin` Settings → **Providers** → Model list, pick the ones you use from the upstream catalog (the `+` button) and type in any name the catalog does not have (custom providers, dynamic routes, suffixes such as `:floor`). The link button beside a listed model sends it one tiny real request, the way a chat client would, and turns into a green dot when it answers; the `−` button takes it off the list. `GET /v1/models` then answers with exactly that list, in the order you added the models. It only changes what is shown: a model that is not on the list can still be called by name, as before. Leave it empty and nothing changes (the whole catalog is shown). With a list saved, the `chatgpt/…` models are shown only if you picked them; the picker lists them first.
 
 **Use your ChatGPT plan** — on a ChatGPT Plus or Pro plan, let your assistant run on the plan instead of an API key (OpenAI's "Sign in with ChatGPT"):
 
-1. `/admin` → Settings → **ChatGPT plan** → *Continue with ChatGPT*. Sign in and approve.
+1. `/admin` → Settings → **Providers** → ChatGPT plan → *Continue with ChatGPT*. Sign in and approve.
 2. Your browser then lands on a `127.0.0.1` page that fails to load. That is expected: copy the whole address from the address bar, paste it into the box in `/admin` and press *Finish sign-in*.
 3. Use models named `chatgpt/<model>`. The *Test* button lists what your account can use. To give one memory, add `chatgpt/*` to the assistant's primary models.
 
@@ -243,6 +243,7 @@ Configuration has three layers, all under `/admin` Settings: upstream, assistant
 | POST | `/<assistant>/v1/messages` | Anthropic messages |
 | POST | `/<assistant>/v1/responses` | OpenAI responses |
 | GET | `/api/gateway/models` | Model picker for `/admin` (owner key): every upstream model id, your ChatGPT models, the saved list |
+| POST | `/api/gateway/models/test` | Connectivity test for one model (owner key): `{"model": "…"}` → one tiny chat request, `{ok, status, latency_ms, error?}`; nothing is recorded |
 | GET / POST | `/api/gateway/chatgpt/*` | ChatGPT plan sign-in (owner key): `status`, `login`, `callback`, `test`, `welcome`, `logout` |
 | GET / POST | `/mcp` | MCP memory tools |
 | GET / POST | `/v1/memories` | List / create memories |

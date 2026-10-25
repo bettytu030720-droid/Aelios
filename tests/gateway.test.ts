@@ -1281,3 +1281,87 @@ test("the picker catalog: owner only, every upstream id once and sorted, the sav
     assert.equal((await admin("GET", undefined, {}, "/api/gateway/models")).json.reason, "unexpected-catalog");
   } finally { globalThis.fetch = mock; }
 });
+
+// ---- model connectivity test: one tiny real request, sent the way a client's is, recorded nowhere ----
+const testModel = (model: any, headers: any = {}) => admin("POST", { model }, headers, "/api/gateway/models/test");
+const completion = (content = "OK") => Response.json({ model: "actual", choices: [{ index: 0, message: { content }, finish_reason: "stop" }] });
+
+test("model test: owner only, and the model must be a name", async () => {
+  assert.equal((await testModel("a/b", { authorization: "Bearer im-key" })).response.status, 401);
+  for (const bad of [undefined, "", "has space", "x".repeat(201), 7]) {
+    assert.equal((await testModel(bad)).response.status, 400, JSON.stringify(bad)?.slice(0, 20));
+  }
+  assert.equal(calls.length, 0, "nothing was sent upstream for a refused input");
+});
+
+test("model test: a model that answers passes, over the same chat route a client uses, and nothing is recorded", async () => {
+  const mock = globalThis.fetch;
+  globalThis.fetch = async (url: any, init: any) => { calls.push({ url: String(url), headers: Object.fromEntries(new Headers(init?.headers)), query: JSON.parse(init.body) }); return completion(" OK \n"); };
+  try {
+    const result = await testModel("openrouter/openai/gpt-6.1-sol:floor");
+    assert.equal(result.response.status, 200);
+    assert.equal(result.json.ok, true);
+    assert.equal(result.json.status, 200);
+    assert.equal(result.json.reply, "OK");
+    assert.equal(typeof result.json.latency_ms, "number");
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].url, "https://upstream.test/ai/v1/chat/completions");
+    assert.equal(calls[0].headers.authorization, "Bearer cf-token");
+    assert.equal(calls[0].query.model, "openrouter/openai/gpt-6.1-sol:floor");
+    assert.equal(calls[0].query.stream, false);
+    assert.equal(calls[0].query.max_tokens, 32);
+    assert.equal(calls[0].query.messages.length, 1, "no memory is added to a connectivity test");
+    await Promise.all(pending);
+    assert.equal(queue.length, 0);
+    assert.equal(count("gateway_exchanges"), 0);
+    assert.equal(count("messages"), 0);
+  } finally { globalThis.fetch = mock; }
+});
+
+test("model test: a refusal comes back with the upstream's own words; HTML is cut down; a 200 that is not a completion fails", async () => {
+  const mock = globalThis.fetch;
+  try {
+    globalThis.fetch = async () => Response.json({ error: { message: "The model `nope/x` does not exist." } }, { status: 404 });
+    const missing = await testModel("nope/x");
+    assert.deepEqual([missing.json.ok, missing.json.status, missing.json.error], [false, 404, "The model `nope/x` does not exist."]);
+    globalThis.fetch = async () => new Response(`<html>${"x".repeat(2000)}</html>`, { status: 502 });
+    const html = await testModel("a/b");
+    assert.equal(html.json.ok, false);
+    assert.equal(html.json.status, 502);
+    assert.ok(html.json.error.length <= 300);
+    globalThis.fetch = async () => Response.json({ hello: "world" });
+    assert.match((await testModel("a/b")).json.error, /not with a chat completion/);
+    globalThis.fetch = async () => new Response("<html>login</html>", { status: 200 });
+    assert.match((await testModel("a/b")).json.error, /not with JSON/);
+    globalThis.fetch = async () => { throw new Error("connection reset"); };
+    const reset = await testModel("a/b");
+    assert.deepEqual([reset.json.ok, reset.json.status, reset.json.error], [false, 0, "connection reset"]);
+  } finally { globalThis.fetch = mock; }
+  delete env.CLOUDFLARE_API_TOKEN;
+  const unset = await testModel("a/b");
+  assert.equal(unset.json.ok, false);
+  assert.match(unset.json.error, /CLOUDFLARE_API_TOKEN/);
+});
+
+test("model test: a reasoning model that wants max_completion_tokens is asked once more with it", async () => {
+  const mock = globalThis.fetch;
+  const sent: any[] = [];
+  globalThis.fetch = async (_url: any, init: any) => {
+    const body = JSON.parse(init.body); sent.push(body);
+    return "max_tokens" in body
+      ? Response.json({ error: { message: "Unsupported parameter: 'max_tokens' is not supported with this model. Use 'max_completion_tokens' instead." } }, { status: 400 })
+      : completion();
+  };
+  try {
+    const result = await testModel("openai/gpt-5");
+    assert.equal(result.json.ok, true);
+    assert.equal(sent.length, 2);
+    assert.equal(sent[1].max_completion_tokens, 32);
+    assert.equal("max_tokens" in sent[1], false);
+    // A 400 about anything else is the answer, not a reason to retry.
+    sent.length = 0;
+    globalThis.fetch = async (_url: any, init: any) => { sent.push(1); return Response.json({ error: { message: "bad key" } }, { status: 400 }); };
+    const other = await testModel("openai/gpt-5");
+    assert.deepEqual([other.json.ok, other.json.error, sent.length], [false, "bad key", 1]);
+  } finally { globalThis.fetch = mock; }
+});
