@@ -1044,3 +1044,21 @@ test("a stalled ChatGPT does not hold up /v1/models: the rest of the list still 
     assert.ok(!body.data.some((item: any) => String(item.id).startsWith("chatgpt/")));
   } finally { TIMEOUTS.modelsMs = before; }
 });
+
+test("model test: a chatgpt/ model is tried on the plan route with the plan token, and says so when nobody is signed in", async () => {
+  const signedOut = await (await post("/api/gateway/models/test", { model: "chatgpt/gpt-test" })).json() as any;
+  assert.equal(signedOut.ok, false);
+  assert.equal(openai().length, 0, "nothing goes to OpenAI without a sign-in");
+  await signIn();
+  const result = await (await post("/api/gateway/models/test", { model: "chatgpt/gpt-test" })).json() as any;
+  assert.equal(result.ok, true, JSON.stringify(result));
+  assert.equal(result.status, 200);
+  assert.equal(openai().length, 1);
+  assert.equal(openai()[0].headers.authorization, "Bearer access-live");
+  assert.equal(openai()[0].body.model, "gpt-test");
+  assert.equal(openai()[0].body.stream, true);
+  assert.equal(openai()[0].body.store, false);
+  assert.equal(asked.filter(item => item.url.includes("upstream.test")).length, 0, "the CF upstream is never touched");
+  await Promise.all(pending);
+  assert.equal(queue.length, 0);
+});

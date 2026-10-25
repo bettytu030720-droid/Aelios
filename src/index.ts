@@ -31,7 +31,7 @@ import {
 import { handleMcp } from "./api/mcp";
 import { handleNotebookApi } from "./api/notebook";
 import { handleImportApi } from "./api/transfer";
-import { handleModels } from "./api/models";
+import { handleModelCatalog, handleModelTest, handleModels } from "./api/models";
 import { handleRelationsGraph } from "./api/relations";
 import { runCandidateJudge } from "./memory/candidateJudge";
 import { runDailyMemoryDigest, runDreamBackfill } from "./memory/dailyDigest";
@@ -111,6 +111,10 @@ export default {
     if (url.pathname.startsWith("/api/gateway/chatgpt/")) return handleChatGptAdmin(request, deployed, ctx);
 
     const env = applySettings(deployed, await loadSettings(deployed));
+
+    // Reads the same catalog /v1/models does, so it takes the saved gateway ID like the chat routes below.
+    if (request.method === "GET" && url.pathname === "/api/gateway/models") return handleModelCatalog(request, env, ctx);
+    if (request.method === "POST" && url.pathname === "/api/gateway/models/test") return handleModelTest(request, env, ctx);
 
     if (
       request.method === "POST" &&
