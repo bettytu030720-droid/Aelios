@@ -44,6 +44,8 @@ Aelios 负责身份、临时召回和自动记录，客户端 Harness 负责工�
 `GET /v1/models` 透传上游模型目录：CF 账号走 AI Gateway 的 compat 目录（`gateway.ai.cloudflare.com/v1/{账号}/{网关}/compat/models`，REST 无 GET /models），自定义地址走 `{base}/models`；上游答不上或无 CF token 时回落为主模型白名单提示。
 
 聊天协议路由(仅 CF 上游;自定义地址原样透传):chat 走 `…/{网关}/compat/chat/completions`(全 provider,BYOK);messages 走 `…/{网关}/{provider}/v1/messages`,responses 走 `…/{网关}/{provider}/v1/responses`(openai 特例无 v1),模型名剥掉 provider 前缀,CF token 以 `cf-aig-authorization` 头携带;provider 不认的协议由上游如实报错。无前缀的模型名网关内直接 400,不打上游。
+
+`chatgpt/<模型>` 是第二条上游:主人自己的 ChatGPT 套餐(Sign in with ChatGPT,开源应用 token 共享)。模型名带 `chatgpt/` 就不碰上面的 CF 上游和 `CLOUDFLARE_API_TOKEN`(没配 CF 也能用),直接 `POST https://api.openai.com/v1/responses`,Bearer 是 `/admin` 登录拿到的 access token,body 一律 `store:false`、`stream:true`。chat 和 messages 请求在 memory 追加之后才翻成 Responses(system→`instructions`,tool_calls / tool_use↔`function_call`,tool_result→`function_call_output`,工具展开并显式写 `strict`;messages 的 thinking 设置映射成 `reasoning.effort` 加 `summary:"auto"`,历史里的 thinking 块丢掉,回来的 reasoning 摘要变成 thinking 块),回来的 SSE 先翻回调用方的协议(chat chunk / Anthropic 事件序列,块严格一个接一个)再交给记录器,所以记忆召回和落库跟别的主模型一样。三种协议都收,responses 基本直通;messages 不套 Anthropic 的 thinking 绑定策略;官方列出的不支持字段会被剥掉并计入 `x-aelios-normalized`,托管工具、`previous_response_id`、`n>1`、音频输入在发出去之前就 400。首个有内容的事件之前失败(用量到顶、没有资格)是真 HTTP 状态,之后的失败是流里的 error 帧。登录、刷新(refresh token 每次轮换,靠 D1 里的租约串行)、日志红线的细节在 `src/chatgpt/` 各文件头的契约注释里。
 管理配置允许 `CHATBOX_API_KEY` / `DEBUG_API_KEY`。旧 MCP 与记忆管理权限不变。
 
 ## 首次配置

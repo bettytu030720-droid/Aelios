@@ -15,6 +15,8 @@ import { handleGatewayAdmin, handleGatewayEnv, handleGatewaySpaces, handleRecall
 import { identityNamespace, loadConfig, loadSettings, type Protocol } from "./gateway/config";
 import { applySettings } from "./gateway/settings";
 import { handleGuideDogChatCompletions } from "./api/guideDog";
+import { handleChatGptAdmin } from "./chatgpt/admin";
+import { keepChatGptAlive } from "./chatgpt/token";
 import {
   handleGlossaryApi,
   handleIngestMessagesApi,
@@ -101,6 +103,7 @@ export default {
     if (request.method === "GET" && url.pathname === "/api/gateway/spaces") return handleGatewaySpaces(request, deployed);
 
     if (request.method === "GET" && url.pathname === "/api/gateway/recalls") return handleRecallHistory(request, deployed);
+    if (url.pathname.startsWith("/api/gateway/chatgpt/")) return handleChatGptAdmin(request, deployed, ctx);
 
     const env = applySettings(deployed, await loadSettings(deployed));
 
@@ -108,14 +111,14 @@ export default {
       request.method === "POST" &&
       (url.pathname === "/v1/guide-dog/chat/completions" || url.pathname === "/guide-dog/v1/chat/completions")
     ) {
-      return handleGuideDogChatCompletions(request, env);
+      return handleGuideDogChatCompletions(request, env, ctx);
     }
 
     const route = gatewayRoute(url.pathname);
     if (route) {
       const protocol = GATEWAY_ENDPOINTS[route.endpoint];
       if (protocol && request.method === "POST") return handleGateway(request, env, ctx, protocol, route.slug);
-      if (route.endpoint === "models" && request.method === "GET") return handleModels(request, env, route.slug);
+      if (route.endpoint === "models" && request.method === "GET") return handleModels(request, env, route.slug, ctx);
     }
 
     if (request.method === "GET" && (url.pathname === "/admin" || url.pathname === "/memory-admin")) {
@@ -266,6 +269,8 @@ export default {
       console.log("scheduled memory maintenance skipped unknown cron", { cron });
       return;
     }
+
+    ctx.waitUntil(keepChatGptAlive(deployed));
 
     ctx.waitUntil(
       (async () => {

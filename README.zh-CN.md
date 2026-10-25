@@ -153,6 +153,14 @@ GitHub 不会自己更新 Fork。有新版本时：
 
 不配这些，记忆召回和夜间整理也能跑（走 Workers AI）。这三步可以交给 AI 做，见[让 AI 帮你配](#让-ai-帮你配)。
 
+**用你的 ChatGPT 套餐**（有 ChatGPT Plus / Pro，想让助手直接用套餐额度，不用 API key；走的是 OpenAI 的 Sign in with ChatGPT）
+
+1. `/admin` → 设置 → **ChatGPT 套餐** → *Continue with ChatGPT*，登录并同意。
+2. 同意之后浏览器会跳到一个打不开的 `127.0.0.1` 页面，**这是正常的**：把地址栏里那一整条地址复制下来，贴进 `/admin` 里的框，点「完成登录」。
+3. 模型名写 `chatgpt/<模型名>`；点「测试」能看到你这个账号能用哪些。想让它带记忆，把 `chatgpt/*` 加进助手的主模型。
+
+要知道的：它只连你自己的账号，别把这条线路分给别人。用量计入你套餐的限额（ChatGPT 设置 → Usage 里管）。chat/completions、Anthropic messages、responses 三种格式的客户端都能用（前两种会翻成 Responses 再翻回来，Claude 那种带思考块的也行）；OpenAI 的套餐线路不收图片生成、文件搜索、代码解释器、MCP 这类托管工具，函数工具和联网搜索可以。不用加新的 Secret：token 加密存在 D1 里，密钥由 `CHATBOX_API_KEY` 派生，换了这把 key 就要重新登录。`npm run deploy` 会把新迁移一并应用。夜间任务也能用套餐：在设置里把 Dream 用的模型（日记模型也行）填成 `chatgpt/<模型名>`。它们一晚上会发好几次请求，都算在套餐额度里；哪晚额度用完，这些任务就像别的模型报错一样失败，记忆库本身不受影响。
+
 **在 Claude 官方 App（网页、手机）、Claude Code、Codex 里用 MCP 记忆**
 
 ```
@@ -229,6 +237,7 @@ CF 上游：chat 走 compat（全厂商，BYOK）；messages / responses 走各�
 | POST | `/<助手>/v1/chat/completions` | OpenAI 兼容聊天 |
 | POST | `/<助手>/v1/messages` | Anthropic messages |
 | POST | `/<助手>/v1/responses` | OpenAI responses |
+| GET / POST | `/api/gateway/chatgpt/*` | ChatGPT 套餐登录（主人钥匙）：`status`、`login`、`callback`、`test`、`welcome`、`logout` |
 | GET / POST | `/mcp` | MCP 记忆工具 |
 | GET / POST | `/v1/memories` | 记忆列表 / 新建 |
 | POST | `/v1/memory/recall` | 动态召回（hook 优先用这个） |

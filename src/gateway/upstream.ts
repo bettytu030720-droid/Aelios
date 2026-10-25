@@ -2,6 +2,9 @@ import type { Env } from "../types";
 import { isMainModel, PATHS, type GatewayConfig, type Identity, type Protocol } from "./config";
 import { applyThinkingPolicy, PROTECTED_TOOL_FIELDS, rejectedFieldNames, sanitizeCacheControl, STRIPPABLE_TOOL_FIELDS, stripToolField, type Body } from "./protocol";
 import { normalizeRequest, validateRequest } from "./request";
+import { MODEL_PREFIX, RESPONSES_URL } from "../chatgpt/client";
+import { callChatGptUpstream } from "../chatgpt/upstream";
+import { toChatGptRequest } from "../chatgpt/toResponses";
 
 const ACCOUNT_RE = /^[a-f0-9]{32}$/i;
 /** Second path segment that is a protocol leftover, not a Gateway ID. */
@@ -86,8 +89,22 @@ export interface UpstreamRoute {
   url: string;
   /** Provider endpoints take the native name; compat keeps the author-prefixed one. */
   model: string;
-  /** Provider endpoints carry the CF token as cf-aig-authorization (BYOK); bearer elsewhere. */
-  auth: "bearer" | "cf-aig";
+  /**
+   * Provider endpoints carry the CF token as cf-aig-authorization (BYOK); bearer elsewhere.
+   * "chatgpt" is the owner's ChatGPT plan: it has its own token, and the CF token never goes there.
+   */
+  auth: "bearer" | "cf-aig" | "chatgpt";
+}
+
+/**
+ * `chatgpt/<model>` runs on the owner's ChatGPT plan (Sign in with ChatGPT), straight to the public Responses API.
+ * Chat, messages and responses callers all get through: the first two are translated both ways.
+ */
+export function chatGptRoute(model: string): UpstreamRoute | null {
+  if (!model.toLowerCase().startsWith(MODEL_PREFIX)) return null;
+  const slug = model.slice(MODEL_PREFIX.length).trim();
+  if (!slug) throw new UpstreamRouteError(`"${model}" has no model name after ${MODEL_PREFIX}`);
+  return { url: RESPONSES_URL, model: slug, auth: "chatgpt" };
 }
 
 /**
@@ -119,20 +136,25 @@ export function nativeAnthropic(route: UpstreamRoute): boolean {
 // One call, one upstream. Model names pass through as written (minus the provider
 // prefix on native endpoints); retries and fallback are AI Gateway's own job.
 export interface PreparedRequest { route: UpstreamRoute; headers: Headers; body: Body; removed: string[];
+  /** The model name as the caller wrote it; the route may have trimmed a prefix off `body.model`. */
+  requestedModel: string;
   /** Set when auto guessed adaptive thinking; holds the client's own anthropic-beta for the fallback. */
   guessedThinking?: { beta: string | null };
 }
 export function prepareGatewayRequest(env: Env, config: GatewayConfig, identity: Identity,
   protocol: Protocol, original: Request, body: Body): PreparedRequest {
   const token = env.CLOUDFLARE_API_TOKEN;
-  if (!token) throw new Error("Missing Worker secret CLOUDFLARE_API_TOKEN");
-  const route = routeFor(resolveUpstream(env, config), protocol, body.model);
+  const chatgpt = chatGptRoute(body.model);
+  if (!chatgpt && !token) throw new Error("Missing Worker secret CLOUDFLARE_API_TOKEN");
+  const route = chatgpt ?? routeFor(resolveUpstream(env, config), protocol, body.model);
   const headers = new Headers({
     "content-type": "application/json",
     accept: body.stream ? "text/event-stream" : "application/json"
   });
   if (route.auth === "cf-aig") headers.set("cf-aig-authorization", `Bearer ${token}`);
-  else headers.set("authorization", `Bearer ${token}`);
+  else if (route.auth === "bearer") headers.set("authorization", `Bearer ${token}`);
+  // Copied for every route: request validation reads the caller's betas (interleaved thinking and the like). The
+  // ChatGPT route builds its own headers for OpenAI, so none of these are forwarded there.
   for (const name of ["anthropic-version", "anthropic-beta", "openai-beta", "x-stainless-helper-method"]) {
     const value = original.headers.get(name);
     if (value) headers.set(name, value);
@@ -142,12 +164,15 @@ export function prepareGatewayRequest(env: Env, config: GatewayConfig, identity:
   const out = normalized.body;
   out.model = route.model;
   const clientBeta = headers.get("anthropic-beta");
-  const guessed = isMainModel(identity, body.model) &&
+  // The thinking-binding policy is Anthropic-line plumbing; a ChatGPT answer has no Anthropic signature to bind.
+  const guessed = !chatgpt && isMainModel(identity, body.model) &&
     applyThinkingPolicy(out, identity, protocol, headers, nativeAnthropic(route));
   validateRequest(out, protocol, headers);
   sanitizeCacheControl(out, protocol);
   validateRequest(out, protocol, headers);
-  return { route, headers, body: out, removed: normalized.removed,
+  // A request ChatGPT plan usage cannot take is the caller's 400, found before recall or recording spends anything.
+  if (chatgpt) toChatGptRequest(out, protocol, route.model);
+  return { route, headers, body: out, removed: normalized.removed, requestedModel: body.model,
     ...(guessed ? { guessedThinking: { beta: clientBeta } } : {}) };
 }
 // Isolate-scope learned capability: Vertex-backed and relay lines answer 400
@@ -178,10 +203,15 @@ function preStrippedToolFields(env: Env): string[] {
 }
 
 export async function callGatewayUpstream(env: Env, protocol: Protocol, original: Request,
-  prepared: PreparedRequest, body: Body): Promise<Response> {
+  prepared: PreparedRequest, body: Body, ctx?: ExecutionContext): Promise<Response> {
   const { route, headers } = prepared;
   // Check the actual wire payload, including the gateway's own modifications.
   validateRequest(body, protocol, headers);
+  if (route.auth === "chatgpt") {
+    return callChatGptUpstream(env, protocol, original.signal,
+      { model: route.model, requestedModel: prepared.requestedModel, removed: prepared.removed }, body,
+      ctx ? promise => ctx.waitUntil(promise) : undefined);
+  }
   const learned = rejectedToolFields.get(route.url);
   if (learned) for (const field of learned) stripToolField(body, field);
   for (const field of preStrippedToolFields(env)) stripToolField(body, field);
