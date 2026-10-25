@@ -12,8 +12,8 @@ export function isChatGptModel(model: unknown): model is string {
 }
 
 /** `waitUntil`, when the caller has one, keeps a token refresh alive past a client that hangs up. */
-export function callChatGptChat(env: Env, body: OpenAIChatRequest, waitUntil?: WaitUntil): Promise<Response> {
+export function callChatGptChat(env: Env, body: OpenAIChatRequest, waitUntil?: WaitUntil, signal?: AbortSignal): Promise<Response> {
   const requested = body.model.trim();
-  return callChatGptUpstream(env, "chat", undefined,
+  return callChatGptUpstream(env, "chat", signal,
     { model: requested.slice(MODEL_PREFIX.length).trim(), requestedModel: requested, removed: [] }, body as unknown as Body, waitUntil);
 }

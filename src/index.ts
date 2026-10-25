@@ -9,7 +9,7 @@ import {
 } from "./api/admin";
 import { handleHealth } from "./api/health";
 import { handleVectorBackfill, handleVectorDoctor, handleVectorHealth, handleVectorReindex } from "./api/debug";
-import { handleDreamHarvest, handleDreamRun, handleDreamStatus } from "./api/dream";
+import { handleDreamHarvest, handleDreamResolve, handleDreamRun, handleDreamStatus } from "./api/dream";
 import { handleGateway } from "./gateway/handler";
 import { handleGatewayAdmin, handleGatewayEnv, handleGatewaySpaces, handleRecallHistory } from "./gateway/admin";
 import { identityNamespace, loadConfig, loadSettings, type Protocol } from "./gateway/config";
@@ -242,6 +242,10 @@ export default {
 
     if (request.method === "POST" && url.pathname === "/v1/dream/run") {
       return handleDreamRun(request, env);
+    }
+
+    if (request.method === "POST" && url.pathname === "/v1/dream/resolve") {
+      return handleDreamResolve(request, env);
     }
 
     return openAiError("Not found", 404);

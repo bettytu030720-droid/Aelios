@@ -21,6 +21,8 @@ function readWorkersAiChatContent(result: unknown): string {
     result?: unknown;
   };
   if (typeof value.response === "string") return value.response;
+  // Workers AI JSON mode may already return a structured object rather than a JSON string.
+  if (value.response && typeof value.response === "object") return JSON.stringify(value.response);
   if (typeof value.answer === "string") return value.answer;
   if (typeof value.caption === "string") return value.caption;
   // Moondream nests its payload one level down: {result: {answer, caption, …}, usage}.
@@ -112,6 +114,10 @@ function buildWorkersAiRunInput(body: OpenAIChatRequest): Record<string, unknown
 
 function wrapWorkersAiChatResponse(model: string, result: unknown): OpenAIChatResponse {
   const content = readWorkersAiChatContent(result);
+  const native = result as { choices?: Array<{ finish_reason?: unknown; message?: { reasoning_content?: unknown } }>; finish_reason?: unknown } | null;
+  const choice = native?.choices?.[0];
+  const finishReason = choice?.finish_reason ?? native?.finish_reason;
+  const reasoning = choice?.message?.reasoning_content;
   const usage =
     result && typeof result === "object" && "usage" in result
       ? (result as { usage?: OpenAIChatResponse["usage"] }).usage
@@ -124,8 +130,8 @@ function wrapWorkersAiChatResponse(model: string, result: unknown): OpenAIChatRe
     choices: [
       {
         index: 0,
-        message: { role: "assistant", content },
-        finish_reason: "stop"
+        message: { role: "assistant", content, ...(typeof reasoning === "string" ? { reasoning_content: reasoning } : {}) },
+        finish_reason: typeof finishReason === "string" ? finishReason : "stop"
       }
     ],
     ...(usage ? { usage } : {})
@@ -191,9 +197,9 @@ export function buildOpenAICompatHeaders(env: Env): Headers {
   return headers;
 }
 
-export async function callOpenAICompat(env: Env, body: OpenAIChatRequest, waitUntil?: (promise: Promise<unknown>) => void): Promise<Response> {
+export async function callOpenAICompat(env: Env, body: OpenAIChatRequest, waitUntil?: (promise: Promise<unknown>) => void, signal?: AbortSignal): Promise<Response> {
   // The owner's ChatGPT plan: its own sign-in and route, no AI Gateway and no CF token.
-  if (isChatGptModel(body.model)) return callChatGptChat(env, body, waitUntil);
+  if (isChatGptModel(body.model)) return callChatGptChat(env, body, waitUntil, signal);
   const workersAiModel = workersAiModelName(body.model);
   if (workersAiModel) {
     if (!env.AI) {
@@ -205,7 +211,7 @@ export async function callOpenAICompat(env: Env, body: OpenAIChatRequest, waitUn
 
     try {
       if (isMoondreamModel(workersAiModel)) {
-        const result = await env.AI.run(workersAiModel as never, buildMoondreamRunInput(body));
+        const result = await env.AI.run(workersAiModel as never, buildMoondreamRunInput(body), { signal });
         const wrapped = wrapWorkersAiChatResponse(body.model, result);
         if (body.stream) {
           return new Response(toSingleChunkSse(wrapped), {
@@ -223,14 +229,14 @@ export async function callOpenAICompat(env: Env, body: OpenAIChatRequest, waitUn
         const stream = await env.AI.run(workersAiModel as never, {
           ...buildWorkersAiRunInput(body),
           stream: true
-        });
+        }, { signal });
         return new Response(stream as unknown as BodyInit, {
           status: 200,
           headers: { "content-type": "text/event-stream" }
         });
       }
 
-      const result = await env.AI.run(workersAiModel as never, buildWorkersAiRunInput(body));
+      const result = await env.AI.run(workersAiModel as never, buildWorkersAiRunInput(body), { signal });
       return new Response(JSON.stringify(wrapWorkersAiChatResponse(body.model, result)), {
         status: 200,
         headers: { "content-type": "application/json" }
@@ -247,12 +253,13 @@ export async function callOpenAICompat(env: Env, body: OpenAIChatRequest, waitUn
   if (env.AI_GATEWAY_ID && env.AI) {
     return env.AI.gateway(env.AI_GATEWAY_ID).run({
       provider: "compat", endpoint: "chat/completions", headers: {}, query: body
-    });
+    }, { signal });
   }
   return fetch(getOpenAICompatUrl(env), {
     method: "POST",
     headers: buildOpenAICompatHeaders(env),
-    body: JSON.stringify(body)
+    body: JSON.stringify(body),
+    signal
   });
 }
 

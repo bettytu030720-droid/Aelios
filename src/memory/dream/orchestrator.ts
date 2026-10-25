@@ -98,13 +98,36 @@ export async function runDailyMemoryDigest(
   namespace: string,
   options: DailyDigestRunOptions = {}
 ): Promise<DailyDigestRunResult> {
-  if (!isDreamEnabled(env)) return { ran: false, mode: "dream", reason: "dream_disabled" };
+  let dreamRunId = options.runId ?? null;
+  try {
+    if (!isDreamEnabled(env)) {
+      await safeFinishDreamRun(env.DB, { id: dreamRunId, status: "skipped", reason: "dream_disabled" });
+      return { ran: false, mode: "dream", reason: "dream_disabled" };
+    }
+    const timeZone = readDreamTimeZone(env);
+    const dateLabel = readString(options.dateLabel) || getTargetDigestDateLabel(timeZone);
+    dreamRunId ??= await safeInsertDreamRun(env.DB, { namespace, dateLabel, trigger: options.trigger ?? "cron" });
+    return await performDailyMemoryDigest(env, namespace, options, { dreamRunId, timeZone, dateLabel });
+  } catch (error) {
+    await safeFinishDreamRun(env.DB, {
+      id: dreamRunId,
+      status: "error",
+      reason: "run_failed",
+      error: "Dream stopped before completion; earlier writes may already exist. Inspect Worker logs before retrying."
+    });
+    console.error("dream: run failed", { runId: dreamRunId, error });
+    throw error;
+  }
+}
 
+async function performDailyMemoryDigest(
+  env: Env,
+  namespace: string,
+  options: DailyDigestRunOptions,
+  run: { dreamRunId: string | null; timeZone: string; dateLabel: string }
+): Promise<DailyDigestRunResult> {
+  const { dreamRunId, timeZone, dateLabel } = run;
   const dryRun = options.dryRun === true;
-  const trigger = options.trigger ?? "cron";
-  const timeZone = readDreamTimeZone(env);
-  const dateLabel = readString(options.dateLabel) || getTargetDigestDateLabel(timeZone);
-  const dreamRunId = await safeInsertDreamRun(env.DB, { namespace, dateLabel, trigger });
   const { startIso, endIso } = getDateRangeForLabel(dateLabel, timeZone);
   const cursorName = `dream:${namespace}:${dateLabel}`;
   const legacyCursorName = `daily_digest:${namespace}:${dateLabel}`;
@@ -220,18 +243,20 @@ export async function runDailyMemoryDigest(
     await safeFinishDreamRun(env.DB, {
       id: dreamRunId,
       status: "error",
-      reason: extractPhase.extractReason === "model_invalid_json" ? "extract_invalid_json" : "extract_model_error",
+      reason: extractPhase.extractReason === "model_invalid_json" ? "extract_invalid_json"
+        : extractPhase.extractReason === "model_timeout" ? "extract_model_timeout" : "extract_model_error",
       model: extractPhase.extractModel ?? modelResult.model,
       processedMessages: messages.length,
       error: extractPhase.extractStatus
         ? `status=${extractPhase.extractStatus}`
-        : extractPhase.extractReason
+        : extractPhase.extractFinishReason ? `finish_reason=${extractPhase.extractFinishReason}` : extractPhase.extractReason
     });
     return {
       ran: false,
       mode: "dream",
       date: dateLabel,
-      reason: extractPhase.extractReason === "model_invalid_json" ? "extract_invalid_json" : "extract_model_error",
+      reason: extractPhase.extractReason === "model_invalid_json" ? "extract_invalid_json"
+        : extractPhase.extractReason === "model_timeout" ? "extract_model_timeout" : "extract_model_error",
       startIso,
       endIso,
       cursor,

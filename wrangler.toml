@@ -89,7 +89,8 @@ queue = "companion-memory"
 
 [[queues.consumers]]
 queue = "companion-memory"
-max_batch_size = 10
+# Dream is a long-running job: do not share one invocation's time budget across several dreams.
+max_batch_size = 1
 max_batch_timeout = 30
 
 # 不写 database_id：Deploy 按钮 / wrangler 自动开资源按名字建库，

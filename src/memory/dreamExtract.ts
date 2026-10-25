@@ -1,6 +1,6 @@
 import { listActiveFactKeys, listDailyLogsInRange } from "../db/v2";
 import { loadConfig, speakersForNamespace, type DreamSpeakers } from "../gateway/config";
-import { callOpenAICompat } from "../proxy/openaiAdapter";
+import { callDreamModelJson, DreamModelTimeoutError } from "./dream/modelCall";
 import type { Env, MessageRecord, OpenAIChatRequest, OpenAIChatResponse } from "../types";
 import { clampScore, extractJsonObject, readString, readStringArray } from "../utils/parse";
 import { CHAT_MATERIAL_RULES, clipMiddle, escapeChatTags, formatChatMaterial } from "./chatMaterial";
@@ -10,13 +10,15 @@ import { clampMemoryType } from "./canonicalTypes";
 import { speakerLabel } from "./speakers";
 import type { ExtractedMemory } from "./extract";
 
-const DEFAULT_DREAM_EXTRACT_MAX_TOKENS = 1200;
+// Same budget as the digest call: a smaller extract cap truncated the candidate list (and any reasoning tokens) of a full batch.
+const DEFAULT_DREAM_EXTRACT_MAX_TOKENS = 3000;
+const MAX_DREAM_EXTRACT_MAX_TOKENS = 8000;
 const DEFAULT_WORKERS_AI_DREAM_MODEL = "workers-ai/@cf/openai/gpt-oss-120b";
 
 export interface DreamExtractModelResult {
   memories: ExtractedMemory[];
   model?: string;
-  reason?: "missing_model" | "model_error" | "model_invalid_json";
+  reason?: "missing_model" | "model_error" | "model_timeout" | "model_invalid_json";
   status?: number;
   /** 模型回的用量 (有就带上)。导入聊天记录要按段显示花了多少 token。 */
   usage?: { input: number; output: number };
@@ -67,11 +69,20 @@ function parseExtractModelOutput(text: string): ExtractedMemory[] | null {
   const parsed = extractJsonObject(text);
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
   const raw = parsed as Record<string, unknown>;
-  const memories = Array.isArray(raw.memories) ? raw.memories : Array.isArray(raw.candidates) ? raw.candidates : [];
-  return memories.flatMap((item): ExtractedMemory[] => {
+  const memories = Array.isArray(raw.memories) ? raw.memories : Array.isArray(raw.candidates) ? raw.candidates : null;
+  // A missing/wrong-shaped list is not a valid empty extraction: never advance the cursor on it.
+  if (!memories) return null;
+  const kept = memories.flatMap((item): ExtractedMemory[] => {
     const candidate = normalizeCandidate(item);
     return candidate ? [candidate] : [];
   });
+  // Individual bad entries (blank, over-long, wrong type) are dropped and counted so one of them cannot stall the batch.
+  // Only a non-empty list in which nothing was usable is treated as malformed output rather than "nothing to remember".
+  if (memories.length > 0 && kept.length === 0) return null;
+  if (kept.length < memories.length) {
+    console.warn("dream extract: dropped unusable candidates", { dropped: memories.length - kept.length, kept: kept.length });
+  }
+  return kept;
 }
 
 function formatTranscript(messages: MessageRecord[], speakers: DreamSpeakers | null): string {
@@ -201,7 +212,8 @@ async function callDreamExtractModel(
   messages: MessageRecord[],
   existingFactKeys: string[],
   speakers: DreamSpeakers | null,
-  background: DiaryBackground[]
+  background: DiaryBackground[],
+  deadlineAt?: number
 ): Promise<DreamExtractModelResult> {
   const model = readDreamExtractModel(env);
   if (!model) return { memories: [], reason: "missing_model" };
@@ -213,27 +225,33 @@ async function callDreamExtractModel(
       { role: "user", content: buildDreamExtractPrompt(messages, existingFactKeys, speakers, background) }
     ],
     temperature: 0,
-    max_tokens: readPositiveInt(env.DREAM_MAX_TOKENS, DEFAULT_DREAM_EXTRACT_MAX_TOKENS, 4000),
+    max_tokens: readPositiveInt(env.DREAM_MAX_TOKENS, DEFAULT_DREAM_EXTRACT_MAX_TOKENS, MAX_DREAM_EXTRACT_MAX_TOKENS),
     response_format: { type: "json_object" },
     stream: false
   };
 
   try {
-    const response = await callOpenAICompat(env, request);
+    const response = await callDreamModelJson(env, request,
+      deadlineAt === undefined ? undefined : Math.min(120_000, deadlineAt - Date.now()));
     if (!response.ok) return { memories: [], model, reason: "model_error", status: response.status };
-    const parsed = (await response.json()) as OpenAIChatResponse;
-    const usage = readUsage(parsed.usage);
-    const choice = parsed.choices?.[0] as { finish_reason?: unknown } | undefined;
+    const parsed = response.parsed;
+    const usage = readUsage(parsed?.usage);
+    const choice = parsed?.choices?.[0] as { finish_reason?: unknown } | undefined;
     const finishReason = typeof choice?.finish_reason === "string" ? choice.finish_reason : null;
-    const message = parsed.choices?.[0]?.message as ({ content?: unknown; reasoning_content?: unknown }) | undefined;
+    const message = parsed?.choices?.[0]?.message as ({ content?: unknown; reasoning_content?: unknown }) | undefined;
     const content = typeof message?.content === "string" ? message.content.trim() : "";
     const reasoning = typeof message?.reasoning_content === "string" ? message.reasoning_content.trim() : "";
     const memories = parseExtractModelOutput(content || reasoning);
-    if (!memories) return { memories: [], model, reason: "model_invalid_json", usage, finishReason };
+    if (!memories) {
+      console.error("dream extract: invalid JSON or candidate shape", {
+        model, finishReason, contentChars: content.length, reasoningChars: reasoning.length
+      });
+      return { memories: [], model, reason: "model_invalid_json", usage, finishReason };
+    }
     return { memories, model, usage, finishReason };
   } catch (error) {
     console.error("dream extract: model failed", { model, error });
-    return { memories: [], model, reason: "model_error" };
+    return { memories: [], model, reason: error instanceof DreamModelTimeoutError ? "model_timeout" : "model_error" };
   }
 }
 
@@ -263,6 +281,8 @@ export async function extractDreamMemoriesFromMessages(
     extraFactKeys?: string[];
     /** false 就不拿前几天的日记当背景 (导入的旧聊天跟现在的日记对不上)。 */
     diaryBackground?: boolean;
+    /** Internal extraction-phase budget, including batch reduction retries. */
+    deadlineAt?: number;
   }
 ): Promise<DreamExtractModelResult> {
   const [activeFactKeys, background] = await Promise.all([
@@ -277,5 +297,5 @@ export async function extractDreamMemoriesFromMessages(
   const speakers = input.speakers !== undefined
     ? input.speakers
     : speakersForNamespace(await loadConfig(env), input.namespace);
-  return callDreamExtractModel(env, input.messages, existingFactKeys, speakers, background);
+  return callDreamExtractModel(env, input.messages, existingFactKeys, speakers, background, input.deadlineAt);
 }

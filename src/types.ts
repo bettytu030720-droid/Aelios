@@ -115,7 +115,15 @@ export interface RetentionQueueMessage {
   namespace: string;
 }
 
-export type QueueMessage = RetentionQueueMessage | import("./gateway/record").GatewayExchange;
+export interface DreamRunQueueMessage {
+  type: "dream_run";
+  runId: string;
+  namespace: string;
+  dateLabel: string;
+  force: boolean;
+}
+
+export type QueueMessage = RetentionQueueMessage | DreamRunQueueMessage | import("./gateway/record").GatewayExchange;
 
 export type Scope =
   | "chat:proxy"
