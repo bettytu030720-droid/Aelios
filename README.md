@@ -120,12 +120,28 @@ Open `/admin`. The bottom tabs:
 | Tab | What it's for |
 |---|---|
 | **Today** | What you talked about today |
+| **Diary** | One diary entry a day, plus weekly entries. If one came out empty, press "用原文重写这篇" (rewrite from the chat) |
+| **Dream** | What the nightly consolidation (Dream) did each night and what it produced; you can also re-run a day by hand, see below |
 | **Review queue** | Candidate memories consolidated overnight. Cloudflare's clef reviews them every night by default; the week's decisions are listed here with an undo. With clef switched off they wait here, or the assistant reviews them itself over MCP. Anything imported from elsewhere sits in its own "Imported" tab and waits for you alone |
 | **Important memories** | Browse, search, edit, delete; a memory rewritten in place keeps its earlier versions under "Old versions", where you can restore one |
+| **Star map** | Your memories drawn as a 3D star map (a separate page) |
 | **More** | Precious originals, glossary, notebook, import / export, maintenance tools |
 | **Settings** | Upstream, assistants, environment parameters |
 
 Want the AI to remember, forget, or fix something? It's all point-and-click.
+
+### Re-running Dream for one day
+
+When a night's consolidation failed, or you want a day processed now:
+
+1. Open **Dream** and check the space selected at the top right.
+2. Under "现在做梦" (Dream now), pick the date and **untick "预演 dry_run"** (ticked by default; ticked only previews and writes nothing). Usually leave force off.
+3. Press "现在做梦". Once it says it is queued you can close the page; the job runs in the background, and a refresh shows the result.
+4. Each press handles one batch (`DREAM_MAX_MESSAGES` messages, 40 by default). For a busy day press again until it says the night is already done. When the day's last batch finishes, that day's diary is written automatically.
+
+- Button greyed out and the task marked as possibly interrupted: check the Worker logs that it really stopped, press "核查后标记为已中断" (mark as interrupted), then press again.
+- A diary entry that only says what was tidied up: that is Dream's draft. Open the Diary tab and press "用原文重写这篇" (rewrite from the chat). Chat is kept for 7 days; after that it can't be rewritten.
+- The detailed execution rules, API and limits are under [For maintainers → Dream execution and failure status](#dream-execution-and-failure-status).
 
 ### Moving memories: export and import
 
@@ -142,18 +158,6 @@ Under "More → Import / export", each one works on the space you have selected:
 - Memory lives in **your own Cloudflare account** (D1 + Vectorize) — never tied to a chat window, never on someone else's server.
 
 One assistant can write to one space and read from several. A fresh conversation can write `coder` while also reading the old vault `coder-old` and a shared `shared-docs`. Leave the recall spaces empty and it only reads its own.
-
-### Dream execution and failure status
-
-The admin Dream console submits non-dry manual Dream runs to the existing durable `MEMORY_QUEUE`. Acceptance returns a run ID immediately; after acceptance, closing the browser does not cancel the queued work. The panel polls status every five seconds and can find the task again after a reload. Queue batches contain one message so several expensive Dream jobs do not share one invocation's execution budget.
-
-API clients opt in with `POST /v1/dream/run` and `{"background":true}` (plus the usual optional namespace, date and force). A successful enqueue returns HTTP **202** with `data.run_id` and `data.status="queued"`; use `GET /v1/dream/status` to follow it. As with the legacy endpoint, each manual job handles one batch, not necessarily the whole date; use the cursor to check whether more batches remain. Missing queues and failed acceptance return **503**. Without `background:true`, the old synchronous contract remains; dry-runs also stay synchronous.
-
-- A queued/running task blocks another background admission in the same space; `force` does not bypass it. This is not a global lease covering cron and legacy synchronous callers.
-- A single digest/extraction call has a 120-second deadline, including its response body. The two-stage extraction phase has an eight-minute budget and at most three batch reductions. Invalid JSON/schema causes both stages to restart on the same smaller prefix; the suffix remains for a later batch. Empty valid candidates differ from malformed output. A single unusable entry inside an otherwise valid answer (blank, over-long or wrong-typed) is dropped and counted in the logs instead of failing the batch; a wrong container type, a missing candidate list, or a non-empty list in which nothing is usable still counts as malformed. The extraction call has the same output budget as the digest (`DREAM_MAX_TOKENS`, up to 8000). Model/format failure does not advance the cursor or actively delete that batch's raw messages; the separate retention policy still applies.
-- Records older than 20 minutes without confirmed completion are labelled **possibly interrupted / unconfirmed**, not endlessly presented as healthy work. This is a read-only hint, not proof that execution stopped. Old unresolved records require log inspection and explicit operator reconciliation; they are not silently cleared to permit another run. Once you have checked the logs, the panel's **Mark as interrupted** button (or `POST /v1/dream/resolve` with `{"run_id":"…"}`, same `memory:write` scope) closes a queued/running record older than 20 minutes; anything newer or already finished is refused. The record then shows as an error and stops blocking a new task. Whatever it had already written is not rolled back.
-- Each Dream batch leaves a housekeeping draft on that date's diary entry; the real diary replaces it once the date's last batch is done. The nightly cron only writes yesterday's diary, so a manual job, the manual backfill endpoint and the cron backfill now write the diary themselves after a date's last batch (nothing happens until that batch is done, and a diary failure does not undo the Dream). On the Diary page, **Rewrite from the chat** (`POST /admin/diary-rewrite` with `{"date":"YYYY-MM-DD"}`) redoes any day whose chat is still within retention and replaces its current text; it is refused once that week has been rolled up into a weekly entry.
-- A conditional claim prevents duplicate delivery of one job from re-executing its pipeline. This is **not exactly-once completion or automatic crash recovery**: after a claim, ambiguous or partial writes are not automatically replayed. Inspect the run before retrying. The manual follow-up candidate review is retained; its failure does not undo an already completed Dream.
 
 ## Optional features
 
@@ -204,6 +208,7 @@ If you only have a Claude subscription and cannot use API mode, get automatic pe
 - Model names need the vendor prefix: `anthropic/claude-opus-4-5`, not `claude-opus-4-5`.
 - Only registered primary models get memory. Keep small utility models out.
 - Never hand-delete the Vectorize index (`memo-kb`, 1024-dim cosine).
+- Manual Dream on the Dream tab has "预演 dry_run" (preview) ticked by default, which writes nothing; untick it for a real run.
 
 ## Digging deeper
 
@@ -252,6 +257,10 @@ Configuration has three layers, all under `/admin` Settings: upstream, assistant
 | POST | `/v1/ingest/messages` | Ingest raw chats |
 | GET | `/v1/memory_boot` | Cold-start pack |
 | GET | `/v1/diary`, `/v1/diary/recent` | Diary |
+| POST | `/admin/diary-rewrite` | Rewrite one diary entry from that day's chat: `{"date":"YYYY-MM-DD"}` |
+| GET | `/v1/dream/status` | Dream runs from the last 7 days, the active task, cursors |
+| POST | `/v1/dream/run` | Run Dream by hand: `date`, `force`, `dry_run`; add `"background":true` to queue it (202 with a `run_id`) |
+| POST | `/v1/dream/resolve` | Mark a task unconfirmed for over 20 minutes as interrupted: `{"run_id":"…"}` |
 | GET / POST / DELETE | `/v1/precious`, `/v1/glossary` | Precious originals / glossary |
 | GET / POST / PATCH / DELETE | `/v1/notebook` | Notebook pages; `/:id` opens, edits or deletes one, `DELETE ?confirm=all` clears the space's notebook |
 | GET / POST | `/v1/candidates` | Review queue; `?scope=daily` for the nightly ones only, `/decisions?days=7` lists automatic decisions, `/:id/undo` reverses one, `/:id/sources` shows the quoted lines |
@@ -271,11 +280,23 @@ With the clef review switched off, `memory_candidates` and `memory_review` are l
 
 ### How memory flows
 
-**Writes:** assistants write directly via `remember`; a nightly cron (`10 20 * * *`) extracts facts from the day's conversations → each candidate is judged remember-or-let-go by Cloudflare's clef decision model (`CLEF_AUTO_REVIEW`, on by default; switched off, candidates wait for you, or the assistant reviews them itself with the MCP tools `memory_candidates` and `memory_review`), and writes diary / weekly / monthly entries.
+**Writes:** assistants write directly via `remember`; a nightly cron (`10 20 * * *`) extracts facts from the day's conversations → each candidate is judged remember-or-let-go by Cloudflare's clef decision model (`CLEF_AUTO_REVIEW`, on by default; switched off, candidates wait for you, or the assistant reviews them itself with the MCP tools `memory_candidates` and `memory_review`), and writes diary / weekly / monthly entries. It consolidates "yesterday" in `DREAM_TIME_ZONE`, in batches of `DREAM_MAX_MESSAGES`, at most `DREAM_MAX_RUNS` batches a night; a day left unfinished gets one more batch on each of the next few nights (3-day lookback), or you can finish it by hand on the Dream tab. A day's diary is written once its last batch is done.
 
 **Recall:** your latest message → vector search + lexical match → batch rerank of original passages + rules → the clean original text is tucked onto the end of the current message. No generative LLM by default: at most one memory on a normal turn, two when answering about the past; low scores are never padded in. Rerank failures fall back to lexical. Scores and trade-offs are visible in `/admin → Settings`. Transport envelopes, hashes, and message IDs never enter the daily prompt; two adjacent messages within 90 seconds in one session are merged. Active search still returns full records and IDs. Diaries are not auto-injected.
 
 **Cleanup:** messages live ~7 days; a memory not rewritten, recalled or seen again for 180 days is flagged expired (pinned, identity and persona never are), and expired records are hard-deleted 30 days later.
+
+### Dream execution and failure status
+
+The admin Dream console submits non-dry manual Dream runs to the existing durable `MEMORY_QUEUE`. Acceptance returns a run ID immediately; after acceptance, closing the browser does not cancel the queued work. The panel polls status every five seconds and can find the task again after a reload. Queue batches contain one message so several expensive Dream jobs do not share one invocation's execution budget.
+
+API clients opt in with `POST /v1/dream/run` and `{"background":true}` (plus the usual optional namespace, date and force). A successful enqueue returns HTTP **202** with `data.run_id` and `data.status="queued"`; use `GET /v1/dream/status` to follow it. As with the legacy endpoint, each manual job handles one batch, not necessarily the whole date; use the cursor to check whether more batches remain. Missing queues and failed acceptance return **503**. Without `background:true`, the old synchronous contract remains; dry-runs also stay synchronous.
+
+- A queued/running task blocks another background admission in the same space; `force` does not bypass it. This is not a global lease covering cron and legacy synchronous callers.
+- A single digest/extraction call has a 120-second deadline, including its response body. The two-stage extraction phase has an eight-minute budget and at most three batch reductions. Invalid JSON/schema causes both stages to restart on the same smaller prefix; the suffix remains for a later batch. Empty valid candidates differ from malformed output. A single unusable entry inside an otherwise valid answer (blank, over-long or wrong-typed) is dropped and counted in the logs instead of failing the batch; a wrong container type, a missing candidate list, or a non-empty list in which nothing is usable still counts as malformed. The extraction call has the same output budget as the digest (`DREAM_MAX_TOKENS`, up to 8000). Model/format failure does not advance the cursor or actively delete that batch's raw messages; the separate retention policy still applies.
+- Records older than 20 minutes without confirmed completion are labelled **possibly interrupted / unconfirmed**, not endlessly presented as healthy work. This is a read-only hint, not proof that execution stopped. Old unresolved records require log inspection and explicit operator reconciliation; they are not silently cleared to permit another run. Once you have checked the logs, the panel's **Mark as interrupted** button (or `POST /v1/dream/resolve` with `{"run_id":"…"}`, same `memory:write` scope) closes a queued/running record older than 20 minutes; anything newer or already finished is refused. The record then shows as an error and stops blocking a new task. Whatever it had already written is not rolled back.
+- Each Dream batch leaves a housekeeping draft on that date's diary entry; the real diary replaces it once the date's last batch is done. The nightly cron only writes yesterday's diary, so a manual job, the manual backfill endpoint and the cron backfill now write the diary themselves after a date's last batch (nothing happens until that batch is done, and a diary failure does not undo the Dream). On the Diary page, **Rewrite from the chat** (`POST /admin/diary-rewrite` with `{"date":"YYYY-MM-DD"}`) redoes any day whose chat is still within retention and replaces its current text; it is refused once that week has been rolled up into a weekly entry.
+- A conditional claim prevents duplicate delivery of one job from re-executing its pipeline. This is **not exactly-once completion or automatic crash recovery**: after a claim, ambiguous or partial writes are not automatically replayed. Inspect the run before retrying. The manual follow-up candidate review is retained; its failure does not undo an already completed Dream.
 
 ### Local verification
 
@@ -286,7 +307,7 @@ npm run verify
 
 Tests need Node.js 22+.
 
-Lint is blocking in CI: `npm run lint` must be zero-error to merge. There are still 17 `noNonNullAssertion` warnings; the rule is demoted to warning in `biome.json` and doesn't affect the exit code — clean them up if you're touching that line, and never bulk-fix with Biome's autofix: it rewrites `x!.y` into `x?.y`, turning "crash loudly" into "silently return undefined".
+Lint is blocking in CI: `npm run lint` must be zero-error to merge. There are still some `noNonNullAssertion` warnings; the rule is demoted to warning in `biome.json` and doesn't affect the exit code — clean them up if you're touching that line, and never bulk-fix with Biome's autofix: it rewrites `x!.y` into `x?.y`, turning "crash loudly" into "silently return undefined".
 
 ## License
 
