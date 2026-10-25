@@ -59,13 +59,28 @@ export async function unseal(env: Env, sealed: string | null): Promise<string | 
 export async function loadConnection(env: Env): Promise<ConnectionRow | null> {
   return env.DB.prepare("SELECT * FROM chatgpt_connection WHERE id = 1").first<ConnectionRow>();
 }
-/** The host id is made once, before the first sign-in, and never changes. It is an opaque label, not a credential. */
+/** The shapes OpenAI accepts for ext_agent_host_id: a JWK thumbprint URI, a urn:uuid, or a did:key. Anything else is refused at authorize. */
+export function isValidHostId(id: string): boolean {
+  return /^urn:uuid:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id)
+    || /^urn:ietf:params:oauth:jwk-thumbprint:\S+$/.test(id)
+    || /^did:key:\S+$/.test(id);
+}
+/**
+ * The host id is made once, before the first sign-in, and never changes. It is an opaque label, not a credential.
+ * An id in a shape OpenAI refuses (an earlier build used `aelios-<uuid>`) is replaced while nothing is registered
+ * under it; a registered one is left alone, since the registration was made with it.
+ */
 export async function ensureConnection(env: Env): Promise<ConnectionRow> {
   const now = nowIso();
   await env.DB.prepare(`INSERT OR IGNORE INTO chatgpt_connection (id, ext_agent_host_id, status, created_at, updated_at)
-    VALUES (1, ?, 'disconnected', ?, ?)`).bind(`aelios-${crypto.randomUUID()}`, now, now).run();
-  const row = await loadConnection(env);
+    VALUES (1, ?, 'disconnected', ?, ?)`).bind(`urn:uuid:${crypto.randomUUID()}`, now, now).run();
+  let row = await loadConnection(env);
   if (!row) throw new Error("ChatGPT sign-in store is unavailable. Apply the D1 migrations first.");
+  if (!row.client_id && !isValidHostId(row.ext_agent_host_id)) {
+    await env.DB.prepare("UPDATE chatgpt_connection SET ext_agent_host_id = ?, updated_at = ? WHERE id = 1 AND client_id IS NULL AND ext_agent_host_id = ?")
+      .bind(`urn:uuid:${crypto.randomUUID()}`, now, row.ext_agent_host_id).run();
+    row = (await loadConnection(env)) ?? row;
+  }
   return row;
 }
 
