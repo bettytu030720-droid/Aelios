@@ -12,7 +12,7 @@ function resolveGuideDogModel(body: OpenAIChatRequest, env: Env): string {
   return resolveTargetModel(body.model, KEY_PROFILES.guideDog, env);
 }
 
-export async function handleGuideDogChatCompletions(request: Request, env: Env): Promise<Response> {
+export async function handleGuideDogChatCompletions(request: Request, env: Env, ctx?: ExecutionContext): Promise<Response> {
   const auth = await authenticate(request, env);
   if (!auth.ok) return openAiError("Unauthorized", 401, "authentication_error");
 
@@ -40,7 +40,7 @@ export async function handleGuideDogChatCompletions(request: Request, env: Env):
 
   let upstream: Response;
   try {
-    upstream = await callOpenAICompat(env, buildOpenAICompatRequest(body, targetModel));
+    upstream = await callOpenAICompat(env, buildOpenAICompatRequest(body, targetModel), ctx ? promise => ctx.waitUntil(promise) : undefined);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Failed to call upstream";
     return openAiError(message, 502);

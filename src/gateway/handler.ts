@@ -264,7 +264,7 @@ export async function handleGateway(request: Request, env: Env, ctx: ExecutionCo
   const payload = appendMemory(prepared.body, protocol, patch);
   if (protocol === "responses" && main) payload.store = false;
   try {
-    const upstream = await callGatewayUpstream(env, protocol, request, prepared, payload);
+    const upstream = await callGatewayUpstream(env, protocol, request, prepared, payload, ctx);
     const headers = new Headers(upstream.headers);
     headers.set("x-aelios-identity", identity.slug);
     headers.set("x-aelios-memory", memoryStatus);

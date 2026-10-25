@@ -1414,6 +1414,74 @@ document.documentElement.dataset.theme = localStorage.getItem('aelios.admin.colo
           </div>
         </article>
 
+        <article x-show="savedApiKey.trim()" class="rounded-2xl border border-zinc-800 bg-zinc-900 p-4 shadow-sm">
+          <div class="flex items-start justify-between gap-3">
+            <div class="min-w-0">
+              <h2 class="text-sm font-semibold text-zinc-100">ChatGPT 套餐</h2>
+              <p class="mt-0.5 text-[11px] leading-5 text-zinc-500">用你自己的 ChatGPT 套餐额度跑 <span class="font-mono">chatgpt/模型名</span>，不走 AI Gateway。只连你自己的账号，别把这条线路分给别人。</p>
+            </div>
+            <span class="chip shrink-0" :class="chatgptChipClass()" x-text="chatgptChipText()"></span>
+          </div>
+          <p x-show="chatgpt.error" class="mt-2 text-xs text-coral" x-text="chatgpt.error"></p>
+
+          <div x-show="chatgpt.status && chatgpt.status.status === 'connected'" class="mt-3 rounded-xl border border-zinc-800 bg-[#0a0a0b] px-3 py-2">
+            <p class="text-sm text-zinc-100">Using ChatGPT plan<span class="text-zinc-500" x-text="chatgpt.status && chatgpt.status.email ? ' · ' + chatgpt.status.email : ''"></span></p>
+            <p class="mt-1 text-[11px] leading-5 text-zinc-500">客户端的模型名写 <span class="font-mono">chatgpt/…</span>（下面「测试」会列出可用的）。想让它带上记忆，把 <span class="font-mono">chatgpt/*</span> 加进助手的主模型。用量计入你的 ChatGPT 套餐。<a href="https://chatgpt.com/#settings/Usage" target="_blank" rel="noopener" class="ml-1 underline hover:text-coral">Manage usage</a></p>
+          </div>
+          <div x-show="chatgpt.status && chatgpt.status.status === 'plan_disabled'" class="mt-3 rounded-xl border border-zinc-800 bg-[#0a0a0b] px-3 py-2">
+            <p class="text-xs leading-5 text-zinc-400">已登录 ChatGPT，但没有授权 Aelios 使用套餐额度，所以不会发任何请求。点下面「重新授权」，在同意页里允许使用套餐。</p>
+          </div>
+          <div x-show="chatgpt.status && chatgpt.status.status === 'needs_login'" class="mt-3 rounded-xl border border-zinc-800 bg-[#0a0a0b] px-3 py-2">
+            <p class="text-xs leading-5 text-zinc-400">ChatGPT 的登录失效了（可能在 ChatGPT 设置里断开过，或很久没用）。重新登录一次就行。</p>
+            <p x-show="chatgpt.status && chatgpt.status.last_error" class="mt-1 text-[11px] text-zinc-500" x-text="chatgpt.status && chatgpt.status.last_error"></p>
+          </div>
+
+          <div class="mt-3 flex flex-wrap items-center gap-2">
+            <button type="button" @click="chatgptLogin({})" :disabled="chatgpt.busy" x-show="!chatgpt.status || ['disconnected','needs_login'].includes(chatgpt.status.status)" class="tap inline-flex items-center gap-2 rounded-2xl border border-zinc-700 bg-black px-4 text-sm font-semibold text-white transition hover:border-coral disabled:opacity-50">Continue with ChatGPT</button>
+            <button type="button" @click="chatgptLogin({ reconsent: true })" :disabled="chatgpt.busy" x-show="chatgpt.status && chatgpt.status.status === 'plan_disabled'" class="tap rounded-2xl bg-coral px-4 text-sm font-semibold text-zinc-950 disabled:opacity-50">重新授权</button>
+            <button type="button" @click="chatgptTest()" :disabled="chatgpt.busy" x-show="chatgpt.status && chatgpt.status.status === 'connected'" class="tap rounded-2xl border border-zinc-800 px-3 text-xs text-zinc-300 transition hover:border-coral hover:text-zinc-100 disabled:opacity-50" x-text="chatgpt.testing ? '测试中…' : '测试'"></button>
+            <button type="button" @click="chatgptLogin({ account: 'new' })" :disabled="chatgpt.busy" x-show="chatgpt.status && chatgpt.status.registered" class="tap rounded-2xl border border-zinc-800 px-3 text-xs text-zinc-500 transition hover:border-coral hover:text-zinc-100 disabled:opacity-50" title="换账号，或者保存的登记被拒绝时重新登记一次">换一个 ChatGPT 账号</button>
+            <button type="button" @click="chatgptLogout()" :disabled="chatgpt.busy" x-show="chatgpt.status && ['connected','plan_disabled','needs_login'].includes(chatgpt.status.status)" class="tap rounded-2xl border border-zinc-800 px-3 text-xs text-zinc-500 transition hover:border-coral hover:text-zinc-100 disabled:opacity-50">退出登录</button>
+          </div>
+
+          <div x-show="chatgpt.authorizeUrl" class="mt-3 rounded-xl border border-zinc-800 bg-[#0a0a0b] p-3">
+            <p class="text-xs leading-5 text-zinc-300">① 在新打开的页面里登录 ChatGPT 并同意。没弹出来的话 <a :href="chatgpt.authorizeUrl" target="_blank" rel="noopener" class="underline hover:text-coral">点这里打开</a>。</p>
+            <p class="mt-1 text-xs leading-5 text-zinc-300">② 同意之后浏览器会跳到一个打不开的页面（<span class="font-mono">127.0.0.1</span>，提示无法连接），<b>这是正常的，别关</b>。把地址栏里那一整条地址复制下来，贴在下面。</p>
+            <textarea x-model="chatgpt.pasted" rows="3" aria-label="粘贴浏览器地址栏里的完整地址" placeholder="http://127.0.0.1:1455/auth/callback?code=…&amp;state=…" class="mt-2 w-full rounded-xl border border-zinc-800 bg-zinc-900 px-3 py-2 font-mono text-xs text-zinc-100 outline-none focus:border-coral"></textarea>
+            <p class="mt-1 text-[11px] leading-5 text-zinc-500">如果你电脑上正开着 Codex CLI 之类也在用 1455 端口的程序，它会抢走这个回跳，先关掉再登。链接 10 分钟内有效。</p>
+            <div class="mt-2 flex items-center gap-2">
+              <button type="button" @click="chatgptFinish()" :disabled="chatgpt.busy" class="tap rounded-2xl bg-coral px-4 text-sm font-semibold text-zinc-950 disabled:opacity-50">完成登录</button>
+              <button type="button" @click="chatgpt.authorizeUrl = ''; chatgpt.pasted = ''; chatgpt.error = ''" class="tap rounded-2xl border border-zinc-800 px-3 text-xs text-zinc-500 transition hover:border-coral hover:text-zinc-100">取消</button>
+            </div>
+          </div>
+
+          <div x-show="chatgpt.test" class="mt-3 rounded-xl border border-zinc-800 bg-[#0a0a0b] px-3 py-2">
+            <template x-if="chatgpt.test && chatgpt.test.ok">
+              <div>
+                <p class="text-xs text-zinc-100">通了：<span class="font-mono" x-text="'chatgpt/' + chatgpt.test.model"></span>，<span x-text="chatgpt.test.latency_ms + ' 毫秒'"></span>，回复「<span x-text="chatgpt.test.reply"></span>」</p>
+                <p class="mt-1 text-[11px] leading-5 text-zinc-500">这个账号能用的模型：</p>
+                <ul class="mt-1 space-y-0.5">
+                  <template x-for="m in (chatgpt.test.models || [])" :key="m.slug"><li class="font-mono text-[11px] text-zinc-400" x-text="'chatgpt/' + m.slug + (m.name && m.name !== m.slug ? '（' + m.name + '）' : '')"></li></template>
+                </ul>
+              </div>
+            </template>
+            <template x-if="chatgpt.test && !chatgpt.test.ok">
+              <div>
+                <p class="text-xs text-coral" x-text="'没通（' + chatgpt.test.step + (chatgpt.test.status ? ' · ' + chatgpt.test.status : '') + '）：' + chatgpt.test.error"></p>
+                <p x-show="chatgpt.test.status === 403" class="mt-1 text-[11px] leading-5 text-zinc-500">403 也可能是地区限制：Worker 是从哪个 Cloudflare 机房出去的，OpenAI 就按那里的地区判断。</p>
+              </div>
+            </template>
+          </div>
+
+          <div x-show="chatgpt.welcomeOpen" class="fixed inset-0 z-50 grid place-items-center bg-black/60 p-4" role="dialog" aria-modal="true" aria-label="You're using your ChatGPT plan">
+            <div class="w-full max-w-sm rounded-2xl border border-zinc-800 bg-zinc-900 p-5 shadow-xl">
+              <h3 class="text-base font-semibold text-zinc-100">You're using your ChatGPT plan</h3>
+              <p class="mt-2 text-xs leading-5 text-zinc-400">符合条件的请求会用你的 ChatGPT 套餐额度，计入套餐的用量限制。可以在 ChatGPT 设置的 Usage 里管理，或给 Aelios 设每周上限。<a href="https://chatgpt.com/#settings/Usage" target="_blank" rel="noopener" class="ml-1 underline hover:text-coral">Manage usage</a></p>
+              <button type="button" @click="chatgptWelcomed()" class="tap mt-4 w-full rounded-2xl bg-coral px-4 text-sm font-semibold text-zinc-950">Got it</button>
+            </div>
+          </div>
+        </article>
+
         <article x-show="savedApiKey.trim() && !gwQuery.trim()" class="rounded-2xl border border-zinc-800 bg-zinc-900 px-4 pb-1 pt-4 shadow-sm">
           <h2 class="text-sm font-semibold text-zinc-100">常用</h2>
           <p x-show="gwBusy && !gwGroups.length" class="py-3 text-xs text-zinc-400">读取中…</p>
@@ -1721,6 +1789,93 @@ function memoryAdmin() {
     importReview: { batches: [], importId: '', filter: 'all', items: [], counts: { pending: 0, clef_yes: 0, clef_no: 0 }, offset: 0, more: false, loading: false, bulk: null },
     transfer: { info: null, exporting: false, entriesText: '', entriesName: '', preview: null, entriesMode: 'direct', entriesBusy: false, entriesRun: null, chat: null, chatLoading: false, chatClef: true, chatRun: null, batches: [] },
 
+    chatgpt: { status: null, loaded: false, busy: false, testing: false, error: '', authorizeUrl: '', pasted: '', test: null, welcomeOpen: false },
+    chatgptChipText() {
+      var status = this.chatgpt.status;
+      if (!status) return this.chatgpt.error ? '读取失败' : '读取中';
+      return { connected: '已连接', plan_disabled: '套餐未开通', needs_login: '需重新登录', disconnected: '未连接' }[status.status] || status.status;
+    },
+    chatgptChipClass() {
+      var status = this.chatgpt.status && this.chatgpt.status.status;
+      return status === 'connected' ? 'chip-ok' : status === 'plan_disabled' ? 'chip-warn' : status === 'needs_login' ? 'chip-err' : '';
+    },
+    async chatgptLoad() {
+      if (!this.savedApiKey.trim()) return;
+      try {
+        this.chatgpt.status = await this.request('/api/gateway/chatgpt/status');
+        this.chatgpt.error = '';
+        if (this.chatgpt.status.welcome) this.chatgpt.welcomeOpen = true;
+      } catch (error) {
+        this.chatgpt.error = error.message;
+      }
+      this.chatgpt.loaded = true;
+    },
+    // options: {} 首次或同一个账号；{ reconsent: true } 重新授权套餐；{ account: 'new' } 换账号。
+    async chatgptLogin(options) {
+      this.chatgpt.busy = true;
+      this.chatgpt.error = '';
+      try {
+        var started = await this.request('/api/gateway/chatgpt/login', { method: 'POST', body: JSON.stringify(options || {}) });
+        this.chatgpt.authorizeUrl = started.authorize_url;
+        this.chatgpt.pasted = '';
+        window.open(started.authorize_url, '_blank', 'noopener');
+      } catch (error) {
+        this.chatgpt.error = error.message;
+      }
+      this.chatgpt.busy = false;
+    },
+    async chatgptFinish() {
+      var pasted = this.chatgpt.pasted.trim();
+      if (!pasted) {
+        this.chatgpt.error = '先把浏览器地址栏里的完整地址粘贴进来';
+        return;
+      }
+      this.chatgpt.busy = true;
+      this.chatgpt.error = '';
+      try {
+        await this.request('/api/gateway/chatgpt/callback', { method: 'POST', body: JSON.stringify({ url: pasted }) });
+        this.chatgpt.authorizeUrl = '';
+        this.chatgpt.pasted = '';
+        this.chatgpt.test = null;
+        this.notify('ChatGPT 已连接');
+        await this.chatgptLoad();
+      } catch (error) {
+        this.chatgpt.error = error.message;
+      }
+      this.chatgpt.busy = false;
+    },
+    async chatgptTest() {
+      this.chatgpt.busy = true;
+      this.chatgpt.testing = true;
+      this.chatgpt.error = '';
+      try {
+        this.chatgpt.test = await this.request('/api/gateway/chatgpt/test', { method: 'POST', body: '{}' });
+      } catch (error) {
+        this.chatgpt.error = error.message;
+      }
+      this.chatgpt.testing = false;
+      this.chatgpt.busy = false;
+      await this.chatgptLoad();
+    },
+    async chatgptLogout() {
+      if (!window.confirm('退出 ChatGPT 登录？会去 ChatGPT 那边撤销授权，chatgpt/ 开头的模型会停用。')) return;
+      this.chatgpt.busy = true;
+      this.chatgpt.error = '';
+      try {
+        var result = await this.request('/api/gateway/chatgpt/logout', { method: 'POST', body: '{}' });
+        this.chatgpt.test = null;
+        this.chatgpt.authorizeUrl = '';
+        this.notify(result.revoked === false ? '已退出；ChatGPT 那边的撤销没确认，可以去 ChatGPT 设置里断开' : '已退出 ChatGPT');
+        await this.chatgptLoad();
+      } catch (error) {
+        this.chatgpt.error = error.message;
+      }
+      this.chatgpt.busy = false;
+    },
+    async chatgptWelcomed() {
+      this.chatgpt.welcomeOpen = false;
+      try { await this.request('/api/gateway/chatgpt/welcome', { method: 'POST', body: '{}' }); } catch (error) { /* 下次打开再弹一次，不碍事 */ }
+    },
     async init() {
       this.applyTheme();
       this.icons();
@@ -2183,7 +2338,7 @@ function memoryAdmin() {
       this.savePrefs();
       var tasks = [this.loadBoot(), this.loadCandidates(), this.loadMemories(), this.loadSpaces()];
       if (this.page === 'review') tasks.push(this.loadJudgeDecisions());
-      if (this.page === 'settings') tasks.push(this.loadRecallHistory());
+      if (this.page === 'settings') tasks.push(this.loadRecallHistory(), this.chatgptLoad());
       if (this.page === 'diary') tasks.push(this.loadDiary());
       if (this.page === 'more' && this.moreView === 'world') tasks.push(this.loadWorldFacts());
       if (this.page === 'more' && this.moreView === 'notebook') tasks.push(this.loadNotebook());
@@ -2783,7 +2938,7 @@ function memoryAdmin() {
         return;
       }
       this.page = id;
-      if (id === 'settings') { this.loadRecallHistory(); if (!this.gwGroups.length && this.savedApiKey.trim()) this.gwLoad(); }
+      if (id === 'settings') { this.loadRecallHistory(); this.chatgptLoad(); if (!this.gwGroups.length && this.savedApiKey.trim()) this.gwLoad(); }
       if (id === 'review') { this.loadCandidates(); this.loadJudgeDecisions(); }
       if (id === 'memory') this.loadMemories();
       if (id === 'diary') this.loadDiary();

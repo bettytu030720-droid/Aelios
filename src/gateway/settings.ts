@@ -37,7 +37,7 @@ export const SETTINGS: SettingSpec[] = [
   { group: "记忆召回", name: "MEMORY_LEGACY_VECTOR_FALLBACK_SCORE_FACTOR", label: "旧向量兜底折扣", hint: "默认 0.45。乘在旧库命中分上，压低它和新记忆的竞争" },
 
   { group: "Dream 与日记", name: "ENABLE_DREAM", label: "夜整总闸", hint: "默认开。关掉完全不跑 dream。旧名 ENABLE_DAILY_MEMORY_DIGEST 只在这项没设时生效", kind: "switch", defaultOn: true, common: true },
-  { group: "Dream 与日记", name: "DREAM_MODEL", label: "Dream 用的模型", common: true },
+  { group: "Dream 与日记", name: "DREAM_MODEL", label: "Dream 用的模型", hint: "填 chatgpt/模型名 就用你的 ChatGPT 套餐（要先在上面「ChatGPT 套餐」里连好）。注意夜里会连发好几轮请求，日记、周记月记也各来一次，都算在套餐额度里；额度到顶那晚这些任务就会失败。套餐线路不收输出长度上限，下面「单轮输出上限」对它不生效", common: true },
   { group: "Dream 与日记", name: "DREAM_TIME_ZONE", label: "按哪个时区分天", hint: "例如 Asia/Singapore" },
   { group: "Dream 与日记", name: "DREAM_MAX_MESSAGES", label: "一轮读多少条对话" },
   { group: "Dream 与日记", name: "DREAM_MEMORY_CONTEXT_LIMIT", label: "一轮参考多少条已有记忆" },
@@ -49,7 +49,7 @@ export const SETTINGS: SettingSpec[] = [
   { group: "Dream 与日记", name: "DREAM_STRATEGY", label: "新记忆写入策略", hint: "默认 upsert，直接改写。填 review 改成先进候选队列等人批" },
   { group: "Dream 与日记", name: "DREAM_NAMESPACE", label: "夜整写进哪个记忆空间", hint: "默认 default" },
   { group: "Dream 与日记", name: "ENABLE_DIARY_WRITER", label: "夜整后写叙事日记", hint: "默认开。关掉不写日记", kind: "switch", defaultOn: true, common: true },
-  { group: "Dream 与日记", name: "DIARY_MODEL", label: "日记和月记用的模型", hint: "留空回落 DREAM_MODEL" },
+  { group: "Dream 与日记", name: "DIARY_MODEL", label: "日记和月记用的模型", hint: "留空回落 DREAM_MODEL。也可以填 chatgpt/模型名，用你的 ChatGPT 套餐" },
   { group: "Dream 与日记", name: "DIARY_SEGMENT_MESSAGES", label: "日记分段条数", hint: "默认 40，最少 10。一天超过这么多条就分段写：每段先记一小段笔记，最后合成一篇。一次塞整天容易被模型那边报错" },
   { group: "Dream 与日记", name: "SUMMARY_MODEL", label: "摘要模型的最后兜底", hint: "DREAM_MODEL 和旧名 DAILY_DIGEST_MODEL 都没填时，摘要链路用它" },
   { group: "Dream 与日记", name: "ENABLE_WEEKLY_ROLLUP", label: "周记汇总", hint: "默认开。关掉不生成 weekly_log，命中也就没有周块可附", kind: "switch", defaultOn: true },

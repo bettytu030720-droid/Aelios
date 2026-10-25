@@ -1,5 +1,6 @@
 import type { AssembledPrompt } from "../assembler/types";
 import { assembledToOpenAIChatMessages } from "../assembler/toOpenAI";
+import { callChatGptChat, isChatGptModel } from "../chatgpt/internal";
 import type { Env, OpenAIChatRequest, OpenAIChatResponse } from "../types";
 
 function workersAiModelName(model: string): string | null {
@@ -190,7 +191,9 @@ export function buildOpenAICompatHeaders(env: Env): Headers {
   return headers;
 }
 
-export async function callOpenAICompat(env: Env, body: OpenAIChatRequest): Promise<Response> {
+export async function callOpenAICompat(env: Env, body: OpenAIChatRequest, waitUntil?: (promise: Promise<unknown>) => void): Promise<Response> {
+  // The owner's ChatGPT plan: its own sign-in and route, no AI Gateway and no CF token.
+  if (isChatGptModel(body.model)) return callChatGptChat(env, body, waitUntil);
   const workersAiModel = workersAiModelName(body.model);
   if (workersAiModel) {
     if (!env.AI) {

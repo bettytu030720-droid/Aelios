@@ -153,6 +153,14 @@ One assistant can write to one space and read from several. A fresh conversation
 
 Skip all of that and memory recall + the overnight Dream still work (via Workers AI). An AI can do these three steps for you: see [Let an AI set it up](#let-an-ai-set-it-up).
 
+**Use your ChatGPT plan** — on a ChatGPT Plus or Pro plan, let your assistant run on the plan instead of an API key (OpenAI's "Sign in with ChatGPT"):
+
+1. `/admin` → Settings → **ChatGPT plan** → *Continue with ChatGPT*. Sign in and approve.
+2. Your browser then lands on a `127.0.0.1` page that fails to load. That is expected: copy the whole address from the address bar, paste it into the box in `/admin` and press *Finish sign-in*.
+3. Use models named `chatgpt/<model>`. The *Test* button lists what your account can use. To give one memory, add `chatgpt/*` to the assistant's primary models.
+
+Good to know: it connects your own account and nothing else, so don't hand this route to other people. Usage counts against your plan's limits (ChatGPT settings → Usage). Clients speaking chat/completions, Anthropic messages or responses all work (the first two are translated to Responses and back, thinking blocks included), and OpenAI's plan route rejects hosted tools such as image generation, file search, code interpreter and MCP; function tools and web search work. No new secret is needed: the tokens sit encrypted in D1 under a key derived from `CHATBOX_API_KEY`, so changing that key means signing in again. `npm run deploy` applies the new migration. The overnight jobs can use the plan too: put `chatgpt/<model>` in Settings → Dream model (and the diary model if you like). They send several requests a night, all counted against the plan; on a night the plan is out, those jobs fail like any other model error and the memory stays put.
+
 **MCP memory for the Claude app (web and mobile), Claude Code and Codex**:
 
 ```text
@@ -220,6 +228,7 @@ Configuration has three layers, all under `/admin` Settings: upstream, assistant
 | POST | `/<assistant>/v1/chat/completions` | OpenAI-compatible chat |
 | POST | `/<assistant>/v1/messages` | Anthropic messages |
 | POST | `/<assistant>/v1/responses` | OpenAI responses |
+| GET / POST | `/api/gateway/chatgpt/*` | ChatGPT plan sign-in (owner key): `status`, `login`, `callback`, `test`, `welcome`, `logout` |
 | GET / POST | `/mcp` | MCP memory tools |
 | GET / POST | `/v1/memories` | List / create memories |
 | POST | `/v1/memory/recall` | Dynamic recall (preferred by hooks) |

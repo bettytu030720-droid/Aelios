@@ -3,7 +3,7 @@ import type { Env } from "../types";
 import { identityNamespace, invalidateSettingsCache, loadConfig, object, validateConfig, type GatewayConfig } from "./config";
 import { describeSettings } from "./settings";
 
-async function ownerOnly(request: Request, env: Env): Promise<boolean> {
+export async function ownerOnly(request: Request, env: Env): Promise<boolean> {
   const auth = await authenticate(request, env);
   return auth.ok && ["CHATBOX_API_KEY", "DEBUG_API_KEY"].includes(auth.keyName);
 }
