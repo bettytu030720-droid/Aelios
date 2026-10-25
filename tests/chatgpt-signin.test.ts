@@ -8,7 +8,7 @@ import {
   AUTHORIZE_URL, b64url, buildAuthorizeUrl, hasPlanScope, JWKS_URL, parseCallback, parseInstant, pkceChallenge,
   redactAuthorizeUrl, resetOAuthCaches, REVOKE_URL, TOKEN_URL, verifyIdToken
 } from "../src/chatgpt/oauth";
-import { claimRefreshLease, releaseRefreshLease, seal, unseal } from "../src/chatgpt/store";
+import { claimRefreshLease, ensureConnection, isValidHostId, releaseRefreshLease, seal, unseal } from "../src/chatgpt/store";
 import { getAccessGrant, keepChatGptAlive } from "../src/chatgpt/token";
 
 (crypto.subtle as any).timingSafeEqual = (a: Uint8Array, b: Uint8Array) => timingSafeEqual(a, b);
@@ -115,12 +115,12 @@ test("pkce challenge matches the RFC 7636 appendix B vector", async () => {
 });
 
 test("authorize url: first sign-in registers, a returning one names the client and drops the app name", () => {
-  const base = { hostId: "aelios-host", state: "s", nonce: "n", challenge: "c" };
+  const base = { hostId: "urn:uuid:3f1c9a52-7b0e-4d1a-9c55-0a6e2b8d4f10", state: "s", nonce: "n", challenge: "c" };
   const first = new URL(buildAuthorizeUrl({ ...base, clientId: null }));
   assert.equal(`${first.origin}${first.pathname}`, AUTHORIZE_URL);
   assert.equal(first.searchParams.get("client_id"), "dynamic_agent_client");
   assert.equal(first.searchParams.get("agent_name_hint"), "Aelios");
-  assert.equal(first.searchParams.get("ext_agent_host_id"), "aelios-host");
+  assert.equal(first.searchParams.get("ext_agent_host_id"), base.hostId);
   assert.equal(first.searchParams.get("redirect_uri"), "http://127.0.0.1:1455/auth/callback");
   assert.equal(first.searchParams.get("resource"), "https://api.openai.com/v1");
   assert.equal(first.searchParams.get("code_challenge_method"), "S256");
@@ -136,6 +136,31 @@ test("authorize url: first sign-in registers, a returning one names the client a
   assert.equal(again.searchParams.get("prompt"), "consent");
   const redacted = redactAuthorizeUrl(again.toString());
   assert.ok(!redacted.includes("hint.jwt.value") && !redacted.includes("me%40example.com") && redacted.includes("client_id="));
+});
+
+test("the host id is one of the shapes OpenAI accepts; the first login url carries it", async () => {
+  assert.equal(isValidHostId("urn:uuid:3f1c9a52-7b0e-4d1a-9c55-0a6e2b8d4f10"), true);
+  assert.equal(isValidHostId("urn:ietf:params:oauth:jwk-thumbprint:sha-256:NzbLsXh8uDCcd-6MNwXF4W_7noWXFZAfHkxZsRGC9Xs"), true);
+  assert.equal(isValidHostId("did:key:z6MkhaXgBZDvotDkL5257faiztiGiC2QtKLGpbnnEGta2doK"), true);
+  for (const bad of ["", "aelios-3f1c9a52-7b0e-4d1a-9c55-0a6e2b8d4f10", "3f1c9a52-7b0e-4d1a-9c55-0a6e2b8d4f10", "urn:uuid:not-a-uuid", "did:web:example.com", "owner@example.com"]) {
+    assert.equal(isValidHostId(bad), false, bad || "(empty)");
+  }
+  const { started } = await signIn();
+  assert.equal(new URL(started.authorize_url).searchParams.get("ext_agent_host_id"), row().ext_agent_host_id);
+});
+
+test("a host id from the earlier build is replaced while nothing is registered, and kept once a client exists", async () => {
+  const legacy = "aelios-c09d0fe5-333b-47a8-b338-f60ea662b4a6";
+  await ensureConnection(env);
+  sqlite.prepare("UPDATE chatgpt_connection SET ext_agent_host_id = ? WHERE id = 1").run(legacy);
+  const login = await (await call("login", {})).json() as any;
+  const sent = need(new URL(login.authorize_url).searchParams.get("ext_agent_host_id"), "host id in the login url");
+  assert.notEqual(sent, legacy);
+  assert.equal(isValidHostId(sent), true);
+  assert.equal(row().ext_agent_host_id, sent);
+  assert.equal((await ensureConnection(env)).ext_agent_host_id, sent, "once replaced it stays");
+  sqlite.prepare("UPDATE chatgpt_connection SET ext_agent_host_id = ?, client_id = ? WHERE id = 1").run(legacy, CLIENT);
+  assert.equal((await ensureConnection(env)).ext_agent_host_id, legacy, "a registered id is never swapped under its client");
 });
 
 test("callback parsing takes the whole address, a bare query, and errors", () => {
@@ -190,7 +215,7 @@ test("sign in: login url, callback, PKCE exchange with the issued client, sealed
   assert.equal(saved.client_id, CLIENT);
   assert.equal(saved.subject, "user-1");
   assert.equal(saved.plan_usage, 1);
-  assert.ok(saved.ext_agent_host_id.startsWith("aelios-"));
+  assert.match(saved.ext_agent_host_id, /^urn:uuid:[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
   for (const column of ["access_token_enc", "refresh_token_enc", "id_token_enc"]) {
     assert.ok(saved[column].startsWith("v1."), column);
     assert.ok(!saved[column].includes("access-1") && !saved[column].includes("refresh-1"), column);
