@@ -626,15 +626,17 @@ export async function runDiaryWriter(
   };
 }
 
-export async function runDiaryWriterNightly(env: Env, namespace: string): Promise<DiaryWriterStats> {
+/**
+ * The diary for one date, written only once that date's dream is complete (the dream leaves a housekeeping draft on the
+ * same daily-log row, and the diary replaces it). The nightly cron only ever visits yesterday, so anything that finishes
+ * an older date later (a manual run, a backfill) has to call this itself.
+ */
+export async function runDiaryWriterForDate(env: Env, namespace: string, dateLabel: string): Promise<DiaryWriterStats> {
   if (!isDiaryWriterEnabled(env)) {
-    const timeZone = readDreamTimeZoneFromEnv(env);
-    const dateLabel = getTargetDigestDateLabel(timeZone);
     return { enabled: false, date: dateLabel, ran: false, reason: "disabled" };
   }
 
   const timeZone = readDreamTimeZoneFromEnv(env);
-  const dateLabel = getTargetDigestDateLabel(timeZone);
   const { startIso, endIso } = getDateRangeForLabel(dateLabel, timeZone);
   const cursor = await readDreamCursorValue(env.DB, { namespace, dateLabel });
   const cursorState = readDailyCursor(cursor, startIso, endIso);
@@ -643,4 +645,20 @@ export async function runDiaryWriterNightly(env: Env, namespace: string): Promis
   }
 
   return runDiaryWriter(env, namespace, dateLabel);
+}
+
+export async function runDiaryWriterNightly(env: Env, namespace: string): Promise<DiaryWriterStats> {
+  const dateLabel = getTargetDigestDateLabel(readDreamTimeZoneFromEnv(env));
+  return runDiaryWriterForDate(env, namespace, dateLabel);
+}
+
+/** For callers that just ran a dream batch: never throws, and does nothing until the date's last batch is done. */
+export async function writeDiaryAfterDream(env: Env, namespace: string, dateLabel: string): Promise<DiaryWriterStats> {
+  try {
+    return await runDiaryWriterForDate(env, namespace, dateLabel);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error("diary writer after dream failed", { namespace, date: dateLabel, error: message });
+    return { enabled: true, date: dateLabel, ran: false, reason: "diary_writer_failed", error: message };
+  }
 }

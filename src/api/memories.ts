@@ -4,6 +4,7 @@ import { getOrCreateConversation } from "../db/conversations";
 import { createMemory, getMemoryById, listMemoriesPage, softDeleteMemory, updateMemory } from "../db/memories";
 import { getMessagesByIds, listMessagesByNamespaceInRange, saveIngestMessages } from "../db/messages";
 import { runDailyMemoryDigest } from "../memory/dailyDigest";
+import { writeDiaryAfterDream } from "../memory/diaryWriter";
 import { deleteMemoryEmbedding, upsertMemoryEmbedding } from "../memory/embedding";
 import { exportMemories, exportMemoryDocument } from "../memory/export";
 import { readDreamTimeZoneFromEnv } from "../memory/dreamEnv";
@@ -421,7 +422,11 @@ async function handleRunDigest(
   const targets = dates.length > 0 ? dates : date ? [date] : [undefined];
   const maxRuns = readPositiveInt(body.max_runs, Number(env.DREAM_MAX_RUNS || env.DAILY_DIGEST_MAX_RUNS || 10), 10);
   const force = readBoolean(body.force, false);
-  const results: Array<{ date?: string; runs: Array<Awaited<ReturnType<typeof runDailyMemoryDigest>>> }> = [];
+  const results: Array<{
+    date?: string;
+    runs: Array<Awaited<ReturnType<typeof runDailyMemoryDigest>>>;
+    diary_writer?: Awaited<ReturnType<typeof writeDiaryAfterDream>>;
+  }> = [];
 
   for (const target of targets) {
     const runs: Array<Awaited<ReturnType<typeof runDailyMemoryDigest>>> = [];
@@ -434,7 +439,13 @@ async function handleRunDigest(
       runs.push(result);
       if (!result.ran || !result.stats?.hasMore) break;
     }
-    results.push({ date: target, runs });
+    // The nightly cron only writes yesterday's diary; do it for the date this call just brought to its last batch.
+    const last = runs.at(-1);
+    results.push({
+      date: target,
+      runs,
+      ...(last?.ran ? { diary_writer: await writeDiaryAfterDream(env, namespace, last.stats.date) } : {})
+    });
   }
 
   return json({

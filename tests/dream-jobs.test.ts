@@ -359,3 +359,25 @@ test("closing is refused for a task that may still be running, a finished one, a
   assert.equal((await handleDreamResolve(resolveRequest({}), env)).status, 400);
   assert.equal((await handleDreamResolve(resolveRequest({ run_id: job.runId }, false), env)).status, 401);
 });
+
+test("the last batch of a date writes its diary after the dream, and a failing diary does not undo the dream", async () => {
+  const job = await queued();
+  const calls: Array<[string, string]> = [];
+  const finished: Parameters<typeof runDreamJob>[2] = async () => {
+    await finishDreamRun(env.DB, { id: job.runId, status: "ok", processedMessages: 3 });
+    return { ran: true } as never;
+  };
+  await runDreamJob(env, job, finished, (async (_env: Env, namespace: string, date: string) => {
+    calls.push([namespace, date]);
+    throw new Error("synthetic diary failure");
+  }) as never);
+  assert.deepEqual(calls, [["test-space", "2026-01-10"]]);
+  assert.equal(row(job.runId).status, "ok");
+
+  const skipped = await queued();
+  await runDreamJob(env, skipped, async () => {
+    await finishDreamRun(env.DB, { id: skipped.runId, status: "skipped", reason: "already_done" });
+    return { ran: false, mode: "dream", reason: "already_done" };
+  }, (async () => { calls.push(["unexpected", "call"]); }) as never);
+  assert.equal(calls.length, 1);
+});

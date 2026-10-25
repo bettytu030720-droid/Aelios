@@ -77,12 +77,12 @@ export function buildDigestPrompt(input: {
     "- memories_to_delete 只删除空、重复、明显过期或被新信息否定的旧记忆。",
     "- 控制总输出长度，宁可少写也不要输出超长 JSON。",
     "",
-    "输出 JSON 结构：",
+    "输出 JSON 结构（尖括号里只说明该填什么，不是示例内容，不要照抄；title 和 summary 要写这一批原文实际发生的事）：",
     JSON.stringify({
       date: input.dateLabel,
-      title: "夜间整理",
-      summary: "这次 dream 合并了重复记忆，更新了项目状态。",
-      sections: [{ heading: "整理结果", content: "……" }],
+      title: "<12 字以内标题>",
+      summary: "<一段话：这一批聊了什么、这次整理实际做了什么；没有改动就如实写没有改动>",
+      sections: [{ heading: "<小标题>", content: "<正文>" }],
       memories_to_add: [],
       memories_to_update: [
         {

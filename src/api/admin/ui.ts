@@ -239,7 +239,8 @@ document.documentElement.dataset.theme = localStorage.getItem('aelios.admin.colo
   .savebar { border-color: var(--coral) !important; background: var(--panel-bg-strong); box-shadow: var(--panel-glow); backdrop-filter: blur(12px); }
 
   /* ===== 梦境观测台 ===== */
-  .dream-stat { position: relative; }
+  /* overflow 裁剪：顶部的极光条是直的，不裁的话会从圆角卡片的左右两侧探出去 */
+  .dream-stat { position: relative; overflow: hidden; }
   .dream-stat::before {
     content: ""; position: absolute; left: 0; right: 0; top: 0; height: 2px;
     border-radius: 2px; background: var(--aurora); opacity: .75;
@@ -1038,7 +1039,10 @@ document.documentElement.dataset.theme = localStorage.getItem('aelios.admin.colo
               <h3 class="text-base font-semibold text-zinc-100" x-text="entry.title"></h3>
               <p class="mt-1 text-xs text-zinc-500" x-show="entry.source_message_ids && entry.source_message_ids.length" x-text="entry.sources_kept == null ? entry.source_message_ids.length + ' 条原文' : entry.sources_kept ? entry.sources_kept + ' 条原文还在，可溯源' : '原文已过保留期清理，只剩这篇日记'"></p>
               <p class="mt-2 whitespace-pre-wrap text-sm leading-7 text-zinc-300" :class="isDiaryExpanded('daily:' + entry.date) ? '' : 'line-clamp-4'" x-text="entry.summary"></p>
-              <button type="button" @click="toggleDiaryExpand('daily:' + entry.date)" class="tap mt-2 text-xs text-coral transition duration-150 ease-in-out hover:underline" x-text="isDiaryExpanded('daily:' + entry.date) ? '收起' : '展开全文'"></button>
+              <div class="mt-2 flex flex-wrap items-center gap-4">
+                <button type="button" @click="toggleDiaryExpand('daily:' + entry.date)" class="tap text-xs text-coral transition duration-150 ease-in-out hover:underline" x-text="isDiaryExpanded('daily:' + entry.date) ? '收起' : '展开全文'"></button>
+                <button type="button" x-show="entry.sources_kept !== 0" @click="rewriteDiary(entry)" :disabled="diaryRewriting !== ''" class="tap text-xs text-zinc-400 transition duration-150 ease-in-out hover:text-coral disabled:opacity-50" x-text="diaryRewriting === entry.date ? '重写中，请保持页面打开…' : '用原文重写这篇'"></button>
+              </div>
             </article>
           </template>
         </div>
@@ -1768,6 +1772,7 @@ function memoryAdmin() {
     notebookLoaded: false,
 
     diaryDailies: [],
+    diaryRewriting: '',
     diaryWeeklies: [],
     diaryExpanded: {},
 
@@ -2139,7 +2144,7 @@ function memoryAdmin() {
       this.todayMessages = []; this.candidates = []; this.judgeDecisions = []; this.memories = [];
       this.precious = []; this.glossary = [];
       this.notebookPages = []; this.notebookDraft = null; this.notebookLoaded = false;
-      this.diaryDailies = []; this.diaryWeeklies = []; this.diaryExpanded = {};
+      this.diaryDailies = []; this.diaryWeeklies = []; this.diaryExpanded = {}; this.diaryRewriting = '';
       this.worldItems = []; this.worldSelection = {}; this.worldQuery = '';
       this.importReview = { batches: [], importId: '', filter: 'all', items: [], counts: { pending: 0, clef_yes: 0, clef_no: 0 }, offset: 0, more: false, loading: false, bulk: null };
       // 正在跑的聊天导入带着自己的空间，换空间不打断它；别的导入状态跟着空间清掉。
@@ -2980,6 +2985,42 @@ function memoryAdmin() {
         this.notify(error.message);
       }
       this.icons();
+    },
+    diaryReasonLabel(reason, error) {
+      const map = {
+        disabled: '日记写手没有开启',
+        no_messages: '这一天没有可用的聊天原文',
+        week_already_rolled_up: '这一周已经汇总成周记，不再重写',
+        ungrounded_sources: '模型给的原文来源对不上，没有写入',
+        model_error: '模型出错',
+        model_invalid_json: '模型返回格式不合要求'
+      };
+      return map[reason] || error || reason || '原因未知';
+    },
+    async rewriteDiary(entry) {
+      if (this.diaryRewriting) return;
+      if (!window.confirm('用 ' + entry.date + ' 的聊天原文重写这篇日记，现在的内容会被覆盖。继续？')) return;
+      const revision = this.spaceRevision;
+      this.diaryRewriting = entry.date;
+      try {
+        const data = await this.request('/admin/diary-rewrite', {
+          method: 'POST',
+          body: JSON.stringify({ namespace: this.namespace, date: entry.date })
+        });
+        if (revision !== this.spaceRevision) return;
+        const stats = (data.data && data.data.stats) || {};
+        if (stats.ran) {
+          this.notify('日记已重写：' + entry.date);
+          await this.loadDiary();
+        } else {
+          this.notify('没有重写：' + this.diaryReasonLabel(stats.reason, stats.error));
+        }
+      } catch (error) {
+        if (revision !== this.spaceRevision) return;
+        this.notify(error.message);
+      } finally {
+        if (revision === this.spaceRevision) this.diaryRewriting = '';
+      }
     },
     isDiaryExpanded(key) {
       return Boolean(this.diaryExpanded[key]);

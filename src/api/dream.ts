@@ -15,6 +15,7 @@ import {
   listMemoriesGoneDormantInRange
 } from "../db/v2";
 import { runCandidateJudge } from "../memory/candidateJudge";
+import { writeDiaryAfterDream } from "../memory/diaryWriter";
 import {
   countRawMessagesForDateLabel,
   getDateLabelsLookback,
@@ -204,6 +205,8 @@ export async function handleDreamRun(request: Request, env: Env): Promise<Respon
           error: error instanceof Error ? error.message : String(error)
         };
       }
+      // Same as the background job: the nightly cron only writes yesterday's diary.
+      if (result.ran) response.diary_writer = await writeDiaryAfterDream(env, namespace, result.stats.date);
     }
 
     if (dryRun && result.ran) {
