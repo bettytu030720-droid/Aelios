@@ -42,12 +42,20 @@ export async function getOrCreateConversation(
   db: D1Database,
   input: { namespace: string; id?: string }
 ): Promise<Conversation> {
-  const id = input.id || `${input.namespace}:default`;
-  const existing = await db
+  let id = input.id || `${input.namespace}:default`;
+  let existing = await db
     .prepare("SELECT id, namespace, created_at, updated_at FROM conversations WHERE id = ?")
     .bind(id)
     .first<Conversation>();
 
+  if (existing && existing.namespace !== input.namespace) {
+    id = `${input.namespace}:${id}`;
+    existing = await db
+      .prepare("SELECT id, namespace, created_at, updated_at FROM conversations WHERE id = ?")
+      .bind(id)
+      .first<Conversation>();
+  }
+  if (existing && existing.namespace !== input.namespace) throw new Error("conversation id belongs to another namespace");
   if (existing) return existing;
 
   const now = nowIso();

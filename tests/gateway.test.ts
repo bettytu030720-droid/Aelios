@@ -8,6 +8,8 @@ import { identityNamespace, identityReadNamespaces, invalidateSettingsCache, spe
 import { appendMemory, classifyTurn, canonical } from "../src/gateway/protocol";
 import { catalogUrl, nativeAnthropic, resolveUpstream, routeFor, rejectedToolFields } from "../src/gateway/upstream";
 import { OutputCollector, observeResponse, persistExchange, prepareExchange, dispatchExchange } from "../src/gateway/record";
+import { getOrCreateConversation } from "../src/db/conversations";
+import { saveUserMessages } from "../src/db/messages";
 
 import { lexicalOverlapScore, shapeRecallQuery } from "../src/memory/queryShape";
 
@@ -1148,4 +1150,29 @@ test("the settings page can see how many memories each space holds", async () =>
   assert.equal(response.status, 200);
   assert.deepEqual(JSON.parse(text).spaces, [{ namespace: "default", memories: 2 }, { namespace: "partner", memories: 1 }]);
   assert.equal((await worker.fetch(request("/api/gateway/spaces", undefined, { authorization: "Bearer im-key" }), env, ctx)).status, 401);
+});
+
+test("explicit conversation ids and retry hashes stay namespace-local", async () => {
+  const first = await getOrCreateConversation(db, { namespace: "space-a", id: "shared-client-id" });
+  const second = await getOrCreateConversation(db, { namespace: "space-b", id: "shared-client-id" });
+  assert.equal(first.namespace, "space-a");
+  assert.equal(second.namespace, "space-b");
+  assert.notEqual(second.id, first.id);
+  assert.equal((await getOrCreateConversation(db, { namespace: "space-b", id: "shared-client-id" })).id, second.id);
+
+  const save = (conversationId: string, namespace: string) => saveUserMessages(db, {
+    conversationId,
+    namespace,
+    source: "test",
+    messages: [{ role: "user", content: "same words" }],
+    requestModel: "test",
+    upstreamModel: "test",
+    upstreamProvider: "test",
+    stream: false
+  });
+  const [firstMessage] = await save(first.id, first.namespace);
+  const [secondMessage] = await save(second.id, second.namespace);
+  assert.notEqual(firstMessage, secondMessage);
+  const rows = sqlite.prepare("SELECT namespace, conversation_id FROM messages WHERE id IN (?, ?)").all(firstMessage, secondMessage) as any[];
+  assert.deepEqual(rows.map((row) => [row.namespace, row.conversation_id]).sort(), [["space-a", first.id], ["space-b", second.id]]);
 });
