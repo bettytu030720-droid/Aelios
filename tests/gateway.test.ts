@@ -1193,6 +1193,8 @@ test("a saved model list is the whole /v1/models answer: owner's order, hand-typ
   assert.equal(body.object, "list");
   assert.deepEqual(body.data.map((m: any) => m.id), LISTED);
   assert.deepEqual(body.data.map((m: any) => m.owned_by), ["openai", "openrouter", "custom-mine", "dynamic", "chatgpt"]);
+  // Which of them get memory under this identity (its main models are "partner", "listed-model" and "*opus*").
+  assert.deepEqual(body.data.map((m: any) => m.aelios.main), [false, false, false, false, false]);
   assert.ok(body.data.every((m: any) => m.object === "model"));
   assert.equal(models.response.headers.get("x-aelios-models"), "list");
   assert.match(String(models.response.headers.get("cache-control")), /no-store/);
@@ -1364,4 +1366,17 @@ test("model test: a reasoning model that wants max_completion_tokens is asked on
     const other = await testModel("openai/gpt-5");
     assert.deepEqual([other.json.ok, other.json.error, sent.length], [false, "bad key", 1]);
   } finally { globalThis.fetch = mock; }
+});
+
+test("the model list marks which models get memory under the asking identity; other clients can ignore it", async () => {
+  const other = { ...identity(), slug: "other", namespace: "partner-b", keys: ["IM_API_KEY"], models: ["chatgpt/*", "*sol*"] };
+  setConfig({ ...config([identity(), other]), modelList: ["anthropic/claude-opus-4-5", "partner", "chatgpt/gpt-5", "openrouter/openai/gpt-6.1-sol:floor", "custom-mine/tiny"] });
+  const mark = async (path: string, headers?: any) =>
+    Object.fromEntries(JSON.parse((await run(path, undefined, headers)).text).data.map((m: any) => [m.id, m.aelios.main]));
+  // "partner" and "*opus*" are main models for the first identity: the pattern matches the full name or the part after the last slash.
+  assert.deepEqual(await mark("/v1/models"), {
+    "anthropic/claude-opus-4-5": true, partner: true, "chatgpt/gpt-5": false, "openrouter/openai/gpt-6.1-sol:floor": false, "custom-mine/tiny": false });
+  // The same list under the other identity, reached by its path with the key it allows.
+  assert.deepEqual(await mark("/other/v1/models", { authorization: "Bearer im-key" }), {
+    "anthropic/claude-opus-4-5": false, partner: false, "chatgpt/gpt-5": true, "openrouter/openai/gpt-6.1-sol:floor": true, "custom-mine/tiny": false });
 });
