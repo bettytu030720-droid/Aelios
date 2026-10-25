@@ -1,7 +1,7 @@
 import { authenticate } from "../auth/apiKey";
 import type { Env } from "../types";
 import { json, openAiError } from "../utils/json";
-import { findIdentity, loadConfig, type GatewayConfig } from "../gateway/config";
+import { findIdentity, isMainModel, loadConfig, type GatewayConfig, type Identity } from "../gateway/config";
 import { callGatewayUpstream, catalogUrl, prepareGatewayRequest } from "../gateway/upstream";
 import { ownerOnly } from "../gateway/admin";
 import { readJsonObject } from "../utils/request";
@@ -21,10 +21,15 @@ async function chatGptEntries(env: Env, signal: AbortSignal, ctx?: ExecutionCont
   return Promise.race([list, new Promise<[]>(resolve => setTimeout(() => resolve([]), TIMEOUTS.modelsMs + 1000))]);
 }
 
-/** One line of the owner's model list, in the shape /v1/models gives its entries. */
-function listedEntry(id: string, fallbackOwner: string): Record<string, unknown> {
+/**
+ * One line of the owner's model list, in the shape /v1/models gives its entries. `aelios.main` says whether a chat
+ * on this model gets memory (recall and recording) under the identity asking: a picker can mark the ones that do not
+ * before anyone tries them. Other clients ignore the extra field.
+ */
+function listedEntry(id: string, identity: Identity): Record<string, unknown> {
   const slash = id.indexOf("/");
-  return { id, object: "model", created: 0, owned_by: slash > 0 ? id.slice(0, slash) : fallbackOwner };
+  return { id, object: "model", created: 0, owned_by: slash > 0 ? id.slice(0, slash) : identity.slug,
+    aelios: { main: isMainModel(identity, id) } };
 }
 
 /** GET {catalog}; a string is the reason it could not be had. */
@@ -57,7 +62,7 @@ export async function handleModels(request: Request, env: Env, slug: string | nu
 
   // Nothing is fetched: the list does not depend on the upstream being up, and the thousand-model catalog never leaves it.
   if (config.modelList?.length) {
-    return json({ object: "list", data: config.modelList.map(id => listedEntry(id, identity.slug)) },
+    return json({ object: "list", data: config.modelList.map(id => listedEntry(id, identity)) },
       { headers: { "Cache-Control": "private, no-store", "x-aelios-identity": identity.slug, "x-aelios-models": "list" } });
   }
 
