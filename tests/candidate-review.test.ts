@@ -357,3 +357,20 @@ test("with clef off the assistant reviews its own candidates over MCP, and each 
   assert.equal(row("memory_candidates", "c-full").status, "pending");
   assert.equal(calls.length, 0);
 });
+
+test("automatic approval supersedes an explicit target even without a fact key", async () => {
+  message("m1", "user", "我搬进自己装修的旧房子了。");
+  memory("target-old", "咲咲住在出租屋。");
+  candidate("c-target", "咲咲搬进了自己装修的旧房子。", { source: "dream_update", target: "target-old" });
+  clefAnswers.push(yes());
+
+  await runCandidateJudge(env, "default");
+
+  const approved = row("memory_candidates", "c-target");
+  assert.equal(approved.status, "approved");
+  assert.notEqual(approved.target_memory_id, "target-old");
+  assert.equal(row("memories", "target-old").status, "superseded");
+  assert.equal(row("memories", approved.target_memory_id).content, "咲咲搬进了自己装修的旧房子。");
+  const current = sqlite.prepare("SELECT COUNT(*) AS n FROM memories WHERE namespace = 'default' AND status = 'active' AND version_status = 'current'").get() as any;
+  assert.equal(current.n, 1);
+});

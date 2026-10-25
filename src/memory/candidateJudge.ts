@@ -117,12 +117,8 @@ async function callClef(
   }
 }
 
-// approve 的落库语义跟 dream 候选队列的 fact_key 分支一致：
-// 有 fact_key 先查是否已有 active 同 key 记忆，有就 supersede (保留历史链)，没有就 upsert 新建；
-// 没有 fact_key 就走向量库直接建条目。admin 后台 /v1/candidates/:id/approve 的私有
-// createApprovedMemoryFromCandidate 目前是"有 fact_key 就直接 upsertMemoryByFactKey"，
-// 不查 active/不 supersede；这里选择跟抽取器自动写路径对齐、保留 supersede 历史，
-// 因为 judge 是自动化批量决策，保留可追溯的旧版本比就地覆盖更安全。
+// approve 保留 supersede 历史：有明确 target 就更新该记忆；否则有 fact_key 先查 active 同 key，
+// 有就 supersede，没有就 upsert；两者都没有才直接建条目。自动批量决策与人工审核使用同一目标语义。
 export async function approveCandidate(
   env: Env,
   namespace: string,
@@ -138,6 +134,23 @@ export async function approveCandidate(
   }
 
   const factKey = candidate.fact_key?.trim() || null;
+
+  if (candidate.target_memory_id) {
+    const result = await supersedeMemory(env, {
+      namespace,
+      oldId: candidate.target_memory_id,
+      newContent: candidate.content,
+      newType: candidate.type,
+      newFactKey: factKey,
+      importance: candidate.importance,
+      confidence: candidate.confidence,
+      tags,
+      source,
+      sourceMessageIds,
+      reason: "candidate_judge_approve"
+    });
+    return result.newId;
+  }
 
   if (factKey) {
     const existing = await getActiveMemoryByFactKey(env.DB, { namespace, factKey });

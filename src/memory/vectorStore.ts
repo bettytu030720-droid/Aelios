@@ -523,6 +523,15 @@ export async function updateVectorMemory(
   const updatedRecord = await updateMemoryRecord(env, nextRecord);
   if (!updatedRecord) return null;
 
+  if (!contentUnchanged) {
+    try {
+      const staleTriggers = await deleteTriggersForMemory(env.DB, id);
+      await deleteTriggerVectors(env, staleTriggers);
+    } catch (error) {
+      console.error("trigger cleanup failed after memory edit", { id, error });
+    }
+  }
+
   try {
     await requireVectorize(env).upsert([
       {
