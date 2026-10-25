@@ -165,6 +165,8 @@ API 客户端在 `POST /v1/dream/run` 中显式传 `{"background":true}`，其�
 
 不配这些，记忆召回和夜间整理也能跑（走 Workers AI）。这三步可以交给 AI 做，见[让 AI 帮你配](#让-ai-帮你配)。
 
+**挑哪些模型显示在客户端里**（AI Gateway 有几千个模型，只能从列表里选模型的聊天 App 会被全部倒出来）：`/admin` 设置 → **模型清单**，从上游目录里勾出你在用的，再手填目录里没有的名字（自定义 Provider、动态路由、`:floor` 这类后缀写法）。`GET /v1/models` 之后只返回这份清单，按你添加的先后顺序。只改显示：清单外的模型照样能按名字调用，跟以前一样。留空就什么都不变（显示整个目录）。存了清单之后，`chatgpt/…` 模型只有你选了才会显示，选择器里它们排在最前面。
+
 **用你的 ChatGPT 套餐**（有 ChatGPT Plus / Pro，想让助手直接用套餐额度，不用 API key；走的是 OpenAI 的 Sign in with ChatGPT）
 
 1. `/admin` → 设置 → **ChatGPT 套餐** → *Continue with ChatGPT*，登录并同意。
@@ -245,10 +247,11 @@ CF 上游：chat 走 compat（全厂商，BYOK）；messages / responses 走各�
 |---|---|---|
 | GET | `/health` | 健康检查 |
 | GET | `/admin` | 管理面板 |
-| GET | `/v1/models` | 模型列表 |
+| GET | `/v1/models` | 模型列表（上游目录，或你存的模型清单） |
 | POST | `/<助手>/v1/chat/completions` | OpenAI 兼容聊天 |
 | POST | `/<助手>/v1/messages` | Anthropic messages |
 | POST | `/<助手>/v1/responses` | OpenAI responses |
+| GET | `/api/gateway/models` | `/admin` 的模型选择器（主人钥匙）：上游全部模型 ID、你的 ChatGPT 模型、已存的清单 |
 | GET / POST | `/api/gateway/chatgpt/*` | ChatGPT 套餐登录（主人钥匙）：`status`、`login`、`callback`、`test`、`welcome`、`logout` |
 | GET / POST | `/mcp` | MCP 记忆工具 |
 | GET / POST | `/v1/memories` | 记忆列表 / 新建 |

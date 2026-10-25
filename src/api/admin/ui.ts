@@ -1497,6 +1497,51 @@ document.documentElement.dataset.theme = localStorage.getItem('aelios.admin.colo
           </div>
         </article>
 
+        <article x-show="savedApiKey.trim() && !gwQuery.trim()" class="rounded-2xl border border-zinc-800 bg-zinc-900 p-4 shadow-sm">
+          <div class="flex items-start justify-between gap-3">
+            <div class="min-w-0">
+              <h2 class="text-sm font-semibold text-zinc-100">模型清单</h2>
+              <p class="mt-0.5 text-[11px] leading-5 text-zinc-500">客户端的模型下拉只显示这里选的，上游几千个模型不再全倒出去。只管显示：清单外的模型照样能调用，能手填的客户端直接手填就行。留空则显示上游目录里的全部。</p>
+            </div>
+            <span class="chip shrink-0" :class="modelList.items.length ? 'chip-ok' : ''" x-text="!modelList.loaded ? '读取中' : modelList.items.length ? '显示 ' + modelList.items.length + ' 个' : '显示全部'"></span>
+          </div>
+          <p x-show="modelList.error" class="mt-2 text-xs text-coral" x-text="modelList.error"></p>
+
+          <ul x-show="modelList.items.length" class="mt-3 divide-y divide-zinc-800 rounded-xl border border-zinc-800 bg-[#0a0a0b]">
+            <template x-for="id in modelList.items" :key="id">
+              <li class="flex items-center justify-between gap-2 px-3 py-1.5">
+                <span class="min-w-0 break-all font-mono text-[11px] text-zinc-300" x-text="id"></span>
+                <button type="button" @click="modelListRemove(id)" :disabled="modelList.busy" :aria-label="'移除 ' + id" class="shrink-0 text-xs text-zinc-500 transition hover:text-coral disabled:opacity-50">移除</button>
+              </li>
+            </template>
+          </ul>
+
+          <div class="mt-3 flex gap-2">
+            <input x-model="modelList.typed" @keydown.enter.prevent="modelListAddTyped()" aria-label="手填模型名" placeholder="手填模型名，如 openrouter/openai/gpt-6.1-sol:floor" class="h-10 min-w-0 flex-1 rounded-xl border border-zinc-800 bg-[#0a0a0b] px-3 font-mono text-xs text-zinc-100 outline-none transition focus:border-coral">
+            <button type="button" @click="modelListAddTyped()" :disabled="modelList.busy || !modelList.typed.trim()" class="tap shrink-0 rounded-2xl bg-coral px-4 text-sm font-semibold text-zinc-950 disabled:opacity-50">添加</button>
+          </div>
+          <p class="mt-1 text-[11px] leading-5 text-zinc-500">自定义 Provider、动态路由、带后缀的写法（如 :floor）上游目录里都没有，这里手填。一次贴好几个也行，用逗号、空格隔开。</p>
+
+          <div class="mt-3 flex flex-wrap items-center gap-2">
+            <button type="button" @click="modelListTogglePicker()" :disabled="modelList.catalogLoading" class="tap rounded-2xl border border-zinc-800 px-3 text-xs text-zinc-300 transition hover:border-coral hover:text-zinc-100 disabled:opacity-50" x-text="modelList.catalogLoading ? '读取中…' : modelList.pickerOpen ? '收起目录' : '从上游目录里选'"></button>
+            <button type="button" x-show="modelList.items.length" @click="modelListClear()" :disabled="modelList.busy" class="tap rounded-2xl border border-zinc-800 px-3 text-xs text-zinc-500 transition hover:border-coral hover:text-zinc-100 disabled:opacity-50">清空，改回显示全部</button>
+          </div>
+
+          <div x-show="modelList.pickerOpen && !modelList.catalogLoading" class="mt-3 rounded-xl border border-zinc-800 bg-[#0a0a0b] p-3">
+            <p x-show="modelList.catalogReason" class="mb-2 text-[11px] leading-5 text-zinc-500" x-text="'上游目录没读到（' + modelList.catalogReason + '）。先检查上游地址和 CF 令牌，或者直接手填。'"></p>
+            <input x-model="modelList.query" @input="modelListSearch()" aria-label="搜索模型" placeholder="搜索，如 claude、gpt-5、openrouter" class="h-10 w-full rounded-xl border border-zinc-800 bg-zinc-900 px-3 text-sm text-zinc-100 outline-none transition focus:border-coral">
+            <p class="mt-1 text-[11px] text-zinc-500" x-text="modelList.total + ' 个可选' + (modelList.total > modelList.shown.length ? '，只列前 ' + modelList.shown.length + ' 个，输入关键词缩小范围' : '')"></p>
+            <ul class="mt-2 max-h-72 divide-y divide-zinc-800 overflow-y-auto">
+              <template x-for="id in modelList.shown" :key="id">
+                <li class="flex items-center justify-between gap-2 py-1.5">
+                  <span class="min-w-0 break-all font-mono text-[11px] text-zinc-300" x-text="id"></span>
+                  <button type="button" @click="modelListAdd([id])" :disabled="modelList.busy" :aria-label="'添加 ' + id" class="shrink-0 text-xs text-coral transition hover:underline disabled:opacity-50">添加</button>
+                </li>
+              </template>
+            </ul>
+          </div>
+        </article>
+
         <article x-show="savedApiKey.trim() && !gwQuery.trim()" class="rounded-2xl border border-zinc-800 bg-zinc-900 px-4 pb-1 pt-4 shadow-sm">
           <h2 class="text-sm font-semibold text-zinc-100">常用</h2>
           <p x-show="gwBusy && !gwGroups.length" class="py-3 text-xs text-zinc-400">读取中…</p>
@@ -1809,6 +1854,72 @@ function memoryAdmin() {
     importReview: { batches: [], importId: '', filter: 'all', items: [], counts: { pending: 0, clef_yes: 0, clef_no: 0 }, offset: 0, more: false, loading: false, bulk: null },
     transfer: { info: null, exporting: false, entriesText: '', entriesName: '', preview: null, entriesMode: 'direct', entriesBusy: false, entriesRun: null, chat: null, chatLoading: false, chatClef: true, chatRun: null, batches: [] },
 
+    // 模型清单：只决定 /v1/models 显示什么，不限制能调用什么。改一下存一下，跟设置项一样走同一条队列。
+    modelList: { items: [], loaded: false, busy: false, error: '', typed: '', catalog: [], catalogLoaded: false, catalogLoading: false, catalogReason: '', query: '', pickerOpen: false, shown: [], total: 0 },
+    modelListSearch() {
+      var list = this.modelList;
+      var query = list.query.trim().toLowerCase();
+      var taken = list.items;
+      var hits = list.catalog.filter(function(id) { return taken.indexOf(id) < 0 && (!query || id.toLowerCase().indexOf(query) >= 0); });
+      list.total = hits.length;
+      list.shown = hits.slice(0, 60);
+    },
+    async modelListTogglePicker() {
+      var list = this.modelList;
+      list.pickerOpen = !list.pickerOpen;
+      if (!list.pickerOpen || list.catalogLoaded) return;
+      list.catalogLoading = true;
+      list.error = '';
+      try {
+        var data = await this.request('/api/gateway/models');
+        list.catalog = (data.chatgpt || []).concat(data.models || []);
+        list.catalogReason = data.reason || '';
+        list.catalogLoaded = true;
+      } catch (error) {
+        list.error = '目录读取失败：' + error.message;
+      }
+      list.catalogLoading = false;
+      this.modelListSearch();
+    },
+    async modelListAddTyped() {
+      var names = this.modelList.typed.split(/[\s,，;；]+/).filter(Boolean);
+      if (!names.length) return;
+      await this.modelListAdd(names);
+      if (!this.modelList.error) this.modelList.typed = '';
+    },
+    modelListAdd(names) {
+      var next = this.modelList.items.slice();
+      names.forEach(function(name) { if (next.indexOf(name) < 0) next.push(name); });
+      return this.modelListSave(next);
+    },
+    modelListRemove(id) {
+      return this.modelListSave(this.modelList.items.filter(function(item) { return item !== id; }));
+    },
+    modelListClear() {
+      if (!window.confirm('清空清单？客户端会改回显示上游目录里的全部模型。清单外的模型本来就能调用，不受影响。')) return;
+      return this.modelListSave([]);
+    },
+    modelListSave(next) {
+      var list = this.modelList;
+      var self = this;
+      if (JSON.stringify(next) === JSON.stringify(list.items)) return Promise.resolve();
+      list.busy = true;
+      list.error = '';
+      var task = async function() {
+        try {
+          var result = await self.request('/api/gateway/config', { method: 'PATCH', body: JSON.stringify({ modelList: next }) });
+          list.items = result.modelList || [];
+          self.notify(list.items.length ? '清单存好了，现在显示 ' + list.items.length + ' 个模型' : '清单已清空，改回显示全部');
+        } catch (error) {
+          list.error = '没存上：' + error.message;
+        }
+        list.busy = false;
+        self.modelListSearch();
+      };
+      var run = settingsQueue.then(task, task);
+      settingsQueue = run.catch(function() {});
+      return run;
+    },
     chatgpt: { status: null, loaded: false, busy: false, testing: false, error: '', authorizeUrl: '', pasted: '', test: null, welcomeOpen: false },
     chatgptChipText() {
       var status = this.chatgpt.status;
@@ -2269,6 +2380,9 @@ function memoryAdmin() {
       try {
         const config = await this.request('/api/gateway/config');
         this.gwAddress = config.upstream && config.upstream.address || '';
+        this.modelList.items = config.modelList || [];
+        this.modelList.loaded = true;
+        this.modelListSearch();
         await this.loadMemoryIdentities();
         this.gwIdentities = (config.identities || []).map(function(idn) {
           return {

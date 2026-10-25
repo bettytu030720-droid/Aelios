@@ -34,6 +34,12 @@ export interface GatewayConfig {
   upstream?: Upstream;
   identities: Identity[];
   settings?: Record<string, string>;
+  /**
+   * What GET /v1/models shows, in the owner's order: picked from the upstream catalog plus names typed by hand.
+   * Display only. Calls are never checked against it, so a model that is not listed still works.
+   * Absent or empty: the whole upstream catalog is shown, as before.
+   */
+  modelList?: string[];
 }
 /** The guard that opens untrusted JSON up for every caller; see the note on `Body` in protocol.ts. */
 // biome-ignore lint/suspicious/noExplicitAny: see above
@@ -48,6 +54,22 @@ const KEY_NAMES = ["CHATBOX_API_KEY", "IM_API_KEY", "DEBUG_API_KEY", "GUIDE_DOG_
 // Slugs are the first path segment, so they cannot shadow existing entry points.
 const RESERVED_SLUGS = ["v1", "api", "admin", "health", "mcp", "memory-mcp", "memory-admin", "guide-dog"];
 
+export const MODEL_LIST_MAX = 300;
+/** Trimmed, de-duplicated, order kept; an empty list is the same as none. */
+function validateModelList(value: unknown): string[] | undefined {
+  if (value === undefined || value === null) return undefined;
+  check(Array.isArray(value), "modelList must be an array of model names");
+  const names: string[] = [];
+  for (const entry of value) {
+    check(text(entry) && entry.trim().length <= 200 && !/\s/.test(entry.trim()),
+      "modelList: each model name must be text without spaces (max 200 characters)");
+    const name = entry.trim();
+    if (!names.includes(name)) names.push(name);
+  }
+  check(names.length <= MODEL_LIST_MAX, `modelList: at most ${MODEL_LIST_MAX} models`);
+  return names.length ? names : undefined;
+}
+
 export function validateConfig(value: unknown): GatewayConfig {
   check(object(value) && value.version === 3, "Gateway config requires version: 3");
   if (value.upstream !== undefined) {
@@ -60,6 +82,8 @@ export function validateConfig(value: unknown): GatewayConfig {
     }
   }
   value.settings = validateSettings(value.settings);
+  value.modelList = validateModelList(value.modelList);
+  if (!value.modelList) delete value.modelList;
   check(Array.isArray(value.identities), "identities must be an array");
   const slugs = new Set<string>();
   for (const identity of value.identities) {

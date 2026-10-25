@@ -1176,3 +1176,108 @@ test("explicit conversation ids and retry hashes stay namespace-local", async ()
   const rows = sqlite.prepare("SELECT namespace, conversation_id FROM messages WHERE id IN (?, ?)").all(firstMessage, secondMessage) as any[];
   assert.deepEqual(rows.map((row) => [row.namespace, row.conversation_id]).sort(), [["space-a", first.id], ["space-b", second.id]]);
 });
+
+// ---- model list: what /v1/models shows, never what can be called ----
+async function admin(method: string, body?: any, headers: any = {}, path = "/api/gateway/config") {
+  const response = await worker.fetch(request(path, body, headers, method), env, ctx);
+  const text = await response.text();
+  return { response, json: text ? JSON.parse(text) : null };
+}
+const LISTED = ["openai/gpt-5", "openrouter/openai/gpt-6.1-sol:floor", "custom-mine/tiny", "dynamic/router-1", "chatgpt/gpt-5"];
+
+test("a saved model list is the whole /v1/models answer: owner's order, hand-typed names kept, upstream never asked", async () => {
+  setConfig({ ...config(), modelList: LISTED });
+  const models = await run("/v1/models");
+  assert.equal(models.response.status, 200);
+  const body = JSON.parse(models.text);
+  assert.equal(body.object, "list");
+  assert.deepEqual(body.data.map((m: any) => m.id), LISTED);
+  assert.deepEqual(body.data.map((m: any) => m.owned_by), ["openai", "openrouter", "custom-mine", "dynamic", "chatgpt"]);
+  assert.ok(body.data.every((m: any) => m.object === "model"));
+  assert.equal(models.response.headers.get("x-aelios-models"), "list");
+  assert.match(String(models.response.headers.get("cache-control")), /no-store/);
+  assert.equal(calls.length, 0, "the thousand-model catalog is not fetched when a list decides the answer");
+  // Without CF credentials the list still answers: it does not depend on the upstream.
+  delete env.CLOUDFLARE_API_TOKEN;
+  assert.deepEqual(JSON.parse((await run("/v1/models")).text).data.map((m: any) => m.id), LISTED);
+});
+
+test("an empty or missing model list leaves /v1/models exactly as it was", async () => {
+  for (const modelList of [undefined, []]) {
+    setConfig({ ...config(), ...(modelList ? { modelList } : {}) });
+    const models = await run("/v1/models");
+    assert.equal(models.response.headers.get("x-aelios-models"), "upstream");
+    assert.deepEqual(JSON.parse(models.text).data.map((m: any) => m.id), ["anthropic/claude-opus-4-5"]);
+  }
+});
+
+test("models outside the list still work: the list is display only", async () => {
+  setConfig({ ...config(), modelList: ["openai/gpt-5"] });
+  for (const model of ["anthropic/claude-opus-4-5", "openrouter/openai/gpt-6.1-sol:floor", "custom-other/unlisted"]) {
+    calls.length = 0;
+    const reply = await run("/v1/chat/completions", { model, messages: [{ role: "user", content: "Hi" }] });
+    assert.equal(reply.response.status, 200, model);
+    assert.equal(calls[0].url, "https://upstream.test/ai/v1/chat/completions");
+    assert.equal(calls[0].query.model, model);
+  }
+});
+
+test("model list validation: trimmed, de-duplicated, order kept, empty means none", () => {
+  const base = { version: 3, identities: [] };
+  assert.deepEqual(validateConfig({ ...base, modelList: [" a/b ", "c", "a/b"] }).modelList, ["a/b", "c"]);
+  assert.equal("modelList" in validateConfig({ ...base, modelList: [] }), false);
+  assert.equal("modelList" in validateConfig({ ...base, modelList: null }), false);
+  assert.equal("modelList" in validateConfig(base), false);
+  for (const bad of ["a/b", [""], [" "], ["has space"], [1], ["x".repeat(201)], Array.from({ length: 301 }, (_, i) => `m/${i}`)]) {
+    assert.throws(() => validateConfig({ ...base, modelList: bad as any }), /modelList/, JSON.stringify(bad).slice(0, 40));
+  }
+  assert.equal(validateConfig({ ...base, modelList: Array.from({ length: 300 }, (_, i) => `m/${i}`) }).modelList?.length, 300);
+});
+
+test("the list is saved with PATCH by the owner only, and other PATCHes leave it alone", async () => {
+  assert.equal((await admin("PATCH", { modelList: ["a/b"] }, { authorization: "Bearer im-key" })).response.status, 401);
+  const saved = await admin("PATCH", { modelList: [" openai/gpt-5 ", "custom-mine/tiny", "openai/gpt-5"] });
+  assert.equal(saved.response.status, 200);
+  assert.deepEqual(saved.json.modelList, ["openai/gpt-5", "custom-mine/tiny"]);
+  assert.deepEqual((await admin("GET")).json.modelList, ["openai/gpt-5", "custom-mine/tiny"]);
+  // The identities save and the settings saves in /admin never carry the list; they must not wipe it.
+  await admin("PATCH", { identities: [identity()] });
+  await admin("PATCH", { settings: { VISION_MODEL: "x/vision" } });
+  assert.deepEqual((await admin("GET")).json.modelList, ["openai/gpt-5", "custom-mine/tiny"]);
+  // And it is what the clients see right away.
+  assert.deepEqual(JSON.parse((await run("/v1/models")).text).data.map((m: any) => m.id), ["openai/gpt-5", "custom-mine/tiny"]);
+  const bad = await admin("PATCH", { modelList: ["has space"] });
+  assert.equal(bad.response.status, 400);
+  assert.deepEqual((await admin("GET")).json.modelList, ["openai/gpt-5", "custom-mine/tiny"], "a refused save changes nothing");
+  assert.deepEqual((await admin("PATCH", { modelList: [] })).json.modelList, []);
+  assert.equal("modelList" in (await admin("GET")).json, false);
+  assert.equal(JSON.parse((await run("/v1/models")).text).data[0].id, "anthropic/claude-opus-4-5", "cleared: the whole upstream catalog again");
+});
+
+test("the picker catalog: owner only, every upstream id once and sorted, the saved list beside it, even while a list is saved", async () => {
+  setConfig({ ...config(), modelList: ["custom-mine/tiny"] });
+  assert.equal((await admin("GET", undefined, { authorization: "Bearer im-key" }, "/api/gateway/models")).response.status, 401);
+  const mock = globalThis.fetch;
+  globalThis.fetch = async (url: any) => {
+    calls.push({ url: String(url) });
+    return Response.json({ object: "list", data: [{ id: "openai/gpt-5" }, { id: "anthropic/claude-opus-4-5" }, { id: "openai/gpt-5" }, { nope: true }, null, { id: 7 }] });
+  };
+  try {
+    const picker = await admin("GET", undefined, {}, "/api/gateway/models");
+    assert.equal(picker.response.status, 200);
+    assert.deepEqual(picker.json.models, ["anthropic/claude-opus-4-5", "openai/gpt-5"]);
+    assert.deepEqual(picker.json.list, ["custom-mine/tiny"]);
+    assert.deepEqual(picker.json.chatgpt, []);
+    assert.equal(picker.json.source, "upstream");
+    assert.equal(calls.at(-1).url, "https://upstream.test/ai/v1/models");
+    globalThis.fetch = async () => new Response("nope", { status: 502 });
+    const down = await admin("GET", undefined, {}, "/api/gateway/models");
+    assert.equal(down.response.status, 200);
+    assert.deepEqual(down.json.models, []);
+    assert.equal(down.json.source, "unavailable");
+    assert.equal(down.json.reason, "upstream-502");
+    assert.deepEqual(down.json.list, ["custom-mine/tiny"], "the saved list is still there to edit");
+    globalThis.fetch = async () => new Response("<html>", { status: 200 });
+    assert.equal((await admin("GET", undefined, {}, "/api/gateway/models")).json.reason, "unexpected-catalog");
+  } finally { globalThis.fetch = mock; }
+});

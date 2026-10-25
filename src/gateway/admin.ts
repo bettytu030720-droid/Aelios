@@ -16,7 +16,8 @@ export async function handleGatewayEnv(request: Request, env: Env): Promise<Resp
 }
 /**
  * PATCH 只改带来的部分，设置页每改一项就存一项，不用整份配置来回传：
- * settings 按项合并 (值为 "" 就删掉这项、回到部署值)，identities 和 upstream 带了就整块替换，upstream: null 删掉。
+ * settings 按项合并 (值为 "" 就删掉这项、回到部署值)，identities、upstream 和 modelList 带了就整块替换，
+ * upstream: null 删掉，modelList: null 或 [] 回到显示整个上游目录。
  */
 function mergeConfig(current: GatewayConfig, patch: unknown): unknown {
   if (!object(patch)) throw new Error("Patch must be an object");
@@ -25,6 +26,8 @@ function mergeConfig(current: GatewayConfig, patch: unknown): unknown {
   if (patch.identities !== undefined) next.identities = patch.identities;
   if (patch.upstream === null) delete next.upstream;
   else if (patch.upstream !== undefined) next.upstream = patch.upstream;
+  if (patch.modelList === null) delete next.modelList;
+  else if (patch.modelList !== undefined) next.modelList = patch.modelList;
   return next;
 }
 export async function handleGatewayAdmin(request: Request, env: Env): Promise<Response> {
@@ -44,7 +47,7 @@ export async function handleGatewayAdmin(request: Request, env: Env): Promise<Re
       ON CONFLICT(id) DO UPDATE SET config_json = excluded.config_json, updated_at = excluded.updated_at`)
       .bind(JSON.stringify(config), new Date().toISOString()).run();
     invalidateSettingsCache();
-    if (request.method === "PATCH") return Response.json({ ok: true, settings: config.settings || {} });
+    if (request.method === "PATCH") return Response.json({ ok: true, settings: config.settings || {}, modelList: config.modelList || [] });
     return Response.json({ ok: true, identities: config.identities.length, settings: Object.keys(config.settings || {}).length });
   } catch { return Response.json({ error: "Configuration store unavailable. Apply D1 migrations first." }, { status: 503 }); }
 }
