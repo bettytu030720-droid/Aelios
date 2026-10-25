@@ -442,8 +442,8 @@ export async function runRecall(env: Env, input: RecallInput): Promise<RecallRes
   // 它什么也做不了；这边把本来进不了候选池的记忆送进来——问题和记忆语义相关但几乎
   // 不共享词汇的那一类，主检索第一跳就空了，触发器是唯一还能把它捞回来的路。
   //
-  // 只 union，不改已有命中的分和顺序。新进来的记忆和别的候选一样，要过 2.5 的
-  // reranker 和闸四才算数——这条通道负责"让它有机会被看见"，不负责"让它赢"。
+  // 只 union，不改已有命中的分和各自通道内顺序；两个通道交替，避免触发器追加在尾部被候选预算截掉。
+  // 新进来的记忆和别的候选一样，要过 2.5 的 reranker 和闸四才算数——负责"让它有机会被看见"，不负责"让它赢"。
   if (isTriggerRecallEnabled(env)) {
     try {
       const outcome = await recallByTriggers(env, {
@@ -457,7 +457,9 @@ export async function runRecall(env: Env, input: RecallInput): Promise<RecallRes
           existingIds: new Set(rawMemories.map((m) => m.id)),
           includeHistory: input.include_history === true
         });
-        rawMemories.push(...extra);
+        extra.forEach((memory, index) => {
+          rawMemories.splice(Math.min(rawMemories.length, index * 2 + 1), 0, memory);
+        });
       }
     } catch (error) {
       console.error("trigger recall failed; using seed pool", error);
@@ -557,7 +559,7 @@ export async function runRecall(env: Env, input: RecallInput): Promise<RecallRes
 
   // 闸四: 绝对分数地板。#37 后判原始相关性分 (raw_score)，不判降权后的排序分——
   // 地板管"跟问题相不相关"，闸三管"最近喂过没有"，两闸各司其职不再相乘。
-  // 关系扩展/长尾命中没有 raw_score，退回 score (它们不经闸三，两者本来就相等)。
+  // 关系扩展命中没有 raw_score，退回 score；LIKE 长尾是词面证据，不套向量分数地板。
   const beforeFloor = [...afterRelation, ...longtailHits]
     .sort((a, b) => b.score - a.score);
   const flooredIds: string[] = [];
@@ -565,7 +567,7 @@ export async function runRecall(env: Env, input: RecallInput): Promise<RecallRes
     .filter((hit) => {
       // Nomination pools stay wide for the later reranker. Explicit search
       // still drops scores that only cleared the padded lexical floor.
-      if (input.grounded === false) return true;
+      if (input.grounded === false || hit.source_layer === "longtail") return true;
       if ((hit.raw_score ?? hit.score) >= minScore) return true;
       flooredIds.push(hit.id);
       return false;

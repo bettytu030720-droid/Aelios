@@ -279,11 +279,17 @@ async function searchWithVectorize(
   // 之前钳到 100，hook 传 top_k≥17 时 vectorTopK 就跨过 50 必崩。钳到 50 根治。
   const vectorTopK = Math.min(Math.max(input.topK * 3, input.topK + legacyFallbackLimit), 50);
   const vectorInput = { ...input, topK: vectorTopK };
-  let result = await queryVectorize(env, vector, vectorInput, true);
+  let result: VectorizeMatches;
   let usedUnfilteredFallback = false;
-  if (result.matches.length === 0) {
-    result = await queryVectorize(env, vector, vectorInput, false);
-    usedUnfilteredFallback = true;
+  try {
+    result = await queryVectorize(env, vector, vectorInput, true);
+    if (result.matches.length === 0) {
+      result = await queryVectorize(env, vector, vectorInput, false);
+      usedUnfilteredFallback = true;
+    }
+  } catch (error) {
+    console.error("memory vector query failed; using lexical recall", { namespace: input.namespace, error });
+    return null;
   }
 
   const minScore = getMinScore(env);
