@@ -239,7 +239,8 @@ document.documentElement.dataset.theme = localStorage.getItem('aelios.admin.colo
   .savebar { border-color: var(--coral) !important; background: var(--panel-bg-strong); box-shadow: var(--panel-glow); backdrop-filter: blur(12px); }
 
   /* ===== 梦境观测台 ===== */
-  .dream-stat { position: relative; }
+  /* overflow 裁剪：顶部的极光条是直的，不裁的话会从圆角卡片的左右两侧探出去 */
+  .dream-stat { position: relative; overflow: hidden; }
   .dream-stat::before {
     content: ""; position: absolute; left: 0; right: 0; top: 0; height: 2px;
     border-radius: 2px; background: var(--aurora); opacity: .75;

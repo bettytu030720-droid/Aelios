@@ -186,3 +186,7 @@ test("close-out needs confirmation and is never offered for a task that is not s
   await fresh.app.resolveDreamRun();
   assert.equal(fresh.app.dreamResolving, false);
 });
+
+test("the straight aurora bar on the stat cards is clipped to their rounded corners", () => {
+  assert.match(ADMIN_HTML, /\.dream-stat \{[^}]*position: relative;[^}]*overflow: hidden;/);
+});
