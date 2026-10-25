@@ -4,7 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import { test, type TestContext } from "node:test";
 import { invalidateSettingsCache } from "../src/gateway/config";
 import { runDailyMemoryDigest } from "../src/memory/dream/orchestrator";
-import { callDigestModel, runExtractPhase } from "../src/memory/dream/extractPhase";
+import { buildDigestPrompt, callDigestModel, runExtractPhase } from "../src/memory/dream/extractPhase";
 import { callDreamModelJson, DreamModelTimeoutError } from "../src/memory/dream/modelCall";
 import { extractDreamMemoriesFromMessages } from "../src/memory/dreamExtract";
 import { callOpenAICompat } from "../src/proxy/openaiAdapter";
@@ -264,4 +264,12 @@ test("unusable digest entries are dropped without stalling the batch, but a wron
     assert.equal(failed.modelResult.reason, "model_invalid_json");
     assert.ok(digestCalls > 1 && digestCalls <= 4);
   }
+});
+
+test("the digest prompt's output example is a format placeholder, not a sentence the model can copy into the diary", () => {
+  const prompt = buildDigestPrompt({ ...stageInput(2), existingMemories: [], speakers: null });
+  assert.doesNotMatch(prompt, /这次 dream 合并了重复记忆/);
+  assert.doesNotMatch(prompt, /"title":"夜间整理"/);
+  assert.match(prompt, /"title":"<12 字以内标题>"/);
+  assert.match(prompt, /不是示例内容，不要照抄/);
 });

@@ -2,6 +2,7 @@ import { claimQueuedDreamRun, failActiveDreamRun } from "../../db/dreamRuns";
 import type { DreamRunQueueMessage, Env } from "../../types";
 import { runDailyMemoryDigest } from "../dailyDigest";
 import { runCandidateJudge } from "../candidateJudge";
+import { writeDiaryAfterDream } from "../diaryWriter";
 
 /**
  * At-most-one pipeline invocation per persisted job, not exactly-once completion.
@@ -11,11 +12,12 @@ import { runCandidateJudge } from "../candidateJudge";
 export async function runDreamJob(
   env: Env,
   job: DreamRunQueueMessage,
-  runDigest: typeof runDailyMemoryDigest = runDailyMemoryDigest
+  runDigest: typeof runDailyMemoryDigest = runDailyMemoryDigest,
+  runDiary: typeof writeDiaryAfterDream = writeDiaryAfterDream
 ): Promise<void> {
   if (!(await claimQueuedDreamRun(env.DB, job))) return;
   try {
-    await runDigest(env, job.namespace, {
+    const result = await runDigest(env, job.namespace, {
       dateLabel: job.dateLabel,
       force: job.force,
       trigger: "manual",
@@ -27,6 +29,9 @@ export async function runDreamJob(
     } catch {
       console.error("dream: background candidate judge failed", { runId: job.runId });
     }
+    // The cron only writes yesterday's diary, so the last batch of any other date needs it written here. It does nothing
+    // until that date's dream is complete, never throws, and its failure does not undo the dream.
+    if (result?.ran) await runDiary(env, job.namespace, job.dateLabel);
   } catch {
     // The orchestrator also finalizes failures; this fallback only touches an unresolved claim.
     // Do not leak model/provider payloads into persisted job errors.

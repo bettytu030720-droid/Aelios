@@ -190,3 +190,44 @@ test("close-out needs confirmation and is never offered for a task that is not s
 test("the straight aurora bar on the stat cards is clipped to their rounded corners", () => {
   assert.match(ADMIN_HTML, /\.dream-stat \{[^}]*position: relative;[^}]*overflow: hidden;/);
 });
+
+test("a diary can be rewritten from its page: confirms, posts the date, reloads on success and explains a refusal", async () => {
+  assert.match(ADMIN_HTML, /x-show="entry\.sources_kept !== 0" @click="rewriteDiary\(entry\)"/);
+  const { app, notices } = panel();
+  const entry = { date: "2026-10-14", sources_kept: 3 };
+  const seen: string[] = [];
+  let stats: Record<string, unknown> = { ran: true };
+  app.request = async (path: string, options?: { body: string }) => {
+    seen.push(path);
+    if (path === "/admin/diary-rewrite") {
+      assert.deepEqual(JSON.parse(options?.body || "{}"), { namespace: "synthetic-space", date: "2026-10-14" });
+      return { data: { stats } };
+    }
+    if (path.startsWith("/admin/diary")) return { data: { dailies: [{ date: "2026-10-14", title: "新日记" }], weeklies: [] } };
+    throw new Error(`unexpected path ${path}`);
+  };
+  await app.rewriteDiary(entry);
+  assert.match(notices.at(-1) ?? "", /日记已重写.*2026-10-14/);
+  assert.equal(app.diaryDailies[0].title, "新日记");
+  assert.equal(app.diaryRewriting, "");
+
+  seen.length = 0;
+  stats = { ran: false, reason: "week_already_rolled_up" };
+  await app.rewriteDiary(entry);
+  assert.match(notices.at(-1) ?? "", /没有重写.*周记/);
+  assert.deepEqual(seen, ["/admin/diary-rewrite"]);
+  assert.equal(app.diaryRewriting, "");
+});
+
+test("a declined confirmation or a rewrite already in flight never reaches the API", async () => {
+  const declined = panel(false);
+  declined.app.request = async () => { throw new Error("must not call the API"); };
+  await declined.app.rewriteDiary({ date: "2026-10-14" });
+  assert.equal(declined.app.diaryRewriting, "");
+
+  const busy = panel();
+  busy.app.request = async () => { throw new Error("must not call the API"); };
+  busy.app.diaryRewriting = "2026-10-13";
+  await busy.app.rewriteDiary({ date: "2026-10-14" });
+  assert.equal(busy.app.diaryRewriting, "2026-10-13");
+});

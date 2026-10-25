@@ -8,7 +8,9 @@ import {
   normalizeDiarySegmentResult,
   readDiarySegmentSize,
   runDiaryWriter,
-  splitDiarySegments
+  runDiaryWriterForDate,
+  splitDiarySegments,
+  writeDiaryAfterDream
 } from "../src/memory/diaryWriter";
 import { ModelCallError, readModelErrorDetail } from "../src/utils/modelCall";
 import type { MessageRecord } from "../src/types";
@@ -271,4 +273,39 @@ test("a Workers AI failure reports what Workers AI said", async () => {
   } finally {
     mock.timers.reset();
   }
+});
+
+test("the diary for a date waits for that date's dream, then replaces the dream's draft", async () => {
+  const { sqlite, db } = setupDb(40);
+  const ai = fakeAi((prompt) =>
+    JSON.stringify({ title: "平常的一天", summary: "她今天还好。", source_message_ids: idsIn(prompt).slice(0, 2) })
+  );
+  const env = { DB: db, AI: ai.AI, DREAM_TIME_ZONE: "Asia/Singapore" } as never;
+
+  const waiting = await runDiaryWriterForDate(env, "default", "2026-10-14");
+  assert.equal(waiting.ran, false);
+  assert.equal(waiting.reason, "dream_not_done");
+  assert.equal(ai.prompts.length, 0);
+  assert.equal(dailyLog(sqlite).title, "夜里的短稿");
+
+  sqlite.prepare("INSERT INTO processing_cursors (name, value, updated_at) VALUES (?, ?, ?)")
+    .run("dream:default:2026-10-14", "done:2026-10-14T00:00:00.000Z", "2026-10-15T00:00:00.000Z");
+  const done = await runDiaryWriterForDate(env, "default", "2026-10-14");
+  assert.equal(done.ran, true, JSON.stringify(done));
+  assert.equal(dailyLog(sqlite).title, "平常的一天");
+});
+
+test("a disabled diary writer is left alone, and a failure after a dream is reported rather than thrown", async () => {
+  const { db } = setupDb(40);
+  const ai = fakeAi(() => assert.fail("must not be called"));
+  const off = await writeDiaryAfterDream(
+    { DB: db, AI: ai.AI, ENABLE_DIARY_WRITER: "false", DREAM_TIME_ZONE: "Asia/Singapore" } as never, "default", "2026-10-14");
+  assert.equal(off.reason, "disabled");
+  assert.equal(ai.prompts.length, 0);
+
+  const broken = { prepare() { throw new Error("synthetic db outage"); } };
+  const failed = await writeDiaryAfterDream({ DB: broken, DREAM_TIME_ZONE: "Asia/Singapore" } as never, "default", "2026-10-14");
+  assert.equal(failed.ran, false);
+  assert.equal(failed.reason, "diary_writer_failed");
+  assert.match(failed.error ?? "", /synthetic db outage/);
 });

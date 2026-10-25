@@ -35,6 +35,7 @@ import { handleModels } from "./api/models";
 import { handleRelationsGraph } from "./api/relations";
 import { runCandidateJudge } from "./memory/candidateJudge";
 import { runDailyMemoryDigest, runDreamBackfill } from "./memory/dailyDigest";
+import { writeDiaryAfterDream } from "./memory/diaryWriter";
 import { backfillFts } from "./memory/fts";
 import { runVectorBackfill } from "./memory/vectorBackfill";
 import {
@@ -87,6 +88,10 @@ async function runDailyMemoryDigestBatches(env: Env, namespace: string): Promise
   const backfill = await runDreamBackfill(env, namespace, { maxDates: 2, lookback: 3 });
   for (const item of backfill) {
     results.push({ type: "backfill", date_label: item.dateLabel, result: item.result });
+    // The nightly diary only visits yesterday, so an older date finished here would keep its dream draft as its diary.
+    if (item.result.ran) {
+      results.push({ type: "backfill_diary", date_label: item.dateLabel, result: await writeDiaryAfterDream(env, namespace, item.dateLabel) });
+    }
   }
 
   return results;
