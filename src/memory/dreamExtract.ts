@@ -224,7 +224,6 @@ async function callDreamExtractModel(
       { role: "system", content: "你是严格的 JSON 生成器。你只输出 JSON。" },
       { role: "user", content: buildDreamExtractPrompt(messages, existingFactKeys, speakers, background) }
     ],
-    temperature: 0,
     max_tokens: readPositiveInt(env.DREAM_MAX_TOKENS, DEFAULT_DREAM_EXTRACT_MAX_TOKENS, MAX_DREAM_EXTRACT_MAX_TOKENS),
     response_format: { type: "json_object" },
     stream: false

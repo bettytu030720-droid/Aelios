@@ -384,7 +384,6 @@ async function callCleanupModel(batch) {
             { role: "system", content: "你是严格 JSON 生成器。只输出 JSON。" },
             { role: "user", content: buildPrompt(batch) }
           ],
-          temperature: 0,
           max_tokens: modelMaxTokens,
           response_format: { type: "json_object" },
           enable_thinking: false,

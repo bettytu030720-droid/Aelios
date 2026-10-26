@@ -49,7 +49,6 @@ export async function draftTriggersForMemory(
         })
       }
     ],
-    temperature: 0,
     max_tokens: 800
   };
 
