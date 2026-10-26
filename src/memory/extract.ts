@@ -179,7 +179,6 @@ export async function extractMemoriesFromMessages(
         content: buildExtractionPrompt(messages)
       }
     ],
-    temperature: 0,
     max_tokens: 900,
     stream: false
   };

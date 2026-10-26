@@ -45,7 +45,6 @@ async function postChat(messages) {
     body: JSON.stringify({
       model,
       stream: false,
-      temperature: 0,
       max_tokens: maxTokens,
       messages
     })

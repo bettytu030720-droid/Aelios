@@ -7,7 +7,10 @@ import { runDailyMemoryDigest } from "../src/memory/dream/orchestrator";
 import { buildDigestPrompt, callDigestModel, runExtractPhase } from "../src/memory/dream/extractPhase";
 import { callDreamModelJson, DreamModelTimeoutError } from "../src/memory/dream/modelCall";
 import { extractDreamMemoriesFromMessages } from "../src/memory/dreamExtract";
+import { extractMemoriesFromMessages } from "../src/memory/extract";
+import { draftTriggersForMemory } from "../src/memory/triggers/build";
 import { callOpenAICompat } from "../src/proxy/openaiAdapter";
+import { callModelWithRetry } from "../src/utils/modelCall";
 import type { MessageRecord } from "../src/types";
 
 const DATE = "2026-09-18";
@@ -272,4 +275,30 @@ test("the digest prompt's output example is a format placeholder, not a sentence
   assert.doesNotMatch(prompt, /"title":"夜间整理"/);
   assert.match(prompt, /"title":"<12 字以内标题>"/);
   assert.match(prompt, /不是示例内容，不要照抄/);
+});
+
+test("background calls through AI Gateway send no temperature: newer Claude models refuse the request when one is set", async (t) => {
+  const sent: any[] = [];
+  const { env } = fixture(t, () => assert.fail("a gateway model must not run on the Workers AI binding"));
+  env.DREAM_MODEL = "anthropic/claude-haiku-5-5";
+  env.AI_GATEWAY_ID = "synthetic-gateway";
+  env.AI.gateway = () => ({
+    async run({ query }: { query: any }) {
+      sent.push(query);
+      const content = isDigest(query) ? JSON.stringify(DIGEST) : '{"memories":[]}';
+      return new Response(JSON.stringify({ choices: [{ message: { content }, finish_reason: "stop" }] }), { headers: { "content-type": "application/json" } });
+    }
+  });
+  invalidateSettingsCache();
+  const digest = await callDigestModel(env, "synthetic", { dateLabel: DATE, messageCount: 1, memoryCount: 0, hasMore: false });
+  assert.equal(digest.digest?.title, DIGEST.title);
+  await extractDreamMemoriesFromMessages(env, { namespace: "default", messages: messages(1), speakers: null });
+  await callModelWithRetry(env, { model: env.DREAM_MODEL, prompt: "give JSON", backoffMs: [] });
+  await extractMemoriesFromMessages(env, messages(1));
+  await draftTriggersForMemory(env, { content: "合成记忆。" });
+  assert.equal(sent.length, 5);
+  for (const body of sent) {
+    assert.equal(body.model, "anthropic/claude-haiku-5-5");
+    assert.ok(!("temperature" in body), JSON.stringify(body).slice(0, 200));
+  }
 });

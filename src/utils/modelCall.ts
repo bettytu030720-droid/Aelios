@@ -99,7 +99,6 @@ export async function callModelWithRetry(env: Env, req: ModelCallRequest): Promi
       { role: "system", content: req.systemPrompt ?? DEFAULT_SYSTEM_PROMPT },
       { role: "user", content: req.prompt }
     ],
-    temperature: 0,
     ...(req.maxTokens !== undefined ? { max_tokens: req.maxTokens } : {}),
     response_format: { type: "json_object" },
     stream: false

@@ -149,7 +149,6 @@ export async function callDigestModel(
       { role: "system", content: "你是严格的 JSON 生成器。你只输出 JSON，不要输出思考过程。" },
       { role: "user", content: prompt }
     ],
-    temperature: 0,
     max_tokens: readDreamMaxTokens(env),
     response_format: {
       type: "json_object"

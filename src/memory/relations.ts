@@ -270,7 +270,6 @@ async function judgeRelationsForPair(
       { role: "system", content: "Output JSON only." },
       { role: "user", content: prompt }
     ],
-    temperature: 0,
     max_tokens: 600
   };
 
@@ -454,7 +453,6 @@ async function judgeSemanticConflict(
       { role: "system", content: "Output JSON only." },
       { role: "user", content: prompt }
     ],
-    temperature: 0,
     max_tokens: 80
   };
 

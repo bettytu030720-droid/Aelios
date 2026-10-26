@@ -463,7 +463,6 @@ async function callOpenAIModel(model, prompt) {
           { role: "system", content: "你是严格 JSON 生成器。只输出 JSON。" },
           { role: "user", content: prompt }
         ],
-        temperature: 0,
         max_tokens: modelMaxTokens,
         response_format: { type: "json_object" },
         stream: false
