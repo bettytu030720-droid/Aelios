@@ -315,7 +315,7 @@ API Key：<钥匙>
 
 ## 导入以前的记忆和聊天记录
 
-整理好的条目直接写进库；聊天记录要先让模型从原话里抽候选，抽出来的进审核页「导入的」那一栏，用户在 `<Worker 地址>/admin` 里点了才算数。先看导入设置，里面有限额、抽取模型和给旧 AI 的提示词：
+整理好的条目直接写进库；聊天记录要先让模型从原话里抽候选，抽出来的进待审页「导入的」那一栏，用户在 `<Worker 地址>/admin` 里点了才算数。先看导入设置，里面有限额、抽取模型和给旧 AI 的提示词：
 
 ```bash
 curl -s "<Worker 地址>/v1/import/info?namespace=default" -H "Authorization: Bearer <钥匙>"
@@ -355,15 +355,15 @@ curl -s "<Worker 地址>/v1/import/info?namespace=default" -H "Authorization: Be
    }
    ```
 
-   - `"direct"` 直接写进库：跟库里一字不差的跳过，跟库里某条很像的不硬写、转去审核页「导入的」等用户定，其余新建；带 `factKey` 的按 key 改写，旧版留着。用户说想一条条过目，才改成 `"review"`，全部先进审核。
-   - 写完把返回的 `counts` 告诉用户：新建 `created`、改写 `updated`、跳过 `unchanged` 和 `duplicate`、转审核 `queued`、失败 `failed`。有 `queued` 的，请用户去 `/admin` → **审核队列** → **导入的** 看一眼。
+   - `"direct"` 直接写进库：跟库里一字不差的跳过，跟库里某条很像的不硬写、转去待审页「导入的」等用户定，其余新建；带 `factKey` 的按 key 改写，旧版留着。用户说想一条条过目，才改成 `"review"`，全部先进审核。
+   - 写完把返回的 `counts` 告诉用户：新建 `created`、改写 `updated`、跳过 `unchanged` 和 `duplicate`、转审核 `queued`、失败 `failed`。有 `queued` 的，请用户去 `/admin` → **待审** → **导入的** 看一眼。
    - 每批 `start_index` 加 25，`fingerprint`、`total` 不变。中途断了，用同一个 `fingerprint` 从断的地方接着发。
 
 ### 聊天记录
 
 聊天记录会一天天交给夜里整理记忆的那个模型（`DREAM_MODEL`）读，抽出候选记忆。要花 Workers AI 的用量，量大时先导两三天的看看效果，再全导。
 
-**最省事：让用户在网页上导。** `<Worker 地址>/admin` → **更多** → **导入导出** → **导入聊天记录**，选文件就行，页面会拆、会切段、显示进度，关了下次选同一个文件接着做。它认：
+**最省事：让用户在网页上导。** `<Worker 地址>/admin` → **导入导出** → **导入聊天记录**，选文件就行，页面会拆、会切段、显示进度，关了下次选同一个文件接着做。它认：
 
 - ChatGPT、Claude 导出的 `conversations.json`
 - 酒馆（SillyTavern）的 `.jsonl`
@@ -393,7 +393,7 @@ curl -s "<Worker 地址>/v1/import/info?namespace=default" -H "Authorization: Be
    ```
 
    `key` 每段不同、不超过 64 个字符；`seq` 在一段里不重复。一段一段串着发，别并发。
-3. 做完告诉用户去 `/admin` → **审核队列** → **导入的** 里挑。
+3. 做完告诉用户去 `/admin` → **待审** → **导入的** 里挑。
 
 ## 附：其它
 

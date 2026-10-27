@@ -3,79 +3,89 @@ import type { Env } from "../types";
 // Everything here is editable from /admin, so Worker settings only needs the API key.
 // kind "switch" 在设置页画成开关，defaultOn 是什么都没填时代码的默认；拨到跟默认/部署值一样就清掉覆盖，
 // 不一样就存 "true"/"false" (所有开关的读法都认这两个)。common 的几项放在设置页最上面「常用」里。
+// labelEn / hintEn / SETTING_GROUPS_EN 是英文版设置页用的；name、group 和中文 label/hint 不动，别处按它们认。
 export interface SettingSpec {
   name: string; label: string; hint?: string; group: string;
+  labelEn?: string; hintEn?: string;
   kind?: "switch"; defaultOn?: boolean; common?: boolean;
 }
+export const SETTING_GROUPS_EN: Record<string, string> = {
+  "记忆召回": "Recall",
+  "Dream 与日记": "Nightly run & journal",
+  "数据留存": "Data retention",
+  "模型与线路": "Models & routing",
+  "GitHub 日档（可选）": "GitHub archive (optional)",
+  "高级 · 改了要重建向量库": "Advanced · changing these needs a vector rebuild"
+};
 export const SETTINGS: SettingSpec[] = [
-  { group: "记忆召回", name: "MEMORY_LIFECYCLE_ENABLED", label: "记忆库 v2 总闸", hint: "默认开。关掉回退旧路径，v2 的 boot 和召回工具会直接回未启用，不碰 v2 表", kind: "switch", defaultOn: true },
-  { group: "记忆召回", name: "RECALL_RERANK_MIN_SCORE", label: "原文重排分数下限", hint: "默认 0.25，低于此值不注入。只是初始值，请结合下方召回记录调整；分数不是正确率，不同模型不可直接比较" },
-  { group: "记忆召回", name: "RECALL_RERANK_TIMEOUT_MS", label: "原文重排最多等多久（毫秒）", hint: "默认 1500，上限 5000。超时改走词面 top-1，聊天继续；迟到结果会丢弃，但 CF 调用可能仍会完成并计费" },
-  { group: "记忆召回", name: "MEMORY_RERANKER_MODEL", label: "原文重排模型", hint: "默认 @cf/baai/bge-reranker-base，通过 Worker 的 AI 绑定调用。所有来源一次批量打分，不生成记忆正文。失败时回落词面命中，不补调 LLM" },
-  { group: "记忆召回", name: "MEMORY_FILTER_MAX_OUTPUT", label: "每次注入几条记忆", hint: "日常建议 1–2 条；显式搜索不受影响。0 表示本轮不注入", common: true },
-  { group: "记忆召回", name: "MEMORY_FILTER_MAX_CONTENT_CHARS", label: "显式搜索的重排文本长度", hint: "自动注入使用不超过 400 字的连续原文窗口，不受此项控制；显式搜索返回完整内容和 ID" },
-  { group: "记忆召回", name: "MEMORY_TOP_K", label: "先从向量库取多少条", hint: "这是上限不是名额；不够格的不凑数。取回来再交给重排模型挑" },
-  { group: "记忆召回", name: "MEMORY_FILTER_MAX_CANDIDATES", label: "每空间普通记忆候选数", hint: "自动召回最终跨来源、跨空间合计最多 16 条候选，每条最多 4 个片段" },
-  { group: "记忆召回", name: "MEMORY_MIN_SCORE", label: "相似度下限", hint: "只当垃圾闸。约 0.4 的打平分会再过词面核对，不靠它凑满十条。调太高会漏掉换了说法的记忆" },
-  { group: "记忆召回", name: "MEMORY_FILTER_MIN_SCORE", label: "重排前相似度下限" },
-  { group: "记忆召回", name: "MEMORY_INJECT_DECAY_FACTOR", label: "刚注入过的记忆降权", hint: "降低近期注入记忆的候选排序；最终原文重排仍按相关性排序。填 1 关闭" },
-  { group: "记忆召回", name: "MEMORY_AUTHORED_BOOST", label: "亲笔记忆加成", hint: "自己写的记忆排前面。填 1 关闭" },
-  { group: "记忆召回", name: "RECALL_MIN_SCORE", label: "召回地板分", hint: "默认 0.15，打在降权前的原始相关性分上。调高会漏掉换了说法的记忆，调低会放进噪声；显式搜索可用 min_score 临时覆盖" },
-  { group: "记忆召回", name: "RELATION_EXPANSION", label: "顺着关系边再扩一跳", hint: "默认关。打开后向量种子命中会沿关系边扩 hop1/hop2。关着时召回结果和没这个功能时逐字一致", kind: "switch", defaultOn: false },
-  { group: "记忆召回", name: "TRIGGER_RECALL", label: "触发器联想召回", hint: "默认关。打开后问题先查触发器索引，命中的触发器把它挂的记忆并进候选池——专治问题和记忆语义相关但几乎不共享词汇的那一类。关着时召回结果和没这个功能时逐字一致", kind: "switch", defaultOn: false },
-  { group: "记忆召回", name: "TRIGGER_RECALL_GATE", label: "触发器命中门限", hint: "默认 0.85，很高是故意的：这条通道只在几乎可以肯定的时候补一刀。只能往上调，填更低的值按 0.85 处理" },
-  { group: "记忆召回", name: "TRIGGER_RECALL_TOP_K", label: "最多采信几条触发器", hint: "默认 10，上限 50。命中的触发器按分排序，只取前几条展开" },
-  { group: "记忆召回", name: "ENABLE_MEMORY_FILTER", label: "候选过滤总闸", hint: "默认开。关掉后不再过滤、重排、压缩候选，命中原样注入", kind: "switch", defaultOn: true },
-  { group: "记忆召回", name: "ENABLE_MEMORY_RERANKER", label: "原文重排开关", hint: "默认开。关掉跳过重排模型，只走词面命中", kind: "switch", defaultOn: true },
-  { group: "记忆召回", name: "MEMORY_FILTER_FAIL_OPEN", label: "过滤链路报错时放行", hint: "默认关：过滤出错就不注入。打开则出错时放行候选，宁可多注入也不丢召回", kind: "switch", defaultOn: false },
-  { group: "记忆召回", name: "RECALL_WEEK_BLOCKS", label: "命中随附周记整块", hint: "默认开。命中记忆所在那一周的 weekly_log 整块随召回下发", kind: "switch", defaultOn: true },
-  { group: "记忆召回", name: "RECALL_WEEK_BLOCK_LIMIT", label: "最多随附几块周记", hint: "默认 2。块是上下文不是命中，不占 k 的名额" },
-  { group: "记忆召回", name: "MEMORY_INJECT_DECAY_WINDOW_MIN", label: "刚注入过的记忆降权窗口（分钟）", hint: "默认 30。窗口内注入过的只压排序、不挤出地板；它是唯一相关命中时照样回来" },
-  { group: "记忆召回", name: "IMPRESSION_LADDER_MAX_CHARS", label: "Impressions 阶梯字符上限", hint: "默认 1000，boot 里近期印象区的长度预算" },
-  { group: "记忆召回", name: "RECALL_REQUIRE_D1_BACKING", label: "丢弃没有 D1 背书的命中", hint: "默认关，保持现状。打开后丢掉 Vectorize 里没有对应 D1 记录的孤儿向量，用来清遗留脏数据", kind: "switch", defaultOn: false },
-  { group: "记忆召回", name: "MEMORY_LEGACY_VECTOR_FALLBACK_LIMIT", label: "旧向量兜底条数", hint: "默认 3。老库兜底召回最多取几条" },
-  { group: "记忆召回", name: "MEMORY_LEGACY_VECTOR_FALLBACK_SCORE_FACTOR", label: "旧向量兜底折扣", hint: "默认 0.45。乘在旧库命中分上，压低它和新记忆的竞争" },
+  { group: "记忆召回", name: "MEMORY_LIFECYCLE_ENABLED", label: "记忆库 v2 总闸", labelEn: "Use memory store v2", hint: "默认开。关掉回退旧路径，v2 的 boot 和召回工具会直接回未启用，不碰 v2 表", hintEn: "On by default. Off falls back to the old path: v2 boot and the recall tools reply “not enabled” and leave the v2 tables untouched.", kind: "switch", defaultOn: true },
+  { group: "记忆召回", name: "RECALL_RERANK_MIN_SCORE", label: "原文重排分数下限", labelEn: "Minimum rerank score", hint: "默认 0.25，低于此值不注入。只是初始值，请结合下方召回记录调整；分数不是正确率，不同模型不可直接比较", hintEn: "Default 0.25. Below this, nothing is brought into the chat. Only a starting point: tune it against the recall log below. The score is not accuracy, and scores from different models can't be compared." },
+  { group: "记忆召回", name: "RECALL_RERANK_TIMEOUT_MS", label: "原文重排最多等多久（毫秒）", labelEn: "Rerank timeout (ms)", hint: "默认 1500，上限 5000。超时改走词面 top-1，聊天继续；迟到结果会丢弃，但 CF 调用可能仍会完成并计费", hintEn: "Default 1500, max 5000. On timeout it uses the top keyword match and the chat carries on. Late results are dropped, but the Cloudflare call may still finish and be billed." },
+  { group: "记忆召回", name: "MEMORY_RERANKER_MODEL", label: "原文重排模型", labelEn: "Rerank model", hint: "默认 @cf/baai/bge-reranker-base，通过 Worker 的 AI 绑定调用。所有来源一次批量打分，不生成记忆正文。失败时回落词面命中，不补调 LLM", hintEn: "Default @cf/baai/bge-reranker-base, called through the Worker's AI binding. Scores all sources in one batch and writes no memory text. If it fails, keyword matches are used; no LLM is called instead." },
+  { group: "记忆召回", name: "MEMORY_FILTER_MAX_OUTPUT", label: "每次注入几条记忆", labelEn: "Memories brought into each chat", hint: "日常建议 1–2 条；显式搜索不受影响。0 表示本轮不注入", hintEn: "1–2 is enough for everyday chat. Explicit searches aren't affected. 0 brings none in this turn.", common: true },
+  { group: "记忆召回", name: "MEMORY_FILTER_MAX_CONTENT_CHARS", label: "显式搜索的重排文本长度", labelEn: "Rerank text length in explicit search", hint: "自动注入使用不超过 400 字的连续原文窗口，不受此项控制；显式搜索返回完整内容和 ID", hintEn: "Automatic recall uses a continuous window of up to 400 characters of the original text and ignores this. Explicit search returns the full content and IDs." },
+  { group: "记忆召回", name: "MEMORY_TOP_K", label: "先从向量库取多少条", labelEn: "Matches pulled from the vector index", hint: "这是上限不是名额；不够格的不凑数。取回来再交给重排模型挑", hintEn: "A ceiling, not a quota: weak matches aren't added to fill it. The rerank model picks from what comes back." },
+  { group: "记忆召回", name: "MEMORY_FILTER_MAX_CANDIDATES", label: "每空间普通记忆候选数", labelEn: "Candidates per memory space", hint: "自动召回最终跨来源、跨空间合计最多 16 条候选，每条最多 4 个片段", hintEn: "Automatic recall ends up with at most 16 candidates in total across sources and spaces, each with up to 4 snippets." },
+  { group: "记忆召回", name: "MEMORY_MIN_SCORE", label: "相似度下限", labelEn: "Minimum similarity", hint: "只当垃圾闸。约 0.4 的打平分会再过词面核对，不靠它凑满十条。调太高会漏掉换了说法的记忆", hintEn: "Only a junk filter. Flat scores around 0.4 get an extra keyword check; this setting isn't what fills ten slots. Set it too high and memories worded differently are missed." },
+  { group: "记忆召回", name: "MEMORY_FILTER_MIN_SCORE", label: "重排前相似度下限", labelEn: "Minimum similarity before rerank" },
+  { group: "记忆召回", name: "MEMORY_INJECT_DECAY_FACTOR", label: "刚注入过的记忆降权", labelEn: "Demote memories just brought in", hint: "降低近期注入记忆的候选排序；最终原文重排仍按相关性排序。填 1 关闭", hintEn: "Ranks recently brought-in memories lower among candidates; the final rerank still sorts by relevance. 1 turns it off." },
+  { group: "记忆召回", name: "MEMORY_AUTHORED_BOOST", label: "亲笔记忆加成", labelEn: "Boost memories the assistant wrote", hint: "自己写的记忆排前面。填 1 关闭", hintEn: "Memories the assistant wrote itself rank higher. 1 turns it off." },
+  { group: "记忆召回", name: "RECALL_MIN_SCORE", label: "召回地板分", labelEn: "Recall floor score", hint: "默认 0.15，打在降权前的原始相关性分上。调高会漏掉换了说法的记忆，调低会放进噪声；显式搜索可用 min_score 临时覆盖", hintEn: "Default 0.15, applied to the raw relevance score before demotion. Higher misses memories worded differently; lower lets in noise. Explicit searches can override it with min_score." },
+  { group: "记忆召回", name: "RELATION_EXPANSION", label: "顺着关系边再扩一跳", labelEn: "Follow links to related memories", hint: "默认关。打开后向量种子命中会沿关系边扩 hop1/hop2。关着时召回结果和没这个功能时逐字一致", hintEn: "Off by default. On: vector hits expand along relation edges (hop1/hop2). Off: recall results are exactly what they'd be without this feature.", kind: "switch", defaultOn: false },
+  { group: "记忆召回", name: "TRIGGER_RECALL", label: "触发器联想召回", labelEn: "Recall through triggers", hint: "默认关。打开后问题先查触发器索引，命中的触发器把它挂的记忆并进候选池——专治问题和记忆语义相关但几乎不共享词汇的那一类。关着时召回结果和没这个功能时逐字一致", hintEn: "Off by default. On: each question first checks the trigger index, and matching triggers add their memories to the candidate pool. Meant for questions that relate to a memory in meaning but share almost no words with it. Off: recall results are exactly what they'd be without this feature.", kind: "switch", defaultOn: false },
+  { group: "记忆召回", name: "TRIGGER_RECALL_GATE", label: "触发器命中门限", labelEn: "Trigger match threshold", hint: "默认 0.85，很高是故意的：这条通道只在几乎可以肯定的时候补一刀。只能往上调，填更低的值按 0.85 处理", hintEn: "Default 0.85, high on purpose: this path only adds a memory when it is nearly certain. Can only be raised; lower values count as 0.85." },
+  { group: "记忆召回", name: "TRIGGER_RECALL_TOP_K", label: "最多采信几条触发器", labelEn: "Max triggers used", hint: "默认 10，上限 50。命中的触发器按分排序，只取前几条展开", hintEn: "Default 10, max 50. Matching triggers are sorted by score and only the top ones are expanded." },
+  { group: "记忆召回", name: "ENABLE_MEMORY_FILTER", label: "候选过滤总闸", labelEn: "Filter recall candidates", hint: "默认开。关掉后不再过滤、重排、压缩候选，命中原样注入", hintEn: "On by default. Off: candidates aren't filtered, reranked or trimmed; hits are brought into the chat as they are.", kind: "switch", defaultOn: true },
+  { group: "记忆召回", name: "ENABLE_MEMORY_RERANKER", label: "原文重排开关", labelEn: "Rerank recall candidates", hint: "默认开。关掉跳过重排模型，只走词面命中", hintEn: "On by default. Off skips the rerank model and uses keyword matches only.", kind: "switch", defaultOn: true },
+  { group: "记忆召回", name: "MEMORY_FILTER_FAIL_OPEN", label: "过滤链路报错时放行", labelEn: "Let memories through if filtering fails", hint: "默认关：过滤出错就不注入。打开则出错时放行候选，宁可多注入也不丢召回", hintEn: "Off by default: if filtering errors, nothing is brought in. On: candidates pass through on error, so you get extra memories rather than lose recall.", kind: "switch", defaultOn: false },
+  { group: "记忆召回", name: "RECALL_WEEK_BLOCKS", label: "命中随附周记整块", labelEn: "Attach the week's summary to hits", hint: "默认开。命中记忆所在那一周的 weekly_log 整块随召回下发", hintEn: "On by default. The whole weekly_log for the week of each hit comes along with recall.", kind: "switch", defaultOn: true },
+  { group: "记忆召回", name: "RECALL_WEEK_BLOCK_LIMIT", label: "最多随附几块周记", labelEn: "Max weekly summaries attached", hint: "默认 2。块是上下文不是命中，不占 k 的名额", hintEn: "Default 2. They are context, not hits, and don't count toward k." },
+  { group: "记忆召回", name: "MEMORY_INJECT_DECAY_WINDOW_MIN", label: "刚注入过的记忆降权窗口（分钟）", labelEn: "Demotion window (minutes)", hint: "默认 30。窗口内注入过的只压排序、不挤出地板；它是唯一相关命中时照样回来", hintEn: "Default 30. Memories brought in within this window only rank lower; they aren't pushed below the floor, and still come back when they're the only relevant hit." },
+  { group: "记忆召回", name: "IMPRESSION_LADDER_MAX_CHARS", label: "Impressions 阶梯字符上限", labelEn: "Impressions ladder length (characters)", hint: "默认 1000，boot 里近期印象区的长度预算", hintEn: "Default 1000. Length budget for the recent-impressions section of boot." },
+  { group: "记忆召回", name: "RECALL_REQUIRE_D1_BACKING", label: "丢弃没有 D1 背书的命中", labelEn: "Drop hits with no D1 record", hint: "默认关，保持现状。打开后丢掉 Vectorize 里没有对应 D1 记录的孤儿向量，用来清遗留脏数据", hintEn: "Off by default (keeps current behaviour). On: drops orphan vectors in Vectorize that have no matching D1 record. Use it to clear out leftover bad data.", kind: "switch", defaultOn: false },
+  { group: "记忆召回", name: "MEMORY_LEGACY_VECTOR_FALLBACK_LIMIT", label: "旧向量兜底条数", labelEn: "Max legacy-vector fallback hits", hint: "默认 3。老库兜底召回最多取几条", hintEn: "Default 3. Most hits the fallback recall takes from the old store." },
+  { group: "记忆召回", name: "MEMORY_LEGACY_VECTOR_FALLBACK_SCORE_FACTOR", label: "旧向量兜底折扣", labelEn: "Legacy-vector score discount", hint: "默认 0.45。乘在旧库命中分上，压低它和新记忆的竞争", hintEn: "Default 0.45. Multiplied into old-store hit scores so they compete less with new memories." },
 
-  { group: "Dream 与日记", name: "ENABLE_DREAM", label: "夜整总闸", hint: "默认开。关掉完全不跑 dream。旧名 ENABLE_DAILY_MEMORY_DIGEST 只在这项没设时生效", kind: "switch", defaultOn: true, common: true },
-  { group: "Dream 与日记", name: "DREAM_MODEL", label: "Dream 用的模型", hint: "填 chatgpt/模型名 就用你的 ChatGPT 套餐（要先在上面「供应商」里的 ChatGPT 套餐连好）。注意夜里会连发好几轮请求，日记、周记月记也各来一次，都算在套餐额度里；额度到顶那晚这些任务就会失败。套餐线路不收输出长度上限，下面「单轮输出上限」对它不生效", common: true },
-  { group: "Dream 与日记", name: "DREAM_TIME_ZONE", label: "按哪个时区分天", hint: "例如 Asia/Singapore" },
-  { group: "Dream 与日记", name: "DREAM_MAX_MESSAGES", label: "一轮读多少条对话" },
-  { group: "Dream 与日记", name: "DREAM_MEMORY_CONTEXT_LIMIT", label: "一轮参考多少条已有记忆" },
-  { group: "Dream 与日记", name: "DREAM_MAX_RUNS", label: "每天最多跑几轮" },
-  { group: "Dream 与日记", name: "DREAM_MAX_TOKENS", label: "单轮输出上限" },
-  { group: "Dream 与日记", name: "DEDUP_COSINE", label: "记忆去重相似度", hint: "越高越容易判成新记忆，越低越容易被合并" },
-  { group: "Dream 与日记", name: "WEEKLY_ROLLUP_DELETE_DAILIES", label: "周记落成后自动删日志", hint: "默认关，周记落成后日志留给人工审阅；打开就一条龙自动删", kind: "switch", defaultOn: false },
-  { group: "Dream 与日记", name: "CLEF_AUTO_REVIEW", label: "每天用 clef 自动审候选", hint: "默认开。每天夜整完，由 Cloudflare 的 clef 把待审候选一次审完，只分记住和放下，审核页能逐条撤回。走 Workers AI 计费，一条几百 token。关掉就全部留着：在审核页手动批，或者让助手用 MCP 的 memory_candidates 和 memory_review 自己审", kind: "switch", defaultOn: true, common: true },
-  { group: "Dream 与日记", name: "DREAM_STRATEGY", label: "新记忆写入策略", hint: "默认 upsert，直接改写。填 review 改成先进候选队列等人批" },
-  { group: "Dream 与日记", name: "DREAM_NAMESPACE", label: "夜整写进哪个记忆空间", hint: "默认 default" },
-  { group: "Dream 与日记", name: "ENABLE_DIARY_WRITER", label: "夜整后写叙事日记", hint: "默认开。关掉不写日记", kind: "switch", defaultOn: true, common: true },
-  { group: "Dream 与日记", name: "DIARY_MODEL", label: "日记和月记用的模型", hint: "留空回落 DREAM_MODEL。也可以填 chatgpt/模型名，用你的 ChatGPT 套餐" },
-  { group: "Dream 与日记", name: "DIARY_SEGMENT_MESSAGES", label: "日记分段条数", hint: "默认 40，最少 10。一天超过这么多条就分段写：每段先记一小段笔记，最后合成一篇。一次塞整天容易被模型那边报错" },
-  { group: "Dream 与日记", name: "SUMMARY_MODEL", label: "摘要模型的最后兜底", hint: "DREAM_MODEL 和旧名 DAILY_DIGEST_MODEL 都没填时，摘要链路用它" },
-  { group: "Dream 与日记", name: "ENABLE_WEEKLY_ROLLUP", label: "周记汇总", hint: "默认开。关掉不生成 weekly_log，命中也就没有周块可附", kind: "switch", defaultOn: true },
-  { group: "Dream 与日记", name: "ENABLE_MONTHLY_ROLLUP", label: "月记汇总", hint: "默认开。关掉不生成 monthly_log", kind: "switch", defaultOn: true },
-  { group: "Dream 与日记", name: "TRIGGER_BUILD", label: "夜里给新记忆建触发器", hint: "默认关。打开后夜批给当天新记忆生成检索触发器。成本是每条记忆一次模型调用加三次向量化，只建增量，已有触发器的记忆跳过", kind: "switch", defaultOn: false },
-  { group: "Dream 与日记", name: "TRIGGER_BUILD_MODEL", label: "建触发器用哪个模型", hint: "留空回落 DREAM_MODEL。触发器质量直接决定这条通道有没有用，别用太小的模型" },
-  { group: "Dream 与日记", name: "JUDGE_MAX_CANDIDATES", label: "clef 一晚最多审几条候选", hint: "默认 100，也是上限。没审到的留到第二晚" },
-  { group: "Dream 与日记", name: "EMPTY_MEMORY_MIN_CHARS", label: "空记忆最短字符数", hint: "默认 4。短于这个长度的抽取结果当空记忆丢掉" },
+  { group: "Dream 与日记", name: "ENABLE_DREAM", label: "夜整总闸", labelEn: "Process chats every night", hint: "默认开。关掉完全不跑 dream。旧名 ENABLE_DAILY_MEMORY_DIGEST 只在这项没设时生效", hintEn: "On by default. Off skips the nightly run entirely. The old name ENABLE_DAILY_MEMORY_DIGEST only applies when this is unset.", kind: "switch", defaultOn: true, common: true },
+  { group: "Dream 与日记", name: "DREAM_MODEL", label: "Dream 用的模型", labelEn: "Model for the nightly run", hint: "填 chatgpt/模型名 就用你的 ChatGPT 套餐（要先在上面「模型与上游」里把 ChatGPT 套餐连好）。注意夜里会连发好几轮请求，日记、周记月记也各来一次，都算在套餐额度里；额度到顶那晚这些任务就会失败。套餐线路不收输出长度上限，下面「单轮输出上限」对它不生效", hintEn: "Enter chatgpt/<model name> to use your ChatGPT plan (connect the ChatGPT plan under Models & upstream above first). Each night sends several rounds of requests, plus one each for the journal and the weekly/monthly summaries, all counted against the plan; on a night the quota runs out, these jobs fail. The plan route takes no output limit, so “Max output tokens per round” below doesn't apply to it.", common: true },
+  { group: "Dream 与日记", name: "DREAM_TIME_ZONE", label: "按哪个时区分天", labelEn: "Time zone for the day boundary", hint: "例如 Asia/Singapore", hintEn: "e.g. Asia/Singapore" },
+  { group: "Dream 与日记", name: "DREAM_MAX_MESSAGES", label: "一轮读多少条对话", labelEn: "Messages read per round" },
+  { group: "Dream 与日记", name: "DREAM_MEMORY_CONTEXT_LIMIT", label: "一轮参考多少条已有记忆", labelEn: "Existing memories consulted per round" },
+  { group: "Dream 与日记", name: "DREAM_MAX_RUNS", label: "每天最多跑几轮", labelEn: "Max rounds per day" },
+  { group: "Dream 与日记", name: "DREAM_MAX_TOKENS", label: "单轮输出上限", labelEn: "Max output tokens per round" },
+  { group: "Dream 与日记", name: "DEDUP_COSINE", label: "记忆去重相似度", labelEn: "Duplicate similarity threshold", hint: "越高越容易判成新记忆，越低越容易被合并", hintEn: "Higher: more things count as new memories. Lower: more get merged." },
+  { group: "Dream 与日记", name: "WEEKLY_ROLLUP_DELETE_DAILIES", label: "周记落成后自动删日志", labelEn: "Delete daily entries after the weekly summary", hint: "默认关，周记落成后日志留给人工审阅；打开就一条龙自动删", hintEn: "Off by default: once the weekly summary is written, the daily entries stay for you to review. On: they're deleted automatically.", kind: "switch", defaultOn: false },
+  { group: "Dream 与日记", name: "CLEF_AUTO_REVIEW", label: "每天用 clef 自动审候选", labelEn: "Auto-review every night", hint: "默认开。每天夜整完，由 Cloudflare 的 clef 把待审候选一次审完，只分记住和放下，审核页能逐条撤回。走 Workers AI 计费，一条几百 token。关掉就全部留着：在审核页手动批，或者让助手用 MCP 的 memory_candidates 和 memory_review 自己审", hintEn: "On by default. After each nightly run, Cloudflare's clef model goes through all pending candidates once, only deciding keep or let go; you can undo each one on the Review page. Billed through Workers AI, a few hundred tokens per candidate. Off: everything waits for you to approve on the Review page, or for the assistant to review them itself with the MCP tools memory_candidates and memory_review.", kind: "switch", defaultOn: true, common: true },
+  { group: "Dream 与日记", name: "DREAM_STRATEGY", label: "新记忆写入策略", labelEn: "How new memories are saved", hint: "默认 upsert，直接改写。填 review 改成先进候选队列等人批", hintEn: "Default upsert writes them directly. Set review to put them in the Review queue as candidates for approval first." },
+  { group: "Dream 与日记", name: "DREAM_NAMESPACE", label: "夜整写进哪个记忆空间", labelEn: "Memory space the nightly run writes to", hint: "默认 default", hintEn: "Default: default" },
+  { group: "Dream 与日记", name: "ENABLE_DIARY_WRITER", label: "夜整后写叙事日记", labelEn: "Write a journal entry afterwards", hint: "默认开。关掉不写日记", hintEn: "On by default. Off: no journal is written.", kind: "switch", defaultOn: true, common: true },
+  { group: "Dream 与日记", name: "DIARY_MODEL", label: "日记和月记用的模型", labelEn: "Model for the journal and monthly summary", hint: "留空回落 DREAM_MODEL。也可以填 chatgpt/模型名，用你的 ChatGPT 套餐", hintEn: "Blank uses DREAM_MODEL. You can also enter chatgpt/<model name> to use your ChatGPT plan." },
+  { group: "Dream 与日记", name: "DIARY_SEGMENT_MESSAGES", label: "日记分段条数", labelEn: "Messages per journal segment", hint: "默认 40，最少 10。一天超过这么多条就分段写：每段先记一小段笔记，最后合成一篇。一次塞整天容易被模型那边报错", hintEn: "Default 40, min 10. A day with more messages than this is written in segments: a short note for each, then merged into one entry. Sending a whole day at once often makes the model return an error." },
+  { group: "Dream 与日记", name: "SUMMARY_MODEL", label: "摘要模型的最后兜底", labelEn: "Last-resort summary model", hint: "DREAM_MODEL 和旧名 DAILY_DIGEST_MODEL 都没填时，摘要链路用它", hintEn: "Used for summaries when neither DREAM_MODEL nor the old name DAILY_DIGEST_MODEL is set." },
+  { group: "Dream 与日记", name: "ENABLE_WEEKLY_ROLLUP", label: "周记汇总", labelEn: "Write weekly summaries", hint: "默认开。关掉不生成 weekly_log，命中也就没有周块可附", hintEn: "On by default. Off: no weekly_log is written, so recall hits have no week to attach.", kind: "switch", defaultOn: true },
+  { group: "Dream 与日记", name: "ENABLE_MONTHLY_ROLLUP", label: "月记汇总", labelEn: "Write monthly summaries", hint: "默认开。关掉不生成 monthly_log", hintEn: "On by default. Off: no monthly_log is written.", kind: "switch", defaultOn: true },
+  { group: "Dream 与日记", name: "TRIGGER_BUILD", label: "夜里给新记忆建触发器", labelEn: "Build triggers for new memories each night", hint: "默认关。打开后夜批给当天新记忆生成检索触发器。成本是每条记忆一次模型调用加三次向量化，只建增量，已有触发器的记忆跳过", hintEn: "Off by default. On: the nightly run builds recall triggers for that day's new memories. Costs one model call plus three embeddings per memory. Only new ones: memories that already have triggers are skipped.", kind: "switch", defaultOn: false },
+  { group: "Dream 与日记", name: "TRIGGER_BUILD_MODEL", label: "建触发器用哪个模型", labelEn: "Model for building triggers", hint: "留空回落 DREAM_MODEL。触发器质量直接决定这条通道有没有用，别用太小的模型", hintEn: "Blank uses DREAM_MODEL. Trigger quality decides whether trigger recall helps at all, so avoid very small models." },
+  { group: "Dream 与日记", name: "JUDGE_MAX_CANDIDATES", label: "clef 一晚最多审几条候选", labelEn: "Max candidates auto-reviewed per night", hint: "默认 100，也是上限。没审到的留到第二晚", hintEn: "Default 100, which is also the max. The rest wait for the next night." },
+  { group: "Dream 与日记", name: "EMPTY_MEMORY_MIN_CHARS", label: "空记忆最短字符数", labelEn: "Shortest memory kept (characters)", hint: "默认 4。短于这个长度的抽取结果当空记忆丢掉", hintEn: "Default 4. Extracted memories shorter than this count as empty and are dropped." },
 
-  { group: "数据留存", name: "MESSAGES_RETENTION_DAYS", label: "原始对话保留天数", hint: "Dream 抽完记忆后，原文留几天", common: true },
+  { group: "数据留存", name: "MESSAGES_RETENTION_DAYS", label: "原始对话保留天数", labelEn: "Keep chat transcripts (days)", hint: "Dream 抽完记忆后，原文留几天", hintEn: "How many days the original messages stay after the nightly run has pulled memories from them.", common: true },
 
-  { group: "模型与线路", name: "AI_GATEWAY_ID", label: "默认 AI Gateway ID", hint: "会写进上游 URL。自定义 Provider 和动态路由必须填对，不能只靠账户默认 Gateway" },
-  { group: "模型与线路", name: "UPSTREAM_STRIP_TOOL_FIELDS", label: "始终剥离的工具字段", hint: "逗号分隔，例如 eager_input_streaming,cache_control。填上就每次先剥，不再等上游那次 400。留空则按线路学习：只在被拒一次后自动剥离（换 isolate 会重学一次），接受该字段的上游不受影响。工具的身份字段 name/description/input_schema/type 会被拒绝" },
-  { group: "模型与线路", name: "VISION_MODEL", label: "看图模型" },
-  { group: "模型与线路", name: "CHAT_MODEL", label: "导盲犬入口的模型", hint: "只给 /v1/guide-dog 用，聊天走网关身份" },
-  { group: "模型与线路", name: "PUBLIC_MODEL_NAME", label: "导盲犬对外显示的模型名" },
-  { group: "模型与线路", name: "DEFAULT_UPSTREAM_MODEL", label: "上游模型兜底名", hint: "CHAT_MODEL 没填时用它" },
-  { group: "模型与线路", name: "ALLOW_MODEL_PASSTHROUGH", label: "允许客户端指定模型", hint: "默认关，客户端传什么模型名都落到 CHAT_MODEL。打开后导盲犬入口按客户端给的模型名原样转发，等于放开模型选择", kind: "switch", defaultOn: false },
+  { group: "模型与线路", name: "AI_GATEWAY_ID", label: "默认 AI Gateway ID", labelEn: "Default AI Gateway ID", hint: "会写进上游 URL。自定义 Provider 和动态路由必须填对，不能只靠账户默认 Gateway", hintEn: "Goes into the upstream URL. Custom providers and dynamic routes need the right ID here; the account's default gateway isn't enough." },
+  { group: "模型与线路", name: "UPSTREAM_STRIP_TOOL_FIELDS", label: "始终剥离的工具字段", labelEn: "Tool fields to always strip", hint: "逗号分隔，例如 eager_input_streaming,cache_control。填上就每次先剥，不再等上游那次 400。留空则按线路学习：只在被拒一次后自动剥离（换 isolate 会重学一次），接受该字段的上游不受影响。工具的身份字段 name/description/input_schema/type 会被拒绝", hintEn: "Comma-separated, e.g. eager_input_streaming,cache_control. Fields listed here are stripped every time, without waiting for the upstream to reject them with a 400. Blank: learned per route, stripping a field only after one rejection (relearned on a new isolate); upstreams that accept it are unaffected. Tool identity fields name/description/input_schema/type are refused." },
+  { group: "模型与线路", name: "VISION_MODEL", label: "看图模型", labelEn: "Model for images" },
+  { group: "模型与线路", name: "CHAT_MODEL", label: "导盲犬入口的模型", labelEn: "Model for the guide-dog endpoint", hint: "只给 /v1/guide-dog 用，聊天走网关身份", hintEn: "Only used by /v1/guide-dog. Chats go through the gateway's assistant setup." },
+  { group: "模型与线路", name: "PUBLIC_MODEL_NAME", label: "导盲犬对外显示的模型名", labelEn: "Model name the guide-dog endpoint shows" },
+  { group: "模型与线路", name: "DEFAULT_UPSTREAM_MODEL", label: "上游模型兜底名", labelEn: "Fallback upstream model", hint: "CHAT_MODEL 没填时用它", hintEn: "Used when CHAT_MODEL is blank." },
+  { group: "模型与线路", name: "ALLOW_MODEL_PASSTHROUGH", label: "允许客户端指定模型", labelEn: "Let clients choose the model", hint: "默认关，客户端传什么模型名都落到 CHAT_MODEL。打开后导盲犬入口按客户端给的模型名原样转发，等于放开模型选择", hintEn: "Off by default: whatever model name a client sends goes to CHAT_MODEL. On: the guide-dog endpoint forwards the client's model name as is, which hands model choice to the client.", kind: "switch", defaultOn: false },
 
-  { group: "GitHub 日档（可选）", name: "GITHUB_DAILY_REPO", label: "仓库", hint: "owner/repo；留空就是不启用" },
-  { group: "GitHub 日档（可选）", name: "GITHUB_DAILY_PATH", label: "仓库里的路径", hint: "默认 archive/daily" },
-  { group: "GitHub 日档（可选）", name: "GITHUB_DAILY_NAMESPACE", label: "写进哪个记忆空间" },
+  { group: "GitHub 日档（可选）", name: "GITHUB_DAILY_REPO", label: "仓库", labelEn: "Repository", hint: "owner/repo；留空就是不启用", hintEn: "owner/repo. Leave blank to turn this off." },
+  { group: "GitHub 日档（可选）", name: "GITHUB_DAILY_PATH", label: "仓库里的路径", labelEn: "Path in the repository", hint: "默认 archive/daily", hintEn: "Default archive/daily" },
+  { group: "GitHub 日档（可选）", name: "GITHUB_DAILY_NAMESPACE", label: "写进哪个记忆空间", labelEn: "Memory space to import into" },
 
-  { group: "高级 · 改了要重建向量库", name: "EMBEDDING_MODEL", label: "向量模型" },
-  { group: "高级 · 改了要重建向量库", name: "EMBEDDING_DIMENSIONS", label: "向量维度", hint: "必须和 Vectorize 索引一致，对不上就整个召不回" },
-  { group: "高级 · 改了要重建向量库", name: "VECTORIZE_INDEX_NAME", label: "Vectorize 索引名" }
+  { group: "高级 · 改了要重建向量库", name: "EMBEDDING_MODEL", label: "向量模型", labelEn: "Embedding model" },
+  { group: "高级 · 改了要重建向量库", name: "EMBEDDING_DIMENSIONS", label: "向量维度", labelEn: "Embedding dimensions", hint: "必须和 Vectorize 索引一致，对不上就整个召不回", hintEn: "Must match the Vectorize index. If it doesn't, recall stops working entirely." },
+  { group: "高级 · 改了要重建向量库", name: "VECTORIZE_INDEX_NAME", label: "Vectorize 索引名", labelEn: "Vectorize index name" }
 ];
 export const SETTING_NAMES = new Set(SETTINGS.map(s => s.name));
 // 已经下线的设置：存过的值读的时候丢掉，不报 Unknown setting。主模型/代审自动审 (10-07) 拆了，只剩 clef。
@@ -85,15 +95,15 @@ const RETIRED_SETTINGS = new Set([
 ]);
 
 // Credentials stay Worker Secrets; the page only reports whether they exist.
-export const SECRET_SPECS: { name: string; label: string }[] = [
-  { name: "CHATBOX_API_KEY", label: "主密钥（必填，客户端和本页都用它）" },
-  { name: "IM_API_KEY", label: "第二个客户端密钥" },
-  { name: "DEBUG_API_KEY", label: "维护密钥（跨记忆空间操作）" },
-  { name: "MEMORY_MCP_API_KEY", label: "MCP 密钥" },
-  { name: "GUIDE_DOG_API_KEY", label: "导盲犬密钥" },
-  { name: "CLOUDFLARE_API_TOKEN", label: "CF 令牌（网关上游就靠它，一把管所有）" },
-  { name: "CF_AIG_TOKEN", label: "AI Gateway 认证令牌（网关开了 authenticated gateway 才要）" },
-  { name: "GITHUB_DAILY_TOKEN", label: "GitHub 日档只读 PAT" }
+export const SECRET_SPECS: { name: string; label: string; labelEn: string }[] = [
+  { name: "CHATBOX_API_KEY", label: "主密钥（必填，客户端和本页都用它）", labelEn: "Main key (required; your chat app and this page both use it)" },
+  { name: "IM_API_KEY", label: "第二个客户端密钥", labelEn: "Second client key" },
+  { name: "DEBUG_API_KEY", label: "维护密钥（跨记忆空间操作）", labelEn: "Maintenance key (works across memory spaces)" },
+  { name: "MEMORY_MCP_API_KEY", label: "MCP 密钥", labelEn: "MCP key" },
+  { name: "GUIDE_DOG_API_KEY", label: "导盲犬密钥", labelEn: "Guide-dog endpoint key" },
+  { name: "CLOUDFLARE_API_TOKEN", label: "CF 令牌（网关上游就靠它，一把管所有）", labelEn: "Cloudflare API token (all upstream calls use this one token)" },
+  { name: "CF_AIG_TOKEN", label: "AI Gateway 认证令牌（网关开了 authenticated gateway 才要）", labelEn: "AI Gateway auth token (only if the gateway has Authenticated Gateway on)" },
+  { name: "GITHUB_DAILY_TOKEN", label: "GitHub 日档只读 PAT", labelEn: "Read-only GitHub PAT for the archive" }
 ];
 
 export function validateSettings(value: unknown): Record<string, string> {
@@ -120,13 +130,14 @@ export function applySettings(env: Env, settings: Record<string, string> | undef
 }
 export function describeSettings(env: Env, settings: Record<string, string>) {
   const source = env as unknown as Record<string, unknown>;
-  const groups: { group: string; items: unknown[] }[] = [];
+  const groups: { group: string; groupEn: string; items: unknown[] }[] = [];
   for (const spec of SETTINGS) {
     const deployed = source[spec.name];
     let group = groups.find(g => g.group === spec.group);
-    if (!group) { group = { group: spec.group, items: [] }; groups.push(group); }
+    if (!group) { group = { group: spec.group, groupEn: SETTING_GROUPS_EN[spec.group] || "", items: [] }; groups.push(group); }
     group.items.push({
       name: spec.name, label: spec.label, hint: spec.hint || "",
+      labelEn: spec.labelEn || "", hintEn: spec.hintEn || "",
       ...(spec.kind ? { kind: spec.kind, defaultOn: spec.defaultOn === true } : {}),
       ...(spec.common ? { common: true } : {}),
       value: settings[spec.name] || "",

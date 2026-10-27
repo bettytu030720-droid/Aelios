@@ -88,13 +88,13 @@ test("fresh/refresh status reconstructs an active job and stale jobs show unconf
   app.request = async () => { throw new Error("active tasks must block submission"); };
   await app.triggerDream();
   assert.equal(app.dreamRunResult, null);
-  assert.match(ADMIN_HTML, /force 也不能覆盖/);
+  assert.match(ADMIN_HTML, /「已经整理过的也重来」也盖不过它/);
   assert.match(ADMIN_HTML, /run.status === 'running' && !run.stale/);
 });
 
 test("dry-run results retain proposal/extraction/routing rendering and do not poll", async () => {
-  assert.match(ADMIN_HTML, /预演需保持页面打开/);
-  assert.match(ADMIN_HTML, /预演中，请保持页面打开/);
+  assert.match(ADMIN_HTML, /预览时请保持页面打开/);
+  assert.match(ADMIN_HTML, /预览中，请保持页面打开/);
   const { app, timers } = panel();
   const result = {
     dry_run: true, result: { ran: true }, proposal: { title: "synthetic proposal", memories_to_add: [] },

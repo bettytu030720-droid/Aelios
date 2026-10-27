@@ -845,7 +845,8 @@ test("settings edited in the admin page override deployment vars everywhere", as
   const report = JSON.parse((await run("/api/gateway/env")).text);
   const items = report.groups.flatMap((g: any) => g.items);
   assert.deepEqual(items.find((i: any) => i.name === "CHAT_MODEL").value, "chosen-in-admin");
-  assert.deepEqual(items.find((i: any) => i.name === "VISION_MODEL"), { name: "VISION_MODEL", label: "看图模型", hint: "", value: "", deployed: "deployed-vision" });
+  assert.deepEqual(items.find((i: any) => i.name === "VISION_MODEL"), { name: "VISION_MODEL", label: "看图模型", hint: "", labelEn: "Model for images", hintEn: "", value: "", deployed: "deployed-vision" });
+  assert.equal(report.groups.find((g: any) => g.group === "模型与线路").groupEn, "Models & routing");
   assert.equal(report.secrets.find((x: any) => x.name === "CHATBOX_API_KEY").present, true);
   assert.equal(report.secrets.find((x: any) => x.name === "DEBUG_API_KEY").present, false);
   assert.equal((await worker.fetch(request("/api/gateway/env", undefined, { authorization: "Bearer im-key" }), env, ctx)).status, 401);
