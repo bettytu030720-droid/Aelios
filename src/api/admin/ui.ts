@@ -435,7 +435,15 @@ tailwind.config = { corePlugins: { preflight: false } };
 
   /* 日记 */
   .journal { display: grid; gap: 16px; }
-  @media (min-width: 1024px) { .journal { grid-template-columns: 320px 1fr; align-items: start; } }
+  .journal-back { display: none; }
+  @media (max-width: 1023px) {
+    .journal.is-reading .journal-list, .journal:not(.is-reading) .reading { display: none; }
+    .journal-back { display: inline-flex; }
+  }
+  @media (min-width: 1024px) {
+    .journal { grid-template-columns: 320px 1fr; align-items: start; }
+    .journal .reading { position: sticky; top: 24px; max-height: calc(100dvh - 48px); overflow-y: auto; }
+  }
   .entry-btn { display: grid; gap: 2px; width: 100%; padding: 12px 16px; border: 0; background: transparent; text-align: left; }
   .entry-btn:hover { background: var(--soft); }
   .entry-btn.is-active { background: var(--aur); box-shadow: inset 3px 0 0 var(--vline); }
@@ -691,7 +699,7 @@ tailwind.config = { corePlugins: { preflight: false } };
                   </div>
                 </template>
               </div>
-              <div x-show="home.diary" class="px-[18px] pb-4"><button type="button" @click="diaryMode = 'daily'; diaryPick = home.diary ? 'daily:' + home.diary.date : ''; go('diary')" class="link">${t("读完整篇 →", "Read the full entry →")}</button></div>
+              <div x-show="home.diary" class="px-[18px] pb-4"><button type="button" @click="diaryMode = 'daily'; go('diary'); if (home.diary) openDiary('daily:' + home.diary.date)" class="link">${t("读完整篇 →", "Read the full entry →")}</button></div>
             </section>
           </div>
         </div>
@@ -818,16 +826,16 @@ tailwind.config = { corePlugins: { preflight: false } };
           </div>
           <div class="flex items-center gap-2">
             <div class="seg" role="group" :aria-label="L('日记类型', 'Entry type')">
-              <button type="button" @click="diaryMode = 'daily'; diaryPick = ''" :class="diaryMode === 'daily' ? 'is-active' : ''" :aria-pressed="diaryMode === 'daily' ? 'true' : 'false'" x-text="L('每天', 'Daily')"></button>
-              <button type="button" @click="diaryMode = 'weekly'; diaryPick = ''" :class="diaryMode === 'weekly' ? 'is-active' : ''" :aria-pressed="diaryMode === 'weekly' ? 'true' : 'false'" x-text="L('每周', 'Weekly')"></button>
+              <button type="button" @click="diaryMode = 'daily'; diaryPick = ''; diaryReading = false" :class="diaryMode === 'daily' ? 'is-active' : ''" :aria-pressed="diaryMode === 'daily' ? 'true' : 'false'" x-text="L('每天', 'Daily')"></button>
+              <button type="button" @click="diaryMode = 'weekly'; diaryPick = ''; diaryReading = false" :class="diaryMode === 'weekly' ? 'is-active' : ''" :aria-pressed="diaryMode === 'weekly' ? 'true' : 'false'" x-text="L('每周', 'Weekly')"></button>
             </div>
             <button type="button" @click="loadDiary()" class="btn btn-icon hidden md:inline-flex" :aria-label="L('刷新', 'Refresh')">${I.refresh}</button>
           </div>
         </header>
 
-        <div class="journal">
-          <div class="flex flex-col gap-3">
-            <button type="button" x-show="diaryMode === 'daily' && diaryWeeklies.length" @click="diaryMode = 'weekly'; diaryPick = 'weekly:' + diaryWeeklies[0].week" class="panel dream-stat grid gap-1 px-4 py-3.5 text-left">
+        <div class="journal" :class="diaryReading ? 'is-reading' : ''">
+          <div class="journal-list flex flex-col gap-3">
+            <button type="button" x-show="diaryMode === 'daily' && diaryWeeklies.length" @click="diaryMode = 'weekly'; openDiary('weekly:' + diaryWeeklies[0].week)" class="panel dream-stat grid gap-1 px-4 py-3.5 text-left">
               <span class="text-xs muted" x-text="diaryWeeklies.length ? L('最近一周 · ', 'Latest week · ') + diaryWeeklies[0].start_date + ' – ' + diaryWeeklies[0].end_date : ''"></span>
               <span class="font-semibold" x-text="diaryWeeklies.length ? diaryWeeklies[0].title : ''"></span>
               <span class="link">${t("读周记 →", "Read the weekly →")}</span>
@@ -837,7 +845,7 @@ tailwind.config = { corePlugins: { preflight: false } };
                 <div class="empty" x-text="diaryMode === 'daily' ? L('还没有日记。', 'No journal entries yet.') : L('还没有周记。', 'No weekly summaries yet.')"></div>
               </template>
               <template x-for="item in diaryListItems()" :key="item.key">
-                <button type="button" @click="diaryPick = item.key" class="entry-btn" :class="diaryCurrentKey() === item.key ? 'is-active' : ''" :aria-current="diaryCurrentKey() === item.key ? 'true' : null">
+                <button type="button" @click="openDiary(item.key)" class="entry-btn" :class="diaryCurrentKey() === item.key ? 'is-active' : ''" :aria-current="diaryCurrentKey() === item.key ? 'true' : null">
                   <span class="text-xs muted" x-text="item.when"></span>
                   <span class="truncate font-semibold" x-text="item.title"></span>
                   <span class="truncate text-[13px] muted" x-text="item.excerpt"></span>
@@ -847,6 +855,7 @@ tailwind.config = { corePlugins: { preflight: false } };
           </div>
 
           <article class="panel reading">
+            <button type="button" @click="diaryReading = false" class="link-btn journal-back mb-4" x-text="L('← 日记列表', '← All entries')"></button>
             <template x-if="!diaryCurrent()">
               <p class="muted">${t("选一篇来读。", "Pick an entry to read.")}</p>
             </template>
@@ -862,7 +871,7 @@ tailwind.config = { corePlugins: { preflight: false } };
                   </div>
                 </div>
                 <template x-for="(para, index) in paragraphs(entry.summary)" :key="index"><p x-text="para"></p></template>
-                <div x-show="!entry.week" class="mt-6 flex flex-wrap items-center gap-3" style="border-top: 1px solid var(--div); padding-top: 16px">
+                <div x-show="!entry.week && entry.sources_kept !== 0" class="mt-6 flex flex-wrap items-center gap-3" style="border-top: 1px solid var(--div); padding-top: 16px">
                   <button type="button" x-show="entry.sources_kept !== 0" @click="rewriteDiary(entry)" :disabled="diaryRewriting !== ''" class="btn btn-sm" x-text="diaryRewriting === entry.date ? L('重写中，请保持页面打开…', 'Rewriting — keep this page open…') : L('用原文重写这篇', 'Rewrite from the originals')"></button>
                   <span x-show="entry.sources_kept !== 0" class="text-xs muted">${t("会覆盖现在的内容。", "Replaces the current text.")}</span>
                 </div>
@@ -1056,7 +1065,7 @@ tailwind.config = { corePlugins: { preflight: false } };
             </div>
           </div>
           <template x-if="notebookDraft">
-            <div class="panel panel-pad grid gap-3">
+            <div id="notebook-editor" class="panel panel-pad grid scroll-mt-6 gap-3">
               <input x-model="notebookDraft.name" maxlength="60" class="field" :placeholder="L('页名，比如 经济师进度', 'Page name, e.g. exam-progress')" :aria-label="L('页名', 'Page name')">
               <textarea x-model="notebookDraft.content" class="field min-h-64" :placeholder="L('这一页记什么', 'What goes on this page')" :aria-label="L('内容', 'Content')"></textarea>
               <div class="flex flex-wrap items-center gap-2">
@@ -1517,12 +1526,12 @@ tailwind.config = { corePlugins: { preflight: false } };
 
         <div class="grid gap-6 lg:grid-cols-[180px_minmax(0,1fr)] lg:items-start">
           <nav class="subnav sticky top-6 hidden lg:block" :aria-label="L('设置分区', 'Settings sections')">
-            <button type="button" @click="settingsJump('s-common')" x-text="L('常用', 'Essentials')"></button>
-            <button type="button" @click="settingsJump('s-assistants')" x-text="L('助手', 'Assistants')"></button>
-            <button type="button" @click="settingsJump('s-upstream')" x-text="L('模型与上游', 'Models & upstream')"></button>
-            <button type="button" @click="settingsJump('s-all')" x-text="L('全部设置', 'All settings')"></button>
-            <button type="button" @click="settingsJump('s-connect')" x-text="L('连接与密钥', 'Connection & keys')"></button>
-            <button type="button" @click="settingsJump('s-debug')" x-text="L('排查工具', 'Troubleshooting')"></button>
+            <button type="button" @click="scrollToId('s-common')" x-text="L('常用', 'Essentials')"></button>
+            <button type="button" @click="scrollToId('s-assistants')" x-text="L('助手', 'Assistants')"></button>
+            <button type="button" @click="scrollToId('s-upstream')" x-text="L('模型与上游', 'Models & upstream')"></button>
+            <button type="button" @click="scrollToId('s-all')" x-text="L('全部设置', 'All settings')"></button>
+            <button type="button" @click="scrollToId('s-connect')" x-text="L('连接与密钥', 'Connection & keys')"></button>
+            <button type="button" @click="scrollToId('s-debug')" x-text="L('排查工具', 'Troubleshooting')"></button>
           </nav>
 
           <div class="flex min-w-0 flex-col gap-6">
@@ -2032,6 +2041,7 @@ function memoryAdmin() {
     diaryExpanded: {},
     diaryMode: 'daily',
     diaryPick: '',
+    diaryReading: false,
 
     worldItems: [],
     worldSelection: {},
@@ -2603,7 +2613,7 @@ function memoryAdmin() {
       this.reviewSelected = {};
       this.precious = []; this.glossary = [];
       this.notebookPages = []; this.notebookDraft = null; this.notebookLoaded = false;
-      this.diaryDailies = []; this.diaryWeeklies = []; this.diaryExpanded = {}; this.diaryRewriting = ''; this.diaryPick = '';
+      this.diaryDailies = []; this.diaryWeeklies = []; this.diaryExpanded = {}; this.diaryRewriting = ''; this.diaryPick = ''; this.diaryReading = false;
       this.worldItems = []; this.worldSelection = {}; this.worldQuery = '';
       this.importReview = { batches: [], importId: '', filter: 'all', items: [], counts: { pending: 0, clef_yes: 0, clef_no: 0 }, offset: 0, more: false, loading: false, bulk: null };
       // 正在跑的聊天导入带着自己的空间，换空间不打断它；别的导入状态跟着空间清掉。
@@ -2825,10 +2835,26 @@ function memoryAdmin() {
       await run;
       this.gwBusy = false;
     },
-    settingsJump(id) {
+    scrollToId(id) {
       if (typeof document.getElementById !== 'function') return;
       const target = document.getElementById(id);
       if (target) target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    },
+    // 等页面画好再滚过去（刚出现的编辑框之类）。
+    revealSoon(id) {
+      if (typeof this.$nextTick === 'function') this.$nextTick(function() { this.scrollToId(id); }.bind(this));
+    },
+    // 回到顶上：宽屏是整页在滚，手机上是 .main 自己在滚。
+    scrollTop() {
+      if (typeof window.scrollTo === 'function') window.scrollTo(0, 0);
+      const main = typeof document.querySelector === 'function' ? document.querySelector('.main') : null;
+      if (main) main.scrollTop = 0;
+    },
+    // 窄屏点开一篇就换成全文，带「← 日记列表」；宽屏左右两栏，正文在右边直接换。
+    openDiary(key) {
+      this.diaryPick = key;
+      this.diaryReading = true;
+      if (typeof window.matchMedia === 'function' && window.matchMedia('(max-width: 1023px)').matches) this.scrollTop();
     },
     async reloadAll() {
       this.savePrefs();
@@ -3475,6 +3501,7 @@ function memoryAdmin() {
     },
     newNotebookPage() {
       this.notebookDraft = { id: '', name: '', content: '', updated_at: '' };
+      this.revealSoon('notebook-editor');
       this.icons();
     },
     async openNotebookPage(item) {
@@ -3484,6 +3511,7 @@ function memoryAdmin() {
         if (revision !== this.spaceRevision) return;
         const page = data.data || {};
         this.notebookDraft = { id: page.id, name: page.name, content: page.content, updated_at: page.updated_at };
+        this.revealSoon('notebook-editor');
       } catch (error) {
         this.notify(error.message);
       }
@@ -3625,16 +3653,13 @@ function memoryAdmin() {
       if (id === 'settings') { this.loadRecallHistory(); this.chatgptLoad(); if (!this.gwGroups.length && this.savedApiKey.trim()) this.gwLoad(); }
       if (id === 'review') { this.loadCandidates(); this.loadJudgeDecisions(); }
       if (id === 'memory') this.loadMoreView();
-      if (id === 'diary') this.loadDiary();
+      if (id === 'diary') { this.diaryReading = false; this.loadDiary(); }
       if (id === 'transfer') { this.loadTransferInfo(); this.loadImportBatches(); }
       if (id === 'dream') {
         this.loadDreamStatus();
         this.loadDreamHarvest();
       }
-      // 换页回到顶上：宽屏是整页在滚，手机上是 .main 自己在滚。
-      if (typeof window.scrollTo === 'function') window.scrollTo(0, 0);
-      const main = typeof document.querySelector === 'function' ? document.querySelector('.main') : null;
-      if (main) main.scrollTop = 0;
+      this.scrollTop();
       this.icons();
     },
     async loadDiary() {
@@ -3814,7 +3839,7 @@ function memoryAdmin() {
       this.dreamDate = run.date_label;
       this.dreamDryRun = false;
       this.dreamForce = false;
-      this.$nextTick(function() { this.settingsJump('dream-run'); }.bind(this));
+      this.revealSoon('dream-run');
     },
     async resolveDreamRun() {
       const run = this.dreamActiveRun;
