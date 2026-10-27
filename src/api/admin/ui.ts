@@ -268,7 +268,7 @@ tailwind.config = { corePlugins: { preflight: false } };
   /* ===== 外壳：手机上是一整屏的列，内容区自己滚、底栏钉在下面；宽屏是侧栏 + 正文，整页滚 ===== */
   .app { position: relative; z-index: 1; display: flex; flex-direction: column; height: 100dvh; }
   .main { position: relative; flex: 1; min-width: 0; min-height: 0; overflow-y: auto; }
-  .wrap { max-width: 1120px; margin: 0 auto; padding: 20px 16px 40px; }
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 20px 16px max(40px, env(safe-area-inset-bottom)); }
   .side { position: fixed; inset: 0 auto 0 0; z-index: 60; width: 272px; max-width: 86vw; box-sizing: border-box; padding: 20px 14px; display: flex; flex-direction: column; gap: 22px; overflow-y: auto;
     background: var(--solid); box-shadow: var(--glow); transform: translateX(-104%); transition: transform .2s ease; }
   .side.is-open { transform: none; }
@@ -279,7 +279,7 @@ tailwind.config = { corePlugins: { preflight: false } };
     .wrap { padding: 32px clamp(16px, 4vw, 40px) 56px; }
     .side { position: sticky; top: 0; height: 100dvh; width: 240px; max-width: none; flex: none; transform: none; transition: none; z-index: 2;
       background: var(--side); box-shadow: inset -1px 0 0 var(--div); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); }
-    .side-scrim, .tabbar, .topbar { display: none !important; }
+    .side-scrim, .topbar { display: none !important; }
   }
   .brand { display: flex; align-items: center; gap: 10px; padding: 0 6px; font-size: 16px; font-weight: 600; letter-spacing: -.01em; }
   .logo { width: 32px; height: 32px; border-radius: 9px; background: var(--coral); color: var(--on-coral); display: grid; place-items: center; font-size: 15px; font-weight: 700; flex: none; }
@@ -290,10 +290,7 @@ tailwind.config = { corePlugins: { preflight: false } };
   .nav-link.is-active { background: var(--aur); box-shadow: inset 0 0 0 1px var(--aurb); color: var(--t1); font-weight: 600; }
   .badge { min-width: 22px; padding: 2px 7px; box-sizing: border-box; border-radius: 999px; background: var(--coral); color: var(--on-coral); font-size: 12px; font-weight: 600; text-align: center; line-height: 1.4; }
   .topbar { display: flex; align-items: center; gap: 8px; padding: 10px 12px; border-bottom: 1px solid var(--div); background: var(--side); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); position: sticky; top: 0; z-index: 30; }
-  .tabbar { flex: none; display: grid; grid-template-columns: repeat(5, 1fr); gap: 2px; padding: 6px 6px max(8px, env(safe-area-inset-bottom)); border-top: 1px solid var(--div); background: var(--solid); z-index: 40; }
-  .tabbar button { position: relative; display: grid; place-items: center; gap: 2px; min-height: 52px; border-radius: 10px; font-size: 11px; color: var(--t3); background: transparent; border: 0; }
-  .tabbar button.is-active { color: var(--t1); background: var(--aur); }
-  .tabbar .badge { position: absolute; top: 2px; right: 10%; min-width: 18px; padding: 0 5px; font-size: 10px; }
+  .topbar .badge { position: absolute; top: -4px; right: -4px; min-width: 18px; padding: 0 5px; font-size: 10px; }
 
   /* ===== 部件 ===== */
   .page { display: flex; flex-direction: column; gap: 24px; }
@@ -534,12 +531,10 @@ tailwind.config = { corePlugins: { preflight: false } };
   </aside>
 
   <main class="main">
+    <!-- 手机上只有这一条：左边 ☰ 打开侧边栏（导航只有那一套），右边刷新。 -->
     <header class="topbar">
-      <button type="button" @click="navOpen = true" class="btn btn-icon" :aria-label="L('打开菜单', 'Open menu')">${I.menu}</button>
-      <div class="min-w-0 flex-1">
-        <div class="truncate text-[15px] font-semibold" x-text="subtitle()"></div>
-        <button type="button" @click="spaceOpen = true" class="block max-w-full truncate text-left text-xs muted" :aria-label="L('切换查看的记忆空间', 'Switch the memory space you are viewing')" x-text="viewingLabel()"></button>
-      </div>
+      <button type="button" @click="navOpen = true" class="btn btn-icon relative" :aria-label="L('打开菜单', 'Open menu')">${I.menu}<span x-show="pendingCount" class="badge" x-text="pendingCount"></span></button>
+      <div class="brand min-w-0 flex-1"><span class="logo" aria-hidden="true">A</span><span>Aelios</span></div>
       <button type="button" @click="reloadAll()" class="btn btn-icon" :aria-label="L('刷新', 'Refresh')">${I.refresh}</button>
     </header>
 
@@ -1939,13 +1934,6 @@ tailwind.config = { corePlugins: { preflight: false } };
     </section>
   </div>
 
-  <nav class="tabbar" :aria-label="L('主导航', 'Main navigation')">
-    <button type="button" @click="go('today')" :class="page === 'today' ? 'is-active' : ''">${I.home}<span x-text="L('首页', 'Home')"></span></button>
-    <button type="button" @click="go('review')" :class="page === 'review' ? 'is-active' : ''">${I.inbox}<span x-text="L('待审', 'Review')"></span><span x-show="pendingCount" class="badge" x-text="pendingCount"></span></button>
-    <button type="button" @click="go('diary')" :class="page === 'diary' ? 'is-active' : ''">${I.book}<span x-text="L('日记', 'Journal')"></span></button>
-    <button type="button" @click="go('memory')" :class="page === 'memory' ? 'is-active' : ''">${I.db}<span x-text="L('记忆库', 'Memories')"></span></button>
-    <button type="button" @click="navOpen = true" :class="['dream', 'transfer', 'settings'].includes(page) ? 'is-active' : ''">${I.menu}<span x-text="L('更多', 'More')"></span></button>
-  </nav>
 </div>
 
 <script>
@@ -1959,16 +1947,6 @@ function memoryAdmin() {
   let chatParsed = null;
   let chatChunks = [];
   return {
-    nav: [
-      { id: 'today', label: '首页', labelEn: 'Home' },
-      { id: 'review', label: '待审', labelEn: 'Review' },
-      { id: 'diary', label: '日记', labelEn: 'Journal' },
-      { id: 'memory', label: '记忆库', labelEn: 'Memories' },
-      { id: 'starmap', label: '星图', labelEn: 'Star map' },
-      { id: 'dream', label: '夜间整理', labelEn: 'Nightly' },
-      { id: 'transfer', label: '导入导出', labelEn: 'Import & export' },
-      { id: 'settings', label: '设置', labelEn: 'Settings' }
-    ],
     // 记忆库里「重要」后面的几栏。
     moreNav: [
       { id: 'precious', label: '珍贵', labelEn: 'Keepsakes' },
@@ -2647,10 +2625,6 @@ function memoryAdmin() {
       this.$nextTick(function() {
         if (window.lucide) window.lucide.createIcons();
       });
-    },
-    subtitle() {
-      const found = this.nav.find(function(item) { return item.id === this.page; }, this);
-      return found ? this.L(found.label, found.labelEn) : this.L('设置', 'Settings');
     },
     savePrefs() {
       localStorage.setItem('aelios.admin.workerUrl', this.workerUrl || location.origin);
