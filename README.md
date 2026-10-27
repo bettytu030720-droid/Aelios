@@ -115,7 +115,7 @@ From then on, Cloudflare builds from your fork whenever it changes, so your next
 
 ## Day-to-day: the admin panel
 
-Open `/admin`. The pages are in the menu on the left (on a phone: the bottom bar, plus ☰ for the rest). The bottom of the menu switches between 中文 and English and between light and dark; with no choice saved, the page follows your browser's language.
+Open `/admin`. The pages are in the menu on the left (on a phone, tap ☰ at the top left). The bottom of the menu switches between 中文 and English and between light and dark; with no choice saved, the page follows your browser's language.
 
 | Page | What it's for |
 |---|---|
