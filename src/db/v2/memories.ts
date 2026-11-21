@@ -13,6 +13,7 @@ import type {
 import { newId } from "../../utils/ids";
 import { nowIso } from "../../utils/time";
 import { insertMemoryRelation } from "./relations";
+import type { CandidateApprovalWrite } from "./operationReview";
 import { saveMemoryRevision } from "./revisions";
 import { SQLITE_BIND_BATCH_SIZE, uniqueStrings } from "./shared";
 
@@ -433,7 +434,8 @@ export async function supersedeMemory(
     createdAt?: string | null;
     /** newType=world_fact 时存成世界知识，不收进 8 类 (storedMemoryType)。 */
     allowWorldFact?: boolean;
-  }
+  },
+  approval?: CandidateApprovalWrite
 ): Promise<{ oldStatus: string; newId: string }> {
   const db = env.DB;
   const now = nowIso();
@@ -481,7 +483,7 @@ export async function supersedeMemory(
   const provenance = input.provenance;
 
   // A rejected candidate or a concurrent forget must roll back the entire transition.
-  const statements: D1PreparedStatement[] = [];
+  const statements: D1PreparedStatement[] = approval ? [approval.guard] : [];
   if (old) {
     statements.push(
       db.prepare(`UPDATE memories SET status = 'superseded', version_status = 'superseded', superseded_by = ?, updated_at = ?
@@ -509,6 +511,7 @@ export async function supersedeMemory(
     ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, NULL)`)
       .bind(nextId, input.namespace, newFactKey, old?.id ?? null, input.reason ?? null, input.validAsOf ?? null, now)
   );
+  if (approval) statements.push(approval.complete(nextId));
   await db.batch(statements);
   // 3. 同步向量：新条目 upsert，旧条目下架
   await syncMemoryVector(env, { namespace: input.namespace, id: nextId });
@@ -585,7 +588,8 @@ export async function markMemoriesUnderReview(
 // 同时从 Vectorize 下架 (向量库只索引 active)。
 export async function archiveMemory(
   env: Env,
-  input: { namespace: string; id: string; dismissCandidates?: boolean }
+  input: { namespace: string; id: string; dismissCandidates?: boolean },
+  approval?: CandidateApprovalWrite
 ): Promise<boolean> {
   const db = env.DB;
   const now = nowIso();
@@ -596,6 +600,7 @@ export async function archiveMemory(
   if (!existing) return false;
 
   const changes = [
+    ...(approval ? [approval.guard] : []),
     db.prepare("UPDATE memories SET status = 'archived', updated_at = ? WHERE namespace = ? AND id = ?")
       .bind(now, input.namespace, input.id),
     db.prepare("DELETE FROM memory_fts WHERE namespace=? AND memory_id=?").bind(input.namespace, input.id)
@@ -604,6 +609,7 @@ export async function archiveMemory(
     changes.push(db.prepare(`UPDATE memory_candidates SET status='discarded', decision_note='target_archived', updated_at=?
       WHERE namespace=? AND target_memory_id=? AND status='pending'`).bind(now, input.namespace, input.id));
   }
+  if (approval) changes.push(approval.complete(input.id));
   await db.batch(changes);
 
   if (existing.vector_id) {

@@ -7,13 +7,16 @@ import {
   listMemoryCandidates,
   updateMemoryCandidateStatus
 } from "../../../db/v2";
+import { settleOperationCandidate } from "../../../db/v2/operationReview";
+import { approveCandidate } from "../../../memory/candidateApproval";
+import { keepOperationAsNewMemory } from "../../../memory/operationReview";
 import {
-  approveCandidate,
   judgeKindFor,
   judgeNotePrefix,
   loadOldMemoryForCandidate,
   parseJsonArray
 } from "../../../memory/candidateJudge";
+import { parseOrigin, UNCLASSIFIED_DREAM_SOURCE } from "../../../memory/provenance";
 import { formatSpeakerTranscript, loadSpeakersForNamespace } from "../../../memory/speakers";
 import type { Env, KeyProfile } from "../../../types";
 import { readPositiveInt, readString, resolveNamespace } from "../../../utils/request";
@@ -43,7 +46,9 @@ export async function handleReviewTool(
       const messages = ids.length > 0 ? await getMessagesByIds(env.DB, { namespace, ids }) : [];
       data.push({
         id: candidate.id,
-        action: judgeKindFor(candidate.source),
+        action: candidate.source === UNCLASSIFIED_DREAM_SOURCE ? "unclassified" : judgeKindFor(candidate.source),
+        ...(candidate.source === UNCLASSIFIED_DREAM_SOURCE
+          ? { reported_op: parseOrigin(candidate.provenance)?.proposed_operation?.reported_op } : {}),
         type: candidate.type,
         content: candidate.content,
         fact_key: candidate.fact_key,
@@ -76,6 +81,22 @@ export async function handleReviewTool(
     const reason = (readString(args.reason) ?? "").replace(/\s+/g, " ").trim().slice(0, 300)
       || (decision === "approve" ? "我决定记住。" : "我决定放下。");
     const decisionNote = `${judgeNotePrefix(reviewer)}${reason}`;
+    if (candidate.source === UNCLASSIFIED_DREAM_SOURCE) {
+      if (decision === "approve") {
+        try {
+          const memoryId = await keepOperationAsNewMemory(env, candidate, {
+            tags: parseJsonArray(candidate.tags), sourceIds: parseJsonArray(candidate.source_message_ids),
+            reviewer: "mcp_review", note: decisionNote
+          });
+          return textToolResult({ data: { id, status: "approved", memory_id: memoryId } });
+        } catch {
+          return toolError("The proposal or its cited messages changed during review. List candidates again.");
+        }
+      }
+      const result = await settleOperationCandidate(env.DB, candidate, { status: "discarded", note: decisionNote }).run();
+      return result.meta.changes ? textToolResult({ data: { id, status: "discarded", memory_id: null } })
+        : toolError("Candidate changed during review. List candidates again.");
+    }
     try {
       if (decision === "discard") {
         await updateMemoryCandidateStatus(env.DB, { namespace, id, status: "discarded", decisionNote });

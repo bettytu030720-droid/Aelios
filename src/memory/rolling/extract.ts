@@ -16,7 +16,8 @@ const WINDOW_OPERATIONS = ["new", "continuation", "update", "no_op"] as const;
 type WindowOperation = typeof WINDOW_OPERATIONS[number];
 
 export interface WindowEvent {
-  op: WindowOperation;
+  op: WindowOperation | "unclassified";
+  reported_op?: string;
   episode_key?: string;
   target_memory_id?: string;
   type: string;
@@ -37,19 +38,21 @@ export interface WindowExtractor {
 }
 
 function readOperation(value: unknown): WindowOperation | undefined {
-  // Some compatible models use "add" for a clearly new event.
+  // Anything else, such as "add", is kept as an unclassified proposal for Clef review.
   const op = readString(value);
-  return op === "add" ? "new" : WINDOW_OPERATIONS.find((candidate) => candidate === op);
+  return WINDOW_OPERATIONS.find((candidate) => candidate === op);
 }
 
 function normalizeEvent(value: unknown): WindowEvent | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const raw = value as Record<string, unknown>;
   const content = sanitizeMemoryContent(readString(raw.content) ?? "");
-  const op = readOperation(raw.op);
-  if (!content || content.length > 1000 || !op) return null;
+  const reportedOp = readString(raw.op);
+  if (!content || content.length > 1000 || !reportedOp) return null;
+  const op = readOperation(reportedOp);
   return {
-    op,
+    op: op ?? "unclassified",
+    ...(!op ? { reported_op: reportedOp.slice(0, 100) } : {}),
     episode_key: readString(raw.episode_key)?.slice(0, 100) ?? undefined,
     target_memory_id: readString(raw.target_memory_id) ?? undefined,
     type: readString(raw.type) ?? "note",

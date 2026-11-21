@@ -1,7 +1,7 @@
 // 候选队列自动评审 (母帖 CANDIDATE_JUDGE)
 // 抽取器把低置信度候选塞进 memory_candidates，默认等人工在后台点 approve/discard。
-// 自动审只有 clef 一条路 (CLEF_AUTO_REVIEW，默认开)：每条候选问 Cloudflare 的 clef 几道是非题，
-// 只分记住/放下，不留给人工，见 clefJudge.ts；审核页「这周自动定下的」能逐条撤回。
+// 自动审只有 clef 一条路 (CLEF_AUTO_REVIEW，默认开)：已知操作判断证据，陌生操作同时判动作。
+// 审核页「本周自动处理」能撤回记忆变更。
 // 关掉 clef 后候选全部留着：人工在后台批，或者让助手自己用 MCP 的 memory_candidates / memory_review 审。
 // Dream 抽完候选后由 cron / 手动入口跑一轮。
 
@@ -15,16 +15,14 @@ import {
   getMemoryCandidateById,
   listMemoryCandidates,
   restoreMemory,
-  supersedeMemory,
   updateMemoryCandidateStatus,
-  upsertMemoryByFactKey,
   type MemoryCandidateRow
 } from "../db/v2";
-import { approvedCandidateMemory } from "../db/v2/candidates";
-import { isExplicitMemory, reviewedOrigin } from "./provenance";
+import { isExplicitMemory, UNCLASSIFIED_DREAM_SOURCE } from "./provenance";
 import type { Env, MessageRecord } from "../types";
 import { askClef, buildClefInput, CLEF_JUDGE_NAME, CLEF_MODEL, isClefReviewOn } from "./clefJudge";
-import { createVectorMemory } from "./vectorStore";
+import { approveCandidate } from "./candidateApproval";
+import { reviewDreamOperation } from "./operationReview";
 import { loadSpeakersForNamespace, type DreamSpeakers } from "./speakers";
 
 // listMemoryCandidates 本身按 confidence ASC 排序，正好是"先看最没把握的"，直接复用，
@@ -128,90 +126,6 @@ async function targetsExplicitWrite(db: D1Database, namespace: string, candidate
   return row ? isExplicitMemory(row) || row.source === "scoped_decision" : false;
 }
 
-// approve 保留 supersede 历史：有明确 target 就更新该记忆；否则有 fact_key 先查 active 同 key，
-// 有就 supersede，没有就 upsert；两者都没有才直接建条目。自动批量决策与人工审核使用同一目标语义。
-export async function approveCandidate(
-  env: Env,
-  namespace: string,
-  candidate: MemoryCandidateRow,
-  tags: string[],
-  sourceMessageIds: string[],
-  source = "judge"
-): Promise<string> {
-  if (candidate.source === "dream_delete" && candidate.target_memory_id) {
-    const archived = await archiveMemory(env, { namespace, id: candidate.target_memory_id });
-    if (!archived) throw new Error("target memory not found");
-    return candidate.target_memory_id;
-  }
-
-  const saved = await approvedCandidateMemory(env.DB, namespace, candidate.id);
-  if (saved) return saved;
-  const provenance = reviewedOrigin(candidate, source);
-  const factKey = candidate.fact_key?.trim() || null;
-
-  if (candidate.target_memory_id) {
-    const result = await supersedeMemory(env, {
-      namespace,
-      oldId: candidate.target_memory_id,
-      newContent: candidate.content,
-      newType: candidate.type,
-      newFactKey: factKey,
-      importance: candidate.importance,
-      confidence: candidate.confidence,
-      tags,
-      source,
-      sourceMessageIds, provenance,
-      reason: "candidate_judge_approve"
-    });
-    return result.newId;
-  }
-
-  if (factKey) {
-    const existing = await getActiveMemoryByFactKey(env.DB, { namespace, factKey });
-    if (existing) {
-      const result = await supersedeMemory(env, {
-        namespace,
-        oldId: existing.id,
-        newContent: candidate.content,
-        newType: candidate.type,
-        newFactKey: factKey,
-        importance: candidate.importance,
-        confidence: candidate.confidence,
-        tags,
-        source,
-        sourceMessageIds, provenance,
-        reason: "candidate_judge_approve"
-      });
-      return result.newId;
-    }
-
-    const result = await upsertMemoryByFactKey(env, {
-      namespace,
-      factKey,
-      content: candidate.content,
-      type: candidate.type,
-      importance: candidate.importance,
-      confidence: candidate.confidence,
-      tags,
-      source,
-      sourceMessageIds, provenance
-    });
-    return result.id;
-  }
-
-  const created = await createVectorMemory(env, {
-    namespace,
-    type: candidate.type,
-    content: candidate.content,
-    importance: candidate.importance,
-    confidence: candidate.confidence,
-    tags,
-    source,
-    sourceMessageIds, provenance
-  });
-  return created.id;
-}
-
 export async function runCandidateJudge(
   env: Env,
   namespace: string,
@@ -260,6 +174,18 @@ export async function runCandidateJudge(
       const messages = sourceMessageIds.length > 0
         ? await getMessagesByIds(env.DB, { namespace, ids: sourceMessageIds })
         : [];
+
+      if (candidate.source === UNCLASSIFIED_DREAM_SOURCE) {
+        const result = await reviewDreamOperation(env, candidate, {
+          messages, sourceIds: sourceMessageIds, tags, speakers, judgePrefix: judgeNotePrefix(judgedBy)
+        });
+        if (result === "approved") approved += 1;
+        if (result === "discarded") discarded += 1;
+        if (result === "kept") kept += 1;
+        if (result === "failed") failed += 1;
+        if (result === "approved" || result === "discarded") judged += 1;
+        continue;
+      }
 
       let judgeResult: JudgeModelResult;
       if (messages.length === 0) {
@@ -359,7 +285,7 @@ export async function undoJudgeDecision(
   candidate: MemoryCandidateRow
 ): Promise<UndoJudgeResult> {
   const note = parseJudgeNote(candidate.decision_note);
-  if (!note || !note.undoable) {
+  if (!note || !note.undoable || candidate.source === UNCLASSIFIED_DREAM_SOURCE) {
     return { ok: false, httpStatus: 409, error: "只有还没撤回过的自动审核决定能撤回" };
   }
   const decisionNote = `undo: ${candidate.decision_note}`;

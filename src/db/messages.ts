@@ -171,22 +171,24 @@ export async function getMessagesByIds(
 ): Promise<MessageRecord[]> {
   if (input.ids.length === 0) return [];
 
-  const placeholders = input.ids.map(() => "?").join(", ");
+  const ids = [...new Set(input.ids)];
+  // Drive the join from the requested IDs so ORDER BY cannot scan the space's time index.
   const result = await db
     .prepare(
       `SELECT id, conversation_id, namespace, role, content, source, created_at, seq, capture_kind
-       FROM messages
-       WHERE namespace = ? AND id IN (${placeholders})
+       FROM (SELECT value AS requested_id FROM json_each(?)) requested
+       CROSS JOIN messages ON messages.id = requested.requested_id
+       WHERE messages.namespace = ?
        ORDER BY ${MESSAGE_ORDER_SQL}`
     )
-    .bind(input.namespace, ...input.ids)
+    .bind(JSON.stringify(ids), input.namespace)
     .all<MessageRecord>();
   const rows = result.results ?? [];
 
   // 导入的旧聊天不在 messages 里 (那里 7 天就删)，候选和记忆挂的是 imsg_ 开头的 id，到 imported_messages 找。
   // 看出处、clef 审、助手用 MCP 看候选都走这里，所以导入的原话处处都查得到。
   const found = new Set(rows.map((row) => row.id));
-  const importedIds = input.ids.filter((id) => !found.has(id) && id.startsWith(IMPORTED_MESSAGE_PREFIX));
+  const importedIds = ids.filter((id) => !found.has(id) && id.startsWith(IMPORTED_MESSAGE_PREFIX));
   if (importedIds.length === 0) return rows;
   return [...rows, ...(await getImportedMessagesByIds(db, { namespace: input.namespace, ids: importedIds }))];
 }

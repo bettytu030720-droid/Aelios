@@ -448,8 +448,8 @@ export const ADMIN_SCRIPT_DREAM = `    async loadDiary() {
       return status || '—';
     },
     dreamCandidateSourceLabel(source) {
-      const zh = { dream_add: '新增提案', dream_update: '更新提案', dream_delete: '移除提案', extract: '抽取', zone_full: '区满' };
-      const en = { dream_add: 'Proposed add', dream_update: 'Proposed update', dream_delete: 'Proposed removal', extract: 'Extracted', zone_full: 'Zone full' };
+      const zh = { dream_add: '新增提案', dream_update: '更新提案', dream_delete: '移除提案', dream_unclassified: '陌生操作', extract: '抽取', zone_full: '区满' };
+      const en = { dream_add: 'Proposed add', dream_update: 'Proposed update', dream_delete: 'Proposed removal', dream_unclassified: 'Unfamiliar action', extract: 'Extracted', zone_full: 'Zone full' };
       return (this.lang === 'en' ? en : zh)[source] || source || '—';
     },
     pct(value) {

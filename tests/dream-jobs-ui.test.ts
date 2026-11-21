@@ -31,6 +31,19 @@ function run(status = "queued", stale = false) {
   return { id: "drm_synthetic", date_label: "2026-01-10", status, stale, started_at: "2026-01-11T00:00:00Z" };
 }
 
+test("unclassified candidates show the model operation and failure without entering bulk approval", () => {
+  const { app } = panel();
+  const pending = { id: "pending", source: "dream_unclassified", type: "fact",
+    provenance: { proposed_operation: { reported_op: "carry_forward" } }, decision_note: "operation_clef_timeout" };
+  app.candidates = [pending, { id: "known", source: "dream_add", type: "fact" }];
+  assert.equal(app.candidateKindLabel(pending), "操作待判定");
+  assert.match(app.operationReviewHint(pending), /carry_forward.*超时/);
+  app.reviewSelectAll(true);
+  assert.deepEqual(Object.keys(app.reviewSelected), ["known"]);
+  assert.equal(app.candidateApproveLabel(pending), "记成新记忆");
+  assert.doesNotMatch(ADMIN_HTML, /x-show="candidate.source !== 'dream_unclassified'" @click="approveCandidate/);
+});
+
 test("manual UI sends background true, displays acceptance ID, polls queued/running and stops on completion", async () => {
   const { app, timers, notices } = panel();
   app.dreamDryRun = false;
