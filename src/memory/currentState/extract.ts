@@ -5,7 +5,7 @@ import type { ExtractedMemory } from "../extract";
 import { isExplicitDecisionText } from "./decisionCues";
 
 export const DECISION_FORMAT =
-  'For an explicit user decision, include decision: {"scope_key":"user/project/property","value":"exact choice from the message"}, along with type="decision", attributed_role="user", evidence_quote, and source_message_ids. scope_key names the decision scope. Never treat musing, questions, quotes, or roleplay as a decision.';
+  'For an explicit user decision, include decision: {"scope_key":"user/project/property","value":"exact choice from the message"}, along with type="decision", attributed_role="user", evidence_quote, and source_message_ids. Reuse the same scope_key for the same project and choice being decided, even if the value changes or returns to an earlier one. Cite the latest message explicitly confirming the choice. Never treat musing, questions, quotes, or roleplay as a decision.';
 
 export async function extractDecisionFallback(
   env: Env,

@@ -424,7 +424,7 @@ function decisionMessage(
   };
 }
 
-test("decision cues trigger at most one model review and a grounded result reaches the active store", async (t) => {
+test("decision cues trigger at most one fallback call and the grounded decision waits in the daily queue", async (t) => {
   const { sqlite, db } = sqliteFixture(t);
   const messages = [
     decisionMessage("a", "我决定就用 ACP。"),
@@ -474,7 +474,7 @@ test("decision cues trigger at most one model review and a grounded result reach
       memories: recovered,
       messageIds: messages.map((message) => message.id)
     }),
-    0
+    1
   );
   assert.equal(
     sqlite
@@ -482,11 +482,11 @@ test("decision cues trigger at most one model review and a grounded result reach
         "SELECT count(*) AS n FROM memories WHERE source='scoped_decision' AND status='active'"
       )
       .get()?.n,
-    1
+    0
   );
   assert.equal(
     sqlite.prepare("SELECT count(*) AS n FROM memory_candidates").get()?.n,
-    0
+    1
   );
 });
 

@@ -1,5 +1,6 @@
 import { getMemoryById } from "../../db/memories";
 import { getMessagesByIds } from "../../db/messages";
+import type { CandidateApprovalWrite } from "../../db/v2/candidateReview";
 import { upsertMemoryFts } from "../fts";
 import { fetchMemoryLifecycleRows } from "../../db/v2/memories";
 import { insertMemoryRelation } from "../../db/v2/relations";
@@ -94,7 +95,8 @@ export async function commitScopedDecision(
     importance: number;
     previous?: { id: string; updatedAt: string; vectorId: string | null } | null;
   },
-  guard?: D1PreparedStatement
+  guard?: D1PreparedStatement,
+  approval?: CandidateApprovalWrite
 ): Promise<void> {
   const db = env.DB;
   const now = nowIso();
@@ -109,7 +111,7 @@ export async function commitScopedDecision(
           `UPDATE memories
            SET status = 'superseded', version_status = 'superseded', superseded_by = ?, updated_at = ?
            WHERE id = ? AND namespace = ? AND status = 'active' AND updated_at = ?
-             AND fact_key = ? AND type = 'decision' AND authored_by IS NULL AND source = ?`
+             AND fact_key = ? AND type = 'decision' AND pinned = 0 AND authored_by IS NULL AND source = ?`
         ).bind(input.id, now, prev.id, input.namespace, prev.updatedAt, input.factKey, SCOPED_DECISION_SOURCE),
         db.prepare("INSERT OR IGNORE INTO memory_lifecycle (memory_id, namespace, seen_count) VALUES (?, ?, 0)")
           .bind(prev.id, input.namespace),
@@ -164,8 +166,14 @@ export async function commitScopedDecision(
         ).bind(input.id, input.namespace, input.factKey, input.validAsOf, now, input.namespace, input.id)
       ];
 
-  const committed = await db.batch(guard ? [guard, ...statements] : statements);
-  if (!committed.at(-2)?.meta.changes) {
+  const assertInserted = approval ? db.prepare(`SELECT CASE WHEN EXISTS (
+    SELECT 1 FROM memories WHERE namespace=? AND id=? AND status='active'
+  ) THEN 1 ELSE json('decision changed') END`).bind(input.namespace, input.id) : null;
+  const committed = await db.batch([
+    ...(guard ? [guard] : []), ...(approval ? [approval.guard] : []), ...statements,
+    ...(approval && assertInserted ? [assertInserted, approval.complete(input.id)] : [])
+  ]);
+  if (!committed.at(approval ? -4 : -2)?.meta.changes) {
     throw new Error("Decision changed; retry");
   }
 

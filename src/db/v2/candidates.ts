@@ -46,15 +46,18 @@ export async function createMemoryCandidate(
   // 幂等闸：同一 namespace 下已有等价的 pending 候选就直接复用，不再入队。
   // dream 每晚重跑会对同一目标反复提删除/更新提案，没有这道闸队列会被灌满重复项。
   const observed = input.provenance?.creation_mode === "dream_derived";
+  const dailyDecision = input.provenance?.daily_decision;
   let id = newId("cand");
-  if (observed) {
+  if (dailyDecision) {
+    id = `cand_${(await sha256Hex(JSON.stringify([input.namespace, dailyDecision.scope_key, dailyDecision.date]))).slice(0, 32)}`;
+  } else if (observed) {
     const refs = input.sourceMessageIds?.length ? input.sourceMessageIds : input.provenance?.inputs;
     const target = input.source === "dream_extract" ? null : input.targetMemoryId;
     const op = input.provenance?.proposed_operation;
     const signature = [input.namespace, input.source, input.content, input.factKey, target, [...new Set(refs)].sort(), ...(op ? [op] : [])];
     id = `cand_${(await sha256Hex(JSON.stringify(signature))).slice(0, 32)}`;
   }
-  const dup = observed ? await getMemoryCandidateById(db, { namespace: input.namespace, id }) : input.targetMemoryId
+  const dup = dailyDecision ? null : observed ? await getMemoryCandidateById(db, { namespace: input.namespace, id }) : input.targetMemoryId
     ? await db
         .prepare(
           `SELECT * FROM memory_candidates
@@ -93,13 +96,25 @@ export async function createMemoryCandidate(
     updated_at: now
   };
 
+  const conflict = dailyDecision ? `ON CONFLICT(id) DO UPDATE SET
+    type=excluded.type, content=excluded.content, confidence=excluded.confidence, importance=excluded.importance,
+    tags=excluded.tags, source_message_ids=excluded.source_message_ids, source=excluded.source,
+    provenance=CASE WHEN json_extract(excluded.provenance,'$.daily_decision.at') =
+      json_extract(memory_candidates.provenance,'$.daily_decision.at')
+      THEN json_set(excluded.provenance,'$.daily_decision.ambiguous',json('true')) ELSE excluded.provenance END,
+    decision_note=NULL, updated_at=excluded.updated_at
+    WHERE memory_candidates.status='pending' AND (
+      json_extract(excluded.provenance,'$.daily_decision.at') > json_extract(memory_candidates.provenance,'$.daily_decision.at')
+      OR (json_extract(excluded.provenance,'$.daily_decision.at') = json_extract(memory_candidates.provenance,'$.daily_decision.at')
+        AND json_extract(excluded.provenance,'$.daily_decision.value') <> json_extract(memory_candidates.provenance,'$.daily_decision.value'))
+    )` : "ON CONFLICT(id) DO NOTHING";
   const insert = db
     .prepare(
       `INSERT INTO memory_candidates (
         id, namespace, type, content, fact_key, confidence, importance, tags,
         source_message_ids, source, status, target_memory_id, decision_note,
         created_at, updated_at, provenance
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT(id) DO NOTHING`
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ${conflict}`
     )
     .bind(
       record.id,
@@ -121,7 +136,7 @@ export async function createMemoryCandidate(
   if (guard) await db.batch([guard, insert]);
   else await insert.run();
 
-  return record;
+  return dailyDecision ? await getMemoryCandidateById(db, { namespace: input.namespace, id }) ?? record : record;
 }
 
 // source 过滤：excludeSources 不要这些来源，onlySources 只要这些来源。
@@ -148,20 +163,23 @@ export async function listMemoryCandidates(
     limit: number;
     excludeSources?: readonly string[];
     onlySources?: readonly string[];
+    dailyDecisionsBefore?: string;
   }
 ): Promise<MemoryCandidateRow[]> {
   const limit = Math.min(Math.max(Math.floor(input.limit), 1), 200);
   const status = input.status ?? "pending";
   const filter = sourceFilterSql(input);
+  const dateFilter = input.dailyDecisionsBefore ? ` AND (type <> 'decision' OR COALESCE(json_extract(
+    CASE WHEN json_valid(provenance) THEN provenance END,'$.daily_decision.date'), '') < ?)` : "";
   const result = await db
     .prepare(
       `SELECT *
        FROM memory_candidates
-       WHERE namespace = ? AND status = ?${filter.sql}
+       WHERE namespace = ? AND status = ?${filter.sql}${dateFilter}
        ORDER BY confidence ASC, created_at DESC
        LIMIT ?`
     )
-    .bind(input.namespace, status, ...filter.binds, limit)
+    .bind(input.namespace, status, ...filter.binds, ...(input.dailyDecisionsBefore ? [input.dailyDecisionsBefore] : []), limit)
     .all<MemoryCandidateRow>();
   return result.results ?? [];
 }

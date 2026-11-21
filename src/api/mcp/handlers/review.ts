@@ -7,9 +7,10 @@ import {
   listMemoryCandidates,
   updateMemoryCandidateStatus
 } from "../../../db/v2";
-import { settleOperationCandidate } from "../../../db/v2/operationReview";
+import { settlePendingCandidate } from "../../../db/v2/candidateReview";
 import { approveCandidate } from "../../../memory/candidateApproval";
 import { keepOperationAsNewMemory } from "../../../memory/operationReview";
+import { reviewDailyDecisionByHand } from "../../../memory/dream/dailyDecisionReview";
 import {
   judgeKindFor,
   judgeNotePrefix,
@@ -81,6 +82,15 @@ export async function handleReviewTool(
     const reason = (readString(args.reason) ?? "").replace(/\s+/g, " ").trim().slice(0, 300)
       || (decision === "approve" ? "我决定记住。" : "我决定放下。");
     const decisionNote = `${judgeNotePrefix(reviewer)}${reason}`;
+    const daily = parseOrigin(candidate.provenance)?.daily_decision;
+    if (daily) {
+      const result = await reviewDailyDecisionByHand(env, candidate, daily, {
+        approve: decision === "approve", actor: "mcp_review", note: decisionNote,
+        sourceIds: parseJsonArray(candidate.source_message_ids)
+      });
+      return result.ok ? textToolResult({ data: { id, status: result.status, memory_id: result.memoryId } })
+        : toolError(result.error);
+    }
     if (candidate.source === UNCLASSIFIED_DREAM_SOURCE) {
       if (decision === "approve") {
         try {
@@ -93,7 +103,7 @@ export async function handleReviewTool(
           return toolError("The proposal or its cited messages changed during review. List candidates again.");
         }
       }
-      const result = await settleOperationCandidate(env.DB, candidate, { status: "discarded", note: decisionNote }).run();
+      const result = await settlePendingCandidate(env.DB, candidate, { status: "discarded", note: decisionNote }).run();
       return result.meta.changes ? textToolResult({ data: { id, status: "discarded", memory_id: null } })
         : toolError("Candidate changed during review. List candidates again.");
     }

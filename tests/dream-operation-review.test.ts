@@ -10,7 +10,7 @@ import { UNCLASSIFIED_DREAM_SOURCE } from "../src/memory/provenance";
 import { runRollingWindow } from "../src/memory/rolling/runner";
 import { loadRollingState } from "../src/memory/rolling/state";
 import type { Env } from "../src/types";
-import { insertLine, NOVEL, SYNTHETIC_AT } from "./support/rolling-fixture";
+import { insertLine, NOVEL, SYNTHETIC_AT, SYNTHETIC_DAY } from "./support/rolling-fixture";
 import { sqliteFixture } from "./support/sqlite";
 
 Object.assign(crypto.subtle, { timingSafeEqual });
@@ -124,6 +124,8 @@ test("default GLM keeps a grounded unfamiliar operation beside a known one and a
   const { state } = await loadRollingState(f.env, NS);
   assert.deepEqual(state.episodes.map(episode => episode.key), ["lab"]);
   assert.deepEqual(state.changes, []);
+  f.sqlite.prepare("INSERT INTO processing_cursors(name,value,updated_at) VALUES(?,?,?)")
+    .run(`dream:default:${SYNTHETIC_DAY}`, `done:${SYNTHETIC_AT}`, SYNTHETIC_AT);
 
   const result = await f.judge(input => input.questions.operation ? actionAnswer("add") : { grounded: noul(0.9), worth: noul(0.9) });
   assert.equal(result.approved, 2);
@@ -139,7 +141,7 @@ test("default GLM keeps a grounded unfamiliar operation beside a known one and a
   assert.deepEqual(Object.keys(f.calls.find(call => !call.questions.operation)?.questions ?? {}), ["grounded", "worth"]);
   const [approvedKnown, approvedRecovered] = f.candidates();
   assert.equal(approvedKnown.id, normal.id);
-  assert.equal(approvedRecovered.source, "dream_add");
+  assert.equal(approvedRecovered.source, "dream_extract");
   assert.equal(f.memory(String(approvedRecovered.target_memory_id))?.content, other);
   assert.equal((await f.api(`/${approvedRecovered.id}/undo`, "POST")).status, 200);
   assert.equal(f.memory(String(approvedRecovered.target_memory_id))?.status, "archived");

@@ -6,7 +6,7 @@ import { createEmbedding } from "./embedding";
 import { deleteFtsRow, upsertMemoryFts } from "./fts";
 import { clampMemoryType } from "./canonicalTypes";
 import { deleteTriggersForMemory, saveMemoryRevision } from "../db/v2";
-import type { CandidateApprovalWrite } from "../db/v2/operationReview";
+import type { CandidateApprovalWrite } from "../db/v2/candidateReview";
 import { deleteTriggerVectors } from "./triggers/store";
 
 type MetadataMap = Record<string, unknown>;

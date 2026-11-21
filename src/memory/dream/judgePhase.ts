@@ -1,12 +1,12 @@
-import { applyScopedDecision } from "../currentState/apply";
-import { isCurrentStateEnabled } from "../currentState/projection";
+import { getMessagesByIds } from "../../db/messages";
 import { createMemoryCandidate } from "../../db/v2";
-import type { Env } from "../../types";
+import type { Env, MessageRecord } from "../../types";
 import { newId } from "../../utils/ids";
 import { nowIso } from "../../utils/time";
 import { findSimilarActiveMemory } from "../dedupGate";
 import { dreamOrigin } from "../provenance";
 import type { ExtractedMemory } from "../extract";
+import { queueDailyDecision } from "./dailyDecisions";
 import {
   type DailyDigestResult,
   type DigestMemoryDelete,
@@ -79,17 +79,26 @@ export async function recordDreamReviewProposal(
 
 export async function queueDreamExtractedMemories(
   env: Env,
-  input: { namespace: string; memories: ExtractedMemory[]; messageIds: string[]; digestDecisions?: ExtractedMemory[]; contextIds?: string[]; guard?: D1PreparedStatement }
+  input: { namespace: string; memories: ExtractedMemory[]; messageIds: string[]; messages?: MessageRecord[];
+    digestDecisions?: ExtractedMemory[]; contextIds?: string[]; guard?: D1PreparedStatement }
 ): Promise<number> {
   let queued = 0;
-  const project = isCurrentStateEnabled(env);
-  const digestDecisions = project ? input.digestDecisions ?? [] : [];
-  for (const memory of [...digestDecisions, ...input.memories.filter(memory => !digestDecisions.includes(memory))]) {
-    if (project && memory.decision && memory.source_message_ids.every(id => input.messageIds.includes(id))) {
-      if (await applyScopedDecision(env, input.namespace, memory, digestDecisions.includes(memory) ? input.contextIds : [], { guard: input.guard })) continue;
-    }
+  const digestDecisions = input.digestDecisions ?? [];
+  const proposals = [...digestDecisions, ...input.memories.filter(memory => !digestDecisions.includes(memory))];
+  const allowed = new Set(input.messageIds);
+  const decisionIds = [...new Set(proposals.filter(memory => memory.decision)
+    .flatMap(memory => memory.source_message_ids.filter(id => allowed.has(id))))];
+  const messages = input.messages?.filter(message => allowed.has(message.id)) ??
+    await getMessagesByIds(env.DB, { namespace: input.namespace, ids: decisionIds });
+  for (const memory of proposals) {
     if (digestDecisions.includes(memory) && !memory.evidence_quote) continue;
     try {
+      if (memory.decision && await queueDailyDecision(env, input.namespace, memory, messages, {
+        recallIds: input.contextIds, guard: input.guard
+      })) {
+        queued += 1;
+        continue;
+      }
       let targetMemoryId: string | null = null;
       let decisionNote: string | null = null;
       const hit = await findSimilarActiveMemory(env, {
@@ -105,7 +114,7 @@ export async function queueDreamExtractedMemories(
         namespace: input.namespace,
         type: memory.type,
         content: memory.content,
-        factKey: project && memory.decision ? null : memory.fact_key ?? null,
+        factKey: memory.decision || memory.fact_key?.startsWith("decision:user/") ? null : memory.fact_key ?? null,
         confidence: memory.confidence,
         importance: memory.importance,
         tags: memory.tags,

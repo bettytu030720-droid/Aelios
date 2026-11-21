@@ -13,7 +13,7 @@ import type {
 import { newId } from "../../utils/ids";
 import { nowIso } from "../../utils/time";
 import { insertMemoryRelation } from "./relations";
-import type { CandidateApprovalWrite } from "./operationReview";
+import type { CandidateApprovalWrite } from "./candidateReview";
 import { saveMemoryRevision } from "./revisions";
 import { SQLITE_BIND_BATCH_SIZE, uniqueStrings } from "./shared";
 

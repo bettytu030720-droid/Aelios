@@ -1,16 +1,15 @@
 import { getMemoryById } from "../db/memories";
 import type { MemoryCandidateRow } from "../db/v2/candidates";
 import { isHandAuthorSource } from "../db/v2/memories";
-import { operationApprovalWrite, settleOperationCandidate } from "../db/v2/operationReview";
+import { candidateApprovalWrite, settlePendingCandidate } from "../db/v2/candidateReview";
 import type { Env, MemoryRecord, MessageRecord } from "../types";
 import { approveCandidate } from "./candidateApproval";
-import { classifyDreamOperation } from "./clefJudge";
+import { classifyDreamOperation, CLEF_REVIEW_TIMEOUT_MS } from "./clefJudge";
 import { isScopedDecisionRecord } from "./currentState/store";
 import { DreamModelTimeoutError, withDreamModelDeadline } from "./dream/modelCall";
 import { isExplicitMemory, parseOrigin } from "./provenance";
 import type { DreamSpeakers } from "./speakers";
 
-const REVIEW_TIMEOUT_MS = 30_000;
 const ACTION_SOURCES = { add: "dream_add", update: "dream_update", archive: "dream_delete" };
 
 function isWritableTarget(memory: MemoryRecord, revision: string): boolean {
@@ -29,7 +28,7 @@ export async function keepOperationAsNewMemory(
   input: { tags: string[]; sourceIds: string[]; reviewer: string; note: string }
 ): Promise<string> {
   const source = ACTION_SOURCES.add;
-  const write = operationApprovalWrite(env.DB, candidate, { source, target: null, note: input.note });
+  const write = candidateApprovalWrite(env.DB, candidate, { source, target: null, note: input.note });
   return approveCandidate(env, candidate.namespace, {
     ...candidate, source, fact_key: null, target_memory_id: null
   }, input.tags, input.sourceIds, input.reviewer, write);
@@ -44,7 +43,7 @@ export async function reviewDreamOperation(
   const { namespace, id } = candidate;
   const { messages, sourceIds, tags, speakers, judgePrefix } = input;
   const hold = async (note: string, outcome: "kept" | "failed" = "kept") => {
-    if (candidate.decision_note !== note) await settleOperationCandidate(db, candidate, { status: "pending", note }).run();
+    if (candidate.decision_note !== note) await settlePendingCandidate(db, candidate, { status: "pending", note }).run();
     return outcome;
   };
   if (!messages.length || messages.length !== sourceIds.length) return hold("operation_evidence_missing");
@@ -57,7 +56,7 @@ export async function reviewDreamOperation(
   try {
     action = await withDreamModelDeadline((signal) =>
       classifyDreamOperation(env, candidate, messages, speakers, proposal, old ? { content: old.content, writable } : null, signal),
-      REVIEW_TIMEOUT_MS
+      CLEF_REVIEW_TIMEOUT_MS
     );
   } catch (error) {
     console.warn("candidate judge: operation classification failed", { namespace, id, error });
@@ -66,7 +65,7 @@ export async function reviewDreamOperation(
   if (action === null) return hold("operation_clef_failed", "failed");
   if (action === "uncertain") return hold("operation_uncertain");
   if (action === "no_op") {
-    const result = await settleOperationCandidate(db, candidate, {
+    const result = await settlePendingCandidate(db, candidate, {
       status: "discarded", note: `${judgePrefix}No memory change supported.`
     }).run();
     return result.meta.changes ? "discarded" : "kept";
@@ -76,7 +75,7 @@ export async function reviewDreamOperation(
   if (action !== "add" && (!target || !writable)) return hold("operation_target_unavailable");
   if (action === "update" && target?.content.trim() === candidate.content.trim()) return hold("operation_uncertain");
   const source = ACTION_SOURCES[action];
-  const write = operationApprovalWrite(db, candidate, {
+  const write = candidateApprovalWrite(db, candidate, {
     source, target, note: `${judgePrefix}Classified unfamiliar Dream operation as ${action} based on the cited messages.`
   });
   try {
