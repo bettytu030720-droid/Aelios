@@ -1,6 +1,7 @@
 import { nowIso } from "../../utils/time";
 import type { GroundedWindow } from "./apply";
 import type { RollingClaim } from "./inbox";
+import type { RollingFailure, RollingWrites } from "./progress";
 import type { RollingState } from "./state";
 
 interface StateWrite {
@@ -92,29 +93,46 @@ export async function loadRollingDrafts(db: D1Database, claim: RollingClaim): Pr
   return rows.results.map(row => JSON.parse(row.payload_json) as RollingDraft).sort((a, b) => a.part - b.part);
 }
 
-export async function finishRollingWindow(db: D1Database, claim: RollingClaim, error?: string, state?: StateWrite): Promise<boolean> {
+export async function finishRollingWindow(
+  db: D1Database,
+  claim: RollingClaim,
+  { failure, state, writes }: { failure?: RollingFailure; state?: StateWrite; writes?: RollingWrites } = {}
+): Promise<boolean> {
   const at = nowIso();
+  const { progress } = claim;
+  // Only a window that hasn't begun writing can be extracted again by nightly Dream.
+  const handoff = Boolean(failure && !progress.committing);
   const owned = guard(claim, claim.at, state);
-  const settled = guard(claim, claim.at, undefined, at);
-  const [, finished] = await db.batch([
+  const beforeSettlement = [
     audit(db, claim, `evt_${claim.key}`, "rolling_window", {
       window_key: claim.key,
-      status: error ? "failed" : "completed",
-      error: error ?? null,
+      status: failure ? "failed" : "completed",
+      error: failure?.reason ?? null,
+      failure,
+      last_failure: progress.lastFailure,
+      disposition: failure ? (handoff ? "nightly" : "check_writes") : undefined,
+      model: progress.model,
+      started_at: progress.startedAt,
+      message_count: claim.rows.length,
       attempts: claim.attempts,
-      triage: claim.progress.triage ?? null,
-      clef_calls: claim.progress.clefCalls,
-      extractor_calls: claim.progress.extractorCalls,
-      event_count: claim.progress.eventCount,
-      duration_ms: Date.parse(at) - Date.parse(claim.progress.startedAt)
-    }, at),
-    db.prepare(`UPDATE rolling_inbox SET done_at=?,progress=NULL,error=?
+      triage: progress.triage ?? null,
+      clef_calls: progress.clefCalls,
+      extractor_calls: progress.extractorCalls,
+      event_count: progress.eventCount,
+      writes,
+      duration_ms: Date.parse(at) - Date.parse(progress.startedAt)
+    }, at, state),
+    ...(progress.completed.length ? [db.prepare(`DELETE FROM memory_events
+      WHERE namespace=? AND event_type='rolling_draft' AND id IN (SELECT value FROM json_each(?)) AND ${owned.sql}`)
+      .bind(claim.namespace, JSON.stringify(draftIds(claim)), ...owned.args)] : [])
+  ];
+  const assignments = handoff ? "rolling_skipped=1,window_key=NULL,claimed_at=NULL" : "done_at=?";
+  const results = await db.batch([
+    ...beforeSettlement,
+    db.prepare(`UPDATE rolling_inbox SET ${assignments},progress=NULL,error=?
       WHERE namespace=? AND window_key=? AND claimed_at=? AND done_at IS NULL AND ${owned.sql}`)
-      .bind(at, error ?? null, claim.namespace, claim.key, claim.at, ...owned.args),
-    ...(state ? [writeState(db, state, at, guard(claim, claim.at, state, at))] : []),
-    ...(claim.progress.completed.length ? [db.prepare(`DELETE FROM memory_events
-      WHERE namespace=? AND event_type='rolling_draft' AND id IN (SELECT value FROM json_each(?)) AND ${settled.sql}`)
-      .bind(claim.namespace, JSON.stringify(draftIds(claim)), ...settled.args)] : [])
+      .bind(...(handoff ? [] : [at]), failure?.reason ?? null, claim.namespace, claim.key, claim.at, ...owned.args),
+    ...(state ? [writeState(db, state, at, guard(claim, claim.at, state, at))] : [])
   ]);
-  return Boolean(finished.meta.changes);
+  return Boolean(results[beforeSettlement.length].meta.changes);
 }

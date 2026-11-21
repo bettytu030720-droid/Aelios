@@ -125,12 +125,12 @@ Open `/admin` to inspect and manage every memory space. The sidebar switches bet
 
 | Page | Purpose |
 | --- | --- |
-| **Home** | Today's conversations (heart to keep as a keepsake, trash to remove noisy or unwanted lines), pending items, last night's Dream summary, and the latest journal entry |
+| **Home** | Today's conversations, with controls to keep or remove individual lines. Also shows pending items, recent Daytime Dream results and failures, last night's summary, and the latest journal entry |
 | **Review** | Pending memory candidates. With Clef auto-review enabled, decisions appear under **Auto-handled this week** with one-click undo. Switching Clef off keeps daily candidates waiting for manual or MCP review. Imported candidates always wait under **Imported** |
 | **Journal** | Daily, weekly, and monthly entries (weeks older than ~5 weeks fold into the monthly entry), with **Rewrite from the originals** for days still within transcript retention |
 | **Memories** | Browse, search, edit, merge, and inspect version history across **Core**, **Keepsakes**, **Our words**, **Notebook**, **Handoff**, and **World facts** |
 | **Star map** | Interactive 3D memory graph opened in its own page (`/admin/starmap`) |
-| **Nightly** | Daytime Dream backlog and window status, 7-day nightly run history, per-night harvest, and manual Dream runs |
+| **Nightly** | Daytime Dream progress, retries, failure reasons, and counts for review candidates and saved memories. Also shows nightly run history, what each night produced, and manual Dream runs |
 | **Import & export** | Backup export (`md` or `jsonl`), structured entry import, chat log extraction, and zero-LLM chat archiving |
 | **Settings** | Common settings, assistants, models & upstream (including ChatGPT plan and model list), all settings, keys, and troubleshooting (recall logs and vector maintenance) |
 

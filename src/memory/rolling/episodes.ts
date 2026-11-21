@@ -17,12 +17,12 @@ export async function extendDreamCandidate(
   db: D1Database,
   candidate: MemoryCandidateRow,
   input: { content: string; sources: string[]; origin: MemoryProvenance; guard: D1PreparedStatement }
-): Promise<boolean> {
+): Promise<"updated" | "covered" | null> {
   const previous = parseOrigin(candidate.provenance);
-  if (candidate.status !== "pending" || previous?.episode_key !== input.origin.episode_key) return false;
+  if (candidate.status !== "pending" || previous?.episode_key !== input.origin.episode_key) return null;
   const priorSources = readStringArray(JSON.parse(candidate.source_message_ids ?? "[]"));
   const covered = candidate.content.includes(input.content);
-  if (covered && input.sources.every(id => priorSources.includes(id))) return true;
+  if (covered && input.sources.every(id => priorSources.includes(id))) return "covered";
   const sources = [...new Set([...priorSources, ...input.sources])];
   const inputs = [...new Set([...(previous?.inputs ?? []), ...(input.origin.inputs ?? [])])];
   const content = covered ? candidate.content : [candidate.content, input.content].join("\n");
@@ -39,7 +39,7 @@ export async function extendDreamCandidate(
       .bind(content.length <= 1000 ? content : candidate.content, JSON.stringify(sources), JSON.stringify(origin),
         nowIso(), candidate.namespace, candidate.id, candidate.content, candidate.provenance ?? null, candidate.source_message_ids)
   ]);
-  return Boolean(saved.meta.changes);
+  return saved.meta.changes ? "updated" : null;
 }
 
 export async function episodeMemory(db: D1Database, namespace: string, candidateId: string) {

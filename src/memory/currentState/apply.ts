@@ -4,7 +4,7 @@ import type { Env } from "../../types";
 import { sha256Hex } from "../../utils/hash";
 import type { ExtractedMemory } from "../extract";
 import { groundCandidate } from "../grounding";
-import { dreamOrigin, isExplicitMemory } from "../provenance";
+import { dreamOrigin, isExplicitMemory, parseOrigin } from "../provenance";
 import { isExplicitDecisionText } from "./decisionCues";
 import { decisionKey } from "./scopeKey";
 import {
@@ -20,7 +20,7 @@ export async function applyScopedDecision(
   namespace: string,
   candidate: ExtractedMemory,
   contextIds: string[] = [],
-  options?: { guard?: D1PreparedStatement; rollingMessages?: string[] }
+  options?: { guard?: D1PreparedStatement; rollingWindow?: { key: string; messageIds: string[] } }
 ) {
   const proposal = candidate.decision;
   const key = proposal && decisionKey(proposal.scope_key);
@@ -61,9 +61,10 @@ export async function applyScopedDecision(
         .bind(namespace, JSON.stringify(context))
         .all<{ id: string }>()
     : null;
+  const window = options?.rollingWindow;
   const origin = {
-    ...dreamOrigin(ids, options?.rollingMessages ? { messages: options.rollingMessages, memories: contextIds } : {}),
-    ...(options?.rollingMessages ? { recording_actor: "rolling_dream" } : {}),
+    ...dreamOrigin(ids, window ? { messages: window.messageIds, memories: contextIds } : {}),
+    ...(window ? { recording_actor: "rolling_dream", rolling_window_key: window.key } : {}),
     attributed_actor: "user" as const,
     evidence_relation: "paraphrase" as const,
     state_of: sameSpace?.results.map((row) => row.id) ?? []
@@ -80,12 +81,16 @@ export async function applyScopedDecision(
   const id = `mem_${(await sha256Hex(JSON.stringify([namespace, key, [...ids].sort(), proposal.value]))).slice(0, 32)}`;
   const revisionId = `rev_${id}`;
   const committed = await env.DB.prepare(
-    `SELECT id FROM memories WHERE namespace = ?1 AND id = ?2
-     UNION ALL SELECT id FROM memory_revisions WHERE namespace = ?1 AND id = ?3 LIMIT 1`
+      `SELECT id, provenance, 'memory' AS kind FROM memories WHERE namespace = ?1 AND id = ?2
+     UNION ALL SELECT id, provenance, 'revision' AS kind FROM memory_revisions WHERE namespace = ?1 AND id = ?3 LIMIT 1`
   )
     .bind(namespace, id, revisionId)
-    .first<{ id: string }>();
-  if (committed) return { id: committed.id, current: false };
+    .first<{ id: string; provenance: string | null; kind: "memory" | "revision" }>();
+  if (committed) {
+    const write = window && parseOrigin(committed.provenance)?.rolling_window_key === window.key
+      ? committed.kind : undefined;
+    return { id: committed.id, current: false, write };
+  }
 
   const match = await getActiveMemoryByFactKey(env.DB, { namespace, factKey: key });
   const current =
@@ -129,7 +134,7 @@ export async function applyScopedDecision(
       sourceMessageIds: ids,
       provenance: origin
     }, options?.guard);
-    return { id: revisionId, current: false };
+    return { id: revisionId, current: false, write: "revision" as const };
   }
 
   await commitScopedDecision(env, {
@@ -144,5 +149,5 @@ export async function applyScopedDecision(
     importance: candidate.importance,
     previous: current ? { id: current.id, updatedAt: current.updated_at, vectorId: current.vector_id } : null
   }, options?.guard);
-  return { id, current: true };
+  return { id, current: true, write: "memory" as const };
 }

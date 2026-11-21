@@ -17,6 +17,7 @@ export interface MemoryProvenance {
   state_of?: string[];
   episode_key?: string;
   episode_date?: string;
+  rolling_window_key?: string;
 }
 
 export function explicitWrite(

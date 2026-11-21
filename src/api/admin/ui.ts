@@ -1,6 +1,7 @@
 // Admin UI assembled from modular template and script slices under ./ui/.
 import { ADMIN_SCRIPT_DREAM } from "./ui/scripts/dream";
 import { ADMIN_SCRIPT_MEMORIES } from "./ui/scripts/memories";
+import { ADMIN_SCRIPT_ROLLING } from "./ui/scripts/rolling";
 import { ADMIN_SCRIPT_SETTINGS } from "./ui/scripts/settings";
 import { ADMIN_SCRIPT_STATE } from "./ui/scripts/state";
 import { ADMIN_SCRIPT_TRANSFER } from "./ui/scripts/transfer";
@@ -30,5 +31,6 @@ export const ADMIN_HTML = [
   ADMIN_SCRIPT_SETTINGS,
   ADMIN_SCRIPT_MEMORIES,
   ADMIN_SCRIPT_DREAM,
+  ADMIN_SCRIPT_ROLLING,
   ADMIN_SCRIPT_TRANSFER
 ].join("\n");

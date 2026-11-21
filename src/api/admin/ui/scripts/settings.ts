@@ -276,7 +276,7 @@ export const ADMIN_SCRIPT_SETTINGS = String.raw`    async init() {
       this.recallHistory = []; this.recallHistoryError = ''; this.recallHistoryLoading = false;
       this.boot = {}; this.stats = {};
       this.todayMessages = []; this.candidates = []; this.judgeDecisions = []; this.memories = [];
-      this.home = { diary: null, run: null, harvest: null }; this.homeAll = false;
+      this.home = { diary: null, run: null, harvest: null, rolling: null, dreamStatusError: false }; this.homeAll = false;
       this.reviewSelected = {};
       this.precious = []; this.glossary = [];
       this.notebookPages = []; this.notebookDraft = null; this.notebookLoaded = false;
@@ -297,6 +297,7 @@ export const ADMIN_SCRIPT_SETTINGS = String.raw`    async init() {
       this.dreamDate = ''; this.dreamHarvestDate = '';
       this.dreamLoading = false; this.dreamHarvestLoading = false;
       this.dreamTriggering = false; this.dreamResolving = false; this.dreamStatusError = '';
+      this.rollingStatusError = '';
       this.debugOutput = '';
     },
     // 图标都直接写在页面里了；留着这个钩子，旧代码里到处在调。

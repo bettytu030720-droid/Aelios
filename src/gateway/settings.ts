@@ -59,7 +59,7 @@ export const SETTINGS: SettingSpec[] = [
   { group: "记忆召回", name: "MEMORY_LEGACY_VECTOR_FALLBACK_SCORE_FACTOR", blankDefault: "0.45", label: "旧向量兜底折扣", labelEn: "Legacy-vector score discount", hint: "默认 0.45。乘在旧库命中分上，压低它和新记忆的竞争", hintEn: "Default 0.45. Multiplied into old-store hit scores so they compete less with new memories." },
 
   { group: "Dream 与日记", name: "ENABLE_DREAM", label: "夜整总闸", labelEn: "Process chats every night", hint: "默认开。关掉完全不跑 dream。旧名 ENABLE_DAILY_MEMORY_DIGEST 只在这项没设时生效", hintEn: "On by default. Off skips the nightly run entirely. The old name ENABLE_DAILY_MEMORY_DIGEST only applies when this is unset.", kind: "switch", defaultOn: true, common: true },
-  { group: "Dream 与日记", name: "DREAM_MODEL", blankDefault: DEFAULT_DREAM_MODEL, inheritFrom: "SUMMARY_MODEL", legacyKey: "DAILY_DIGEST_MODEL", label: "Dream 用的模型", labelEn: "Model for the nightly run", hint: "填 chatgpt/模型名 就用你的 ChatGPT 套餐（要先在上面「模型与上游」里把 ChatGPT 套餐连好）。注意夜里会连发好几轮请求，日记、周记月记也各来一次，都算在套餐额度里；额度到顶那晚这些任务就会失败。套餐线路不收输出长度上限，下面「单轮输出上限」对它不生效", hintEn: "Enter chatgpt/<model name> to use your ChatGPT plan (connect the ChatGPT plan under Models & upstream above first). Each night sends several rounds of requests, plus one each for the journal and the weekly/monthly summaries, all counted against the plan; on a night the quota runs out, these jobs fail. The plan route takes no output limit, so “Max output tokens per round” below doesn't apply to it.", common: true },
+  { group: "Dream 与日记", name: "DREAM_MODEL", blankDefault: DEFAULT_DREAM_MODEL, inheritFrom: "SUMMARY_MODEL", legacyKey: "DAILY_DIGEST_MODEL", label: "Dream 用的模型", labelEn: "Model for Dream", hint: "白天抽取和夜间整理共用此模型。填 chatgpt/模型名 可用已连接的 ChatGPT 套餐，用量计入套餐额度。套餐线路沿用自己的输出上限。", hintEn: "Daytime extraction and nightly Dream share this model. A chatgpt/<model name> uses your connected ChatGPT plan and counts toward its quota. That route uses its own output limit.", common: true },
   { group: "Dream 与日记", name: "DREAM_TIME_ZONE", blankDefault: "Asia/Singapore", legacyKey: "DAILY_DIGEST_TIME_ZONE", label: "按哪个时区分天", labelEn: "Time zone for the day boundary", hint: "例如 Asia/Singapore", hintEn: "e.g. Asia/Singapore" },
   {
     group: "Dream 与日记",
@@ -119,18 +119,18 @@ export const SETTINGS: SettingSpec[] = [
     under: "ROLLING_DREAM",
     label: "一段处理多久算卡住（分钟）",
     labelEn: "Minutes before a stretch counts as stuck",
-    hint: "默认 15。超过这个时间还没处理完，就当作中断，可以重新处理，或者交给夜里接手",
-    hintEn: "Default 15. A stretch still unfinished after this long counts as interrupted and can be retried or picked up by the nightly run."
+    hint: "默认 15。超过这个时间没有进度，面板标为可能卡住，下一次整理可以接手。",
+    hintEn: "Default 15. A stretch with no progress for this long is shown as possibly stalled and can be picked up by the next run."
   },
   {
     group: "Dream 与日记",
     name: "ROLLING_MAX_ATTEMPTS",
     blankDefault: "3",
     under: "ROLLING_DREAM",
-    label: "一段最多重试几次",
-    labelEn: "Retries per stretch",
-    hint: "默认 3，最多 10。还失败就记下原因、跳过这段，后面的照常整理，原话照样能搜到",
-    hintEn: "Default 3, at most 10. After that the failure is logged and the stretch is skipped so later ones continue; the original words stay searchable."
+    label: "一段最多尝试几次",
+    labelEn: "Attempts per stretch",
+    hint: "默认共 3 次，最多 10 次。写入前仍未成功的消息会留给夜间抽取。",
+    hintEn: "Default 3 attempts total, up to 10. Messages from windows that fail before saving are left for nightly extraction."
   },
   { group: "Dream 与日记", name: "DREAM_MAX_MESSAGES", blankDefault: "40", legacyKey: "DAILY_DIGEST_MAX_MESSAGES", label: "一轮读多少条对话", labelEn: "Messages read per round" },
   { group: "Dream 与日记", name: "DREAM_MEMORY_CONTEXT_LIMIT", blankDefault: "40", legacyKey: "DAILY_DIGEST_MEMORY_CONTEXT_LIMIT", label: "一轮参考多少条已有记忆", labelEn: "Existing memories consulted per round" },

@@ -4,25 +4,12 @@ import type { Env, RollingWindowQueueMessage } from "../../types";
 import { sha256Hex } from "../../utils/hash";
 import { nowIso } from "../../utils/time";
 import { readDreamModel } from "../dreamEnv";
+import type { WindowProgress } from "./progress";
 import { isDaytimeDreamOn, rollingSettings } from "./settings";
-import type { TriageAnswers } from "./triage";
 import { codePointLength, pickWindow, type InboxMessage } from "./window";
 
 const STAGE_VERSION = "rolling-v1";
 const MAX_QUEUE_DELAY_SECONDS = 86_400;
-
-interface WindowProgress {
-  model: string;
-  chars: number;
-  startedAt: string;
-  triage?: TriageAnswers | null;
-  extract?: boolean;
-  completed: string[];
-  clefCalls: number;
-  extractorCalls: number;
-  eventCount: number;
-  committing?: boolean;
-}
 
 export interface RollingClaim {
   namespace: string;
@@ -173,7 +160,7 @@ export async function claimRollingWindow(env: Env, namespace: string, resumeKey?
     const last = heads[heads.length - 1].inbox_seq;
     key = `rolling_${(await sha256Hex(JSON.stringify([namespace, model, first, last, STAGE_VERSION, "on"]))).slice(0, 32)}`;
     progress = {
-      model, chars: rollingSettings(env).chars, startedAt: at, completed: [],
+      model, chars: rollingSettings(env).chars, startedAt: at, messageCount: heads.length, completed: [],
       clefCalls: 0, extractorCalls: 0, eventCount: 0
     };
     lease = env.DB.prepare(`WITH ready(seq) AS MATERIALIZED (

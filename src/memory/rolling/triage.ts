@@ -8,7 +8,7 @@ export interface TriageAnswers {
 }
 
 export interface WindowTriage {
-  classify(packet: RollingPacket): Promise<TriageAnswers | null>;
+  classify(packet: RollingPacket, signal?: AbortSignal): Promise<TriageAnswers | null>;
 }
 
 export function needsExtraction(

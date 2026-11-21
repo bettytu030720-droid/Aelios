@@ -153,6 +153,9 @@ test("rolling decisions use P1 ordering and leave an older late arrival in histo
   assert.match(String(sqlite.prepare("SELECT value FROM processing_cursors WHERE name='rolling_state:default'").get()?.value), /user\/lab\/protocol/);
   assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM memory_candidates").get()?.n, 0);
   assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM memory_events WHERE event_type='rolling_draft'").get()?.n, 0);
+  const windows = (await getRollingDreamStatus(env, "default")).recent_windows;
+  assert.equal(windows.reduce((n, window) => n + (window.writes?.memories ?? 0), 0), 2);
+  assert.equal(windows.reduce((n, window) => n + (window.writes?.revisions ?? 0), 0), 1);
 });
 
 test("a failure after the live write resumes with the same proposal even after switching off", async (t) => {
@@ -177,6 +180,7 @@ test("a failure after the live write resumes with the same proposal even after s
   assert.equal(calls, 1);
   assert.deepEqual(sqlite.prepare("SELECT id FROM memory_candidates").all().map(row => row.id), [candidate]);
   assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM rolling_inbox WHERE done_at IS NOT NULL").get()?.n, 2);
+  assert.equal((await getRollingDreamStatus(env, "default")).recent_windows[0].writes?.candidates, 1);
 });
 
 test("an expired nightly inference cannot write candidates after live rolling takes its messages", async (t) => {

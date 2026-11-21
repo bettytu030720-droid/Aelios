@@ -11,11 +11,10 @@ export class DreamModelTimeoutError extends Error {
   }
 }
 
-export async function callDreamModelJson(
-  env: Env,
-  request: OpenAIChatRequest,
+export async function withDreamModelDeadline<T>(
+  call: (signal: AbortSignal) => Promise<T>,
   timeoutMs = DREAM_MODEL_TIMEOUT_MS
-): Promise<{ ok: boolean; status: number; statusText: string; parsed?: OpenAIChatResponse }> {
+): Promise<T> {
   if (timeoutMs <= 0) throw new DreamModelTimeoutError();
   const controller = new AbortController();
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -26,8 +25,21 @@ export async function callDreamModelJson(
       controller.abort(error);
     }, timeoutMs);
   });
-  const operation = (async () => {
-    const response = await callOpenAICompat(env, request, undefined, controller.signal);
+  try {
+    return await Promise.race([call(controller.signal), deadline]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+    controller.abort();
+  }
+}
+
+export async function callDreamModelJson(
+  env: Env,
+  request: OpenAIChatRequest,
+  timeoutMs?: number
+): Promise<{ ok: boolean; status: number; statusText: string; parsed?: OpenAIChatResponse }> {
+  return withDreamModelDeadline(async (signal) => {
+    const response = await callOpenAICompat(env, request, undefined, signal);
     if (!response.ok) {
       await response.body?.cancel().catch(() => {});
       return { ok: false, status: response.status, statusText: response.statusText };
@@ -38,11 +50,5 @@ export async function callDreamModelJson(
       statusText: response.statusText,
       parsed: await response.json() as OpenAIChatResponse
     };
-  })();
-  try {
-    return await Promise.race([operation, deadline]);
-  } finally {
-    if (timer !== undefined) clearTimeout(timer);
-    controller.abort();
-  }
+  }, timeoutMs);
 }

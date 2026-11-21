@@ -7,7 +7,7 @@ export const ROLLING_CLEF_MODEL = "@cf/cloudflare/clef-flash";
 
 export function clefTriage(env: Env): WindowTriage {
   return {
-    async classify(packet: RollingPacket) {
+    async classify(packet: RollingPacket, signal?: AbortSignal) {
       const question = (instructions: string) => ({
         type: "noul" as const,
         instructions,
@@ -32,7 +32,7 @@ export function clefTriage(env: Env): WindowTriage {
           explicit_writes: packet.explicit_writes.map(({ content }) => content)
         },
         questions,
-      }, ROLLING_CLEF_MODEL).catch(() => null);
+      }, ROLLING_CLEF_MODEL, signal);
       const novel = readNoul(answers, "novel");
       const decision = readNoul(answers, "decision");
       const covered = readNoul(answers, "covered");
