@@ -40,7 +40,8 @@ test("unclassified candidates show the model operation and failure without enter
   assert.match(app.operationReviewHint(pending), /carry_forward.*超时/);
   app.reviewSelectAll(true);
   assert.deepEqual(Object.keys(app.reviewSelected), ["known"]);
-  assert.match(ADMIN_HTML, /x-show="candidate.source !== 'dream_unclassified'" @click="approveCandidate/);
+  assert.equal(app.candidateApproveLabel(pending), "记成新记忆");
+  assert.doesNotMatch(ADMIN_HTML, /x-show="candidate.source !== 'dream_unclassified'" @click="approveCandidate/);
 });
 
 test("manual UI sends background true, displays acceptance ID, polls queued/running and stops on completion", async () => {

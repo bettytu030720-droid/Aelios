@@ -269,22 +269,41 @@ test("target edits during inference and a failed settlement both roll back the a
   assert.equal((await f.judge(() => assert.fail("already approved"))).reason, "no_candidates");
 });
 
-test("with Clef off, REST and MCP can inspect or discard an unfamiliar operation, and cannot approve it", async (t) => {
+test("with Clef off, REST and MCP keep an unfamiliar operation as a new memory without touching its target", async (t) => {
   const f = operationFixture(t);
   f.env.CLEF_AUTO_REVIEW = "off";
+  f.target();
+  const second = "The telescope arrived on Friday.";
+  const third = "The dome needs new paint.";
   insertLine(f.sqlite, "line", talk);
-  await f.extract([event("capture")]);
-  const [candidate] = f.candidates();
-  const id = String(candidate.id);
+  insertLine(f.sqlite, "line2", second);
+  insertLine(f.sqlite, "line3", third);
+  await f.extract([{ ...event("capture"), target_memory_id: "old" }]);
+  await f.extract([event("capture", second, "line2")]);
+  await f.extract([event("capture", third, "line3")]);
+  const [withTarget, plain, dropped] = f.candidates().map(row => String(row.id));
   assert.equal((await f.judge(() => assert.fail("review disabled"))).reason, "clef_off");
-  assert.equal((await f.api(`/${id}/approve`, "POST")).status, 409);
-  assert.equal((await f.api(`/${id}/merge`, "POST")).status, 409);
+  assert.equal((await f.api(`/${withTarget}/merge`, "POST")).status, 409);
+
+  const kept = await f.api(`/${withTarget}/approve`, "POST");
+  assert.equal(kept.status, 200);
+  const body = await kept.json() as { data: { memory_id: string; action: string } };
+  assert.equal(body.data.action, "added");
+  assert.equal(f.memory(body.data.memory_id)?.content, talk);
+  assert.equal(f.memory("old")?.status, "active");
+  assert.equal(f.memory("old")?.content, "The lab meets on Tuesday.");
+  assert.equal(f.candidates()[0].status, "approved");
+  assert.equal(f.candidates()[0].source, "dream_add");
+  assert.equal((await f.api(`/${withTarget}/discard`, "POST")).status, 409);
+
   const pending = (await f.mcp("memory_candidates")).content[0].text;
   assert.match(pending, /"action":\s*"unclassified"/);
   assert.match(pending, /"reported_op":\s*"capture"/);
-  assert.equal((await f.mcp("memory_review", { id, decision: "approve" })).isError, true);
-  assert.match((await f.mcp("memory_review", { id, decision: "discard" })).content[0].text, /discarded/);
-  assert.equal(f.candidates()[0].status, "discarded");
+  const approved = await f.mcp("memory_review", { id: plain, decision: "approve" });
+  assert.notEqual(approved.isError, true);
+  assert.equal(f.memory(JSON.parse(approved.content[0].text).data.memory_id)?.content, second);
+  assert.match((await f.mcp("memory_review", { id: dropped, decision: "discard" })).content[0].text, /discarded/);
+  assert.deepEqual(f.candidates().map(row => row.status), ["approved", "approved", "discarded"]);
   assert.equal(f.calls.length, 0);
 });
 

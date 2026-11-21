@@ -9,6 +9,7 @@ import {
 } from "../../../db/v2";
 import { settleOperationCandidate } from "../../../db/v2/operationReview";
 import { approveCandidate } from "../../../memory/candidateApproval";
+import { keepOperationAsNewMemory } from "../../../memory/operationReview";
 import {
   judgeKindFor,
   judgeNotePrefix,
@@ -75,19 +76,27 @@ export async function handleReviewTool(
     if (isImportCandidateSource(candidate.source)) {
       return toolError("This candidate came from an import; the person reviews imports themselves on the review page");
     }
-    if (candidate.source === UNCLASSIFIED_DREAM_SOURCE) {
-      if (decision === "approve") return toolError("Clef must classify this Dream proposal before it can change a memory.");
-      const result = await settleOperationCandidate(env.DB, candidate, {
-        status: "discarded", note: readString(args.reason)?.slice(0, 300) || "discarded"
-      }).run();
-      return result.meta.changes ? textToolResult({ data: { id, status: "discarded", memory_id: null } })
-        : toolError("Candidate changed during review. List candidates again.");
-    }
     const speakers = await loadSpeakersForNamespace(env, namespace);
     const reviewer = (speakers?.assistantName ?? "").replace(/[\]\r\n]/g, "").trim().slice(0, 32) || "助手";
     const reason = (readString(args.reason) ?? "").replace(/\s+/g, " ").trim().slice(0, 300)
       || (decision === "approve" ? "我决定记住。" : "我决定放下。");
     const decisionNote = `${judgeNotePrefix(reviewer)}${reason}`;
+    if (candidate.source === UNCLASSIFIED_DREAM_SOURCE) {
+      if (decision === "approve") {
+        try {
+          const memoryId = await keepOperationAsNewMemory(env, candidate, {
+            tags: parseJsonArray(candidate.tags), sourceIds: parseJsonArray(candidate.source_message_ids),
+            reviewer: "mcp_review", note: decisionNote
+          });
+          return textToolResult({ data: { id, status: "approved", memory_id: memoryId } });
+        } catch {
+          return toolError("The proposal or its cited messages changed during review. List candidates again.");
+        }
+      }
+      const result = await settleOperationCandidate(env.DB, candidate, { status: "discarded", note: decisionNote }).run();
+      return result.meta.changes ? textToolResult({ data: { id, status: "discarded", memory_id: null } })
+        : toolError("Candidate changed during review. List candidates again.");
+    }
     try {
       if (decision === "discard") {
         await updateMemoryCandidateStatus(env.DB, { namespace, id, status: "discarded", decisionNote });

@@ -33,7 +33,7 @@ function modelResponse(op: string, content = "The lab got a new telescope.") {
   } }] });
 }
 
-test("Gemini's observed add operation creates a grounded candidate and reports a separate write count", async (t) => {
+test("Gemini's add operation is kept for Clef review as a grounded candidate with a separate write count", async (t) => {
   const { sqlite, db } = sqliteFixture(t);
   insertLine(sqlite, "telescope", "The lab got a new telescope.");
   let calls = 0;
@@ -45,7 +45,10 @@ test("Gemini's observed add operation creates a grounded candidate and reports a
   });
   assert.equal((await runRollingWindow(env, "default", { triage })).extracted, true);
   assert.equal(calls, 1);
-  assert.equal(sqlite.prepare("SELECT content FROM memory_candidates").get()?.content, "The lab got a new telescope.");
+  const candidate = sqlite.prepare("SELECT content,source,provenance FROM memory_candidates").get();
+  assert.equal(candidate?.content, "The lab got a new telescope.");
+  assert.equal(candidate?.source, "dream_unclassified");
+  assert.equal(JSON.parse(String(candidate?.provenance)).proposed_operation.reported_op, "add");
   const { recent_windows: [window] } = await getRollingDreamStatus(env, "default");
   assert.deepEqual(window.writes, { candidates: 1, memories: 0, revisions: 0 });
   assert.equal(window.model, GEMINI);

@@ -132,7 +132,7 @@ export const CANDIDATE_CARD = `<article class="panel cand">
                 </div>
               </div>
               <div class="cand-actions">
-                <button type="button" x-show="candidate.source !== 'dream_unclassified'" @click="approveCandidate(candidate)" class="btn btn-primary btn-sm">${I.check}<span x-text="candidate.editing ? L('改好记住', 'Save & remember') : candidateApproveLabel(candidate)"></span></button>
+                <button type="button" @click="approveCandidate(candidate)" class="btn btn-primary btn-sm">${I.check}<span x-text="candidate.editing ? L('改好记住', 'Save & remember') : candidateApproveLabel(candidate)"></span></button>
                 <button type="button" @click="discardCandidate(candidate)" class="btn btn-sm" x-text="candidateDiscardLabel(candidate)"></button>
                 <div x-show="candidate.source !== 'dream_unclassified'" class="relative">
                   <button type="button" @click="candidate.moreOpen = !candidate.moreOpen" class="btn btn-sm btn-icon-sm" :aria-expanded="candidate.moreOpen ? 'true' : 'false'" :aria-label="L('更多操作', 'More actions')">${I.more}</button>

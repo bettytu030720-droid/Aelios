@@ -9,6 +9,7 @@ import { getMessagesByIds, retainedMessageIds } from "../../db/messages";
 import { findSimilarActiveMemory } from "../../memory/dedupGate";
 import { approvedCandidateMemory } from "../../db/v2/candidates";
 import { settleOperationCandidate } from "../../db/v2/operationReview";
+import { keepOperationAsNewMemory } from "../../memory/operationReview";
 import { reviewedOrigin, type MemoryProvenance, UNCLASSIFIED_DREAM_SOURCE } from "../../memory/provenance";
 import { clampMemoryType } from "../../memory/canonicalTypes";
 import {
@@ -225,9 +226,24 @@ export async function handleMemoryCandidates(request: Request, env: Env): Promis
     if (action === "approve" && candidate.status === "approved") {
       return json({ data: { candidate: toCandidateApiRecord(candidate), memory_id: candidate.target_memory_id } });
     }
+    if (action === "approve" && candidate.source === UNCLASSIFIED_DREAM_SOURCE && candidate.status === "pending") {
+      if (content !== candidate.content || type !== candidate.type) {
+        return openAiError("This Dream proposal can only be kept as written. Discard it to drop it.", 409);
+      }
+      try {
+        const memoryId = await keepOperationAsNewMemory(env, candidate, {
+          tags, sourceIds: parseJsonArray(candidate.source_message_ids), reviewer: "review",
+          note: readString(body.decision_note) || "Kept as a new memory on review."
+        });
+        const updated = await getMemoryCandidateById(env.DB, { namespace, id });
+        return json({ data: { candidate: updated ? toCandidateApiRecord(updated) : null, memory_id: memoryId, action: "added" } });
+      } catch {
+        return openAiError("The proposal or its cited messages changed during review. Reload and try again.", 409);
+      }
+    }
     if (["approve", "discard", "merge", "supersede"].includes(action ?? "")) {
       return openAiError(candidate.status === "pending"
-        ? "Clef must classify this Dream proposal before it can change a memory."
+        ? "This Dream proposal can be kept as a new memory or discarded."
         : "This Dream proposal has already been reviewed.", 409);
     }
   }

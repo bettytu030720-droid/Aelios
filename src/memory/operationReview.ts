@@ -19,6 +19,22 @@ function isWritableTarget(memory: MemoryRecord, revision: string): boolean {
     !isScopedDecisionRecord(memory);
 }
 
+/**
+ * A person, or the assistant reviewing for them, can keep an unclassified proposal as a new memory.
+ * Nothing existing is updated or archived, so this needs no Clef decision and works with auto-review off.
+ */
+export async function keepOperationAsNewMemory(
+  env: Env,
+  candidate: MemoryCandidateRow,
+  input: { tags: string[]; sourceIds: string[]; reviewer: string; note: string }
+): Promise<string> {
+  const source = ACTION_SOURCES.add;
+  const write = operationApprovalWrite(env.DB, candidate, { source, target: null, note: input.note });
+  return approveCandidate(env, candidate.namespace, {
+    ...candidate, source, fact_key: null, target_memory_id: null
+  }, input.tags, input.sourceIds, input.reviewer, write);
+}
+
 export async function reviewDreamOperation(
   env: Env,
   candidate: MemoryCandidateRow,

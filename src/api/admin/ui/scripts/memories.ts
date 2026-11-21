@@ -154,6 +154,7 @@ export const ADMIN_SCRIPT_MEMORIES = String.raw`    async reloadAll() {
       return 'chip-violet';
     },
     candidateApproveLabel(candidate) {
+      if (candidate.source === 'dream_unclassified') return this.L('记成新记忆', 'Keep as new memory');
       if (candidate.source === 'dream_delete') return this.L('移除', 'Remove');
       if (this.candidateIsUpdate(candidate)) return this.L('改成新的', 'Use new');
       return this.L('记住', 'Remember');
@@ -165,7 +166,7 @@ export const ADMIN_SCRIPT_MEMORIES = String.raw`    async reloadAll() {
     },
     operationReviewHint(candidate) {
       const notes = {
-        operation_uncertain: ['Clef 未能从原话确定该怎么处理。', 'Clef could not determine an action from the cited messages.'],
+        operation_uncertain: ['Clef 未能从原话确定该怎么处理，可以记成新记忆或丢弃。', 'Clef could not determine an action from the cited messages. You can keep it as a new memory or discard it.'],
         operation_clef_failed: ['Clef 评审失败，候选仍在等待。', 'Clef review failed. The proposal is still pending.'],
         operation_clef_timeout: ['Clef 评审超时，候选仍在等待。', 'Clef review timed out. The proposal is still pending.'],
         operation_evidence_missing: ['原话已不完整，等待处理。', 'Some or all cited messages are missing.'],
@@ -174,7 +175,7 @@ export const ADMIN_SCRIPT_MEMORIES = String.raw`    async reloadAll() {
       };
       const note = notes[candidate.decision_note] || (this.autoReview
         ? ['等夜间 Clef 审核判定。', 'Waiting for the nightly Clef review.']
-        : ['Clef 自动审核已关闭，可以查看原话或丢弃提案。', 'Clef auto-review is off. You can inspect the sources or discard the proposal.']);
+        : ['Clef 自动审核已关闭，可以看原话后记成新记忆或丢弃。', 'Clef auto-review is off. Check the sources, then keep it as a new memory or discard it.']);
       const op = candidate.provenance && candidate.provenance.proposed_operation;
       return (op ? this.L('模型给出的操作 ', 'Model operation ') + op.reported_op + ' · ' : '') + this.L(note[0], note[1]);
     },

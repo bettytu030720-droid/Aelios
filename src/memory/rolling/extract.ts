@@ -38,9 +38,9 @@ export interface WindowExtractor {
 }
 
 function readOperation(value: unknown): WindowOperation | undefined {
-  // Some compatible models use "add" for a clearly new event.
+  // Anything else, such as "add", is kept as an unclassified proposal for Clef review.
   const op = readString(value);
-  return op === "add" ? "new" : WINDOW_OPERATIONS.find((candidate) => candidate === op);
+  return WINDOW_OPERATIONS.find((candidate) => candidate === op);
 }
 
 function normalizeEvent(value: unknown): WindowEvent | null {
