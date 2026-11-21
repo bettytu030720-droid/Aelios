@@ -196,7 +196,7 @@ export const ADMIN_SCRIPT_MEMORIES = String.raw`    async reloadAll() {
       };
       const note = notes[candidate.decision_note] || (this.autoReview
         ? ['当天整理完成后，审核最后一次确认。', 'Clef reviews the last confirmation after that day is processed.']
-        : ['自动审核已关闭，等待人工处理。', 'Auto-review is off. This decision is waiting for manual review.']);
+        : ['自动审核已关闭。当天结束、夜间整理完成后可以人工审核。', 'Auto-review is off. Review it by hand once that day is over and its Dream run has finished.']);
       return decision.date + ' · ' + this.L(note[0], note[1]) +
         (origin.proposed_operation ? ' · ' + this.L('模型操作 ', 'Model operation ') + origin.proposed_operation.reported_op : '');
     },

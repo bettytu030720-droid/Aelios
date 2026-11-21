@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
+import { timingSafeEqual } from "node:crypto";
 import { test, type TestContext } from "node:test";
+import { handleMcp } from "../src/api/mcp";
+import { handleMemoryCandidates } from "../src/api/memories/candidates";
 import { writeCursor } from "../src/db/retention";
 import { invalidateKnownInputs } from "../src/db/v2/revocation";
 import { runCandidateJudge } from "../src/memory/candidateJudge";
@@ -10,6 +13,7 @@ import type { Env } from "../src/types";
 import { insertLine, NOVEL, SYNTHETIC_DAY } from "./support/rolling-fixture";
 import { sqliteFixture } from "./support/sqlite";
 
+Object.assign(crypto.subtle, { timingSafeEqual });
 const namespace = "default";
 const scope = "user/lab/protocol";
 const at = (hour: number, day = SYNTHETIC_DAY) => `${day}T${String(hour).padStart(2, "0")}:00:00.000Z`;
@@ -32,7 +36,7 @@ function fixture(t: TestContext) {
   let tail: ReturnType<typeof decision> | undefined;
   let duringReview: (() => Promise<unknown>) | undefined;
   const env: Env = {
-    DB: db, DREAM_TIME_ZONE: "UTC", ROLLING_WINDOW_MESSAGES: "1",
+    DB: db, DREAM_TIME_ZONE: "UTC", ROLLING_WINDOW_MESSAGES: "1", CHATBOX_API_KEY: "synthetic-owner",
     AI: {
       async run(model: string, input: { state?: unknown; messages?: Array<{ content: string }> }) {
         if (model === CLEF_MODEL) {
@@ -159,4 +163,59 @@ test("a new confirmation during review invalidates the old write and can be revi
   assert.equal((await runCandidateJudge(f.env, namespace)).approved, 1);
   assert.equal(f.memories().length, 1);
   assert.match(String(f.memories()[0].content), /SDK/);
+});
+
+const owner = { authorization: "Bearer synthetic-owner", "content-type": "application/json" };
+
+test("a person reviews a daily decision only after its day closes, and it becomes the next version", async (t) => {
+  t.mock.timers.enable({ apis: ["Date"], now: Date.parse(at(20)) });
+  const f = fixture(t);
+  const review = (id: string, action: string, body: Record<string, unknown> = {}) =>
+    handleMemoryCandidates(new Request(`https://aelios.test/v1/candidates/${id}/${action}`, {
+      method: "POST", headers: owner, body: JSON.stringify(body)
+    }), f.env);
+  const mcpReview = async (id: string, decision: string) => {
+    const response = await handleMcp(new Request("https://aelios.test/mcp?tools=all", {
+      method: "POST", headers: owner,
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call",
+        params: { name: "memory_review", arguments: { id, decision } } })
+    }), f.env, { waitUntil() {} } as unknown as ExecutionContext);
+    return (await response.json() as { result: { isError?: boolean; content: Array<{ text: string }> } }).result;
+  };
+  const pending = (day: string) => f.candidates().find(row =>
+    JSON.parse(String(row.provenance)).daily_decision.date === day);
+
+  await f.roll("before", "SDK", "我决定用 SDK。", at(9, "2026-11-16"));
+  await f.markDone("2026-11-16");
+  assert.equal((await review(String(pending("2026-11-16")?.id), "approve")).status, 200);
+  const previous = f.memories()[0];
+  assert.equal(previous.fact_key, `decision:${scope}`);
+
+  await f.roll("am", "ACP", "我决定用 ACP。", at(8));
+  const today = String(pending(SYNTHETIC_DAY)?.id);
+  for (const action of ["approve", "discard"]) {
+    const early = await review(today, action);
+    assert.equal(early.status, 409);
+    assert.match(await early.text(), new RegExp(SYNTHETIC_DAY));
+  }
+  assert.equal((await mcpReview(today, "approve")).isError, true);
+  await f.roll("pm", "REST", "我决定改用 REST。", at(18));
+  assert.equal(pending(SYNTHETIC_DAY)?.status, "pending");
+
+  t.mock.timers.setTime(Date.parse(at(4, "2026-11-18")));
+  await f.markDone();
+  assert.equal((await review(today, "approve", { content: "用户决定用 gRPC。" })).status, 409);
+  assert.equal((await review(today, "merge")).status, 409);
+  const saved = await mcpReview(today, "approve");
+  assert.equal(saved.isError, undefined);
+  const memoryId = JSON.parse(saved.content[0].text).data.memory_id;
+  const current = f.memories().find(row => row.id === memoryId);
+  assert.equal(current?.status, "active");
+  assert.equal(current?.fact_key, `decision:${scope}`);
+  assert.match(String(current?.content), /REST/);
+  assert.deepEqual(JSON.parse(String(current?.source_message_ids)), ["pm"]);
+  assert.equal(JSON.parse(String(current?.provenance)).recording_actor, "mcp_review");
+  assert.equal(f.memories().find(row => row.id === previous.id)?.status, "superseded");
+  assert.equal(pending(SYNTHETIC_DAY)?.status, "approved");
+  assert.equal(f.reviews.length, 0);
 });

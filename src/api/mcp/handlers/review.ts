@@ -10,6 +10,7 @@ import {
 import { settlePendingCandidate } from "../../../db/v2/candidateReview";
 import { approveCandidate } from "../../../memory/candidateApproval";
 import { keepOperationAsNewMemory } from "../../../memory/operationReview";
+import { reviewDailyDecisionByHand } from "../../../memory/dream/dailyDecisionReview";
 import {
   judgeKindFor,
   judgeNotePrefix,
@@ -81,6 +82,15 @@ export async function handleReviewTool(
     const reason = (readString(args.reason) ?? "").replace(/\s+/g, " ").trim().slice(0, 300)
       || (decision === "approve" ? "我决定记住。" : "我决定放下。");
     const decisionNote = `${judgeNotePrefix(reviewer)}${reason}`;
+    const daily = parseOrigin(candidate.provenance)?.daily_decision;
+    if (daily) {
+      const result = await reviewDailyDecisionByHand(env, candidate, daily, {
+        approve: decision === "approve", actor: "mcp_review", note: decisionNote,
+        sourceIds: parseJsonArray(candidate.source_message_ids)
+      });
+      return result.ok ? textToolResult({ data: { id, status: result.status, memory_id: result.memoryId } })
+        : toolError(result.error);
+    }
     if (candidate.source === UNCLASSIFIED_DREAM_SOURCE) {
       if (decision === "approve") {
         try {

@@ -10,7 +10,8 @@ import { findSimilarActiveMemory } from "../../memory/dedupGate";
 import { approvedCandidateMemory } from "../../db/v2/candidates";
 import { settlePendingCandidate } from "../../db/v2/candidateReview";
 import { keepOperationAsNewMemory } from "../../memory/operationReview";
-import { reviewedOrigin, type MemoryProvenance, UNCLASSIFIED_DREAM_SOURCE } from "../../memory/provenance";
+import { parseOrigin, reviewedOrigin, type MemoryProvenance, UNCLASSIFIED_DREAM_SOURCE } from "../../memory/provenance";
+import { reviewDailyDecisionByHand } from "../../memory/dream/dailyDecisionReview";
 import { clampMemoryType } from "../../memory/canonicalTypes";
 import {
   archiveMemory,
@@ -212,6 +213,24 @@ export async function handleMemoryCandidates(request: Request, env: Env): Promis
         ...(result.restoredId ? { restored_id: result.restoredId } : {})
       }
     });
+  }
+
+  const daily = parseOrigin(candidate.provenance)?.daily_decision;
+  if (daily && candidate.status === "pending" && ["approve", "discard", "merge", "supersede"].includes(action ?? "")) {
+    if (action === "merge" || action === "supersede") {
+      return openAiError("A daily decision can be saved or discarded.", 409);
+    }
+    if (action === "approve" && (content !== candidate.content || type !== candidate.type)) {
+      return openAiError("A daily decision is saved as written. Discard it to drop it.", 409);
+    }
+    const result = await reviewDailyDecisionByHand(env, candidate, daily, {
+      approve: action === "approve", actor: "review", sourceIds: parseJsonArray(candidate.source_message_ids),
+      note: readString(body.decision_note) || (action === "approve" ? "Saved on review." : "discarded")
+    });
+    if (!result.ok) return openAiError(result.error, 409);
+    const updated = await getMemoryCandidateById(env.DB, { namespace, id });
+    const record = updated ? toCandidateApiRecord(updated) : null;
+    return json({ data: action === "approve" ? { candidate: record, memory_id: result.memoryId } : record });
   }
 
   if (candidate.source === UNCLASSIFIED_DREAM_SOURCE || provenance.proposed_operation) {

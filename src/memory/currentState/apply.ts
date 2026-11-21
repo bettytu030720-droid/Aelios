@@ -23,7 +23,7 @@ export async function applyScopedDecision(
   options?: {
     guard?: D1PreparedStatement;
     rollingWindow?: { key: string; messageIds: string[] };
-    review?: { id: string; messages: MessageRecord[]; write: CandidateApprovalWrite };
+    review?: { id: string; messages: MessageRecord[]; write: CandidateApprovalWrite; actor: string };
   }
 ) {
   const proposal = candidate.decision;
@@ -58,7 +58,7 @@ export async function applyScopedDecision(
   const origin = {
     ...dreamOrigin(ids, window ? { messages: window.messageIds, memories: contextIds } : {}),
     ...(window ? { recording_actor: "rolling_dream", rolling_window_key: window.key } : {}),
-    ...(options?.review ? { recording_actor: "judge", candidate_id: options.review.id } : {}),
+    ...(options?.review ? { recording_actor: options.review.actor, candidate_id: options.review.id } : {}),
     attributed_actor: "user" as const,
     evidence_relation: "paraphrase" as const,
     state_of: sameSpace?.results.map((row) => row.id) ?? []
