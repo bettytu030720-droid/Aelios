@@ -2,6 +2,7 @@ import { strict as assert } from "node:assert";
 import type { DatabaseSync } from "node:sqlite";
 import { test, type TestContext } from "node:test";
 import { invalidateSettingsCache } from "../src/gateway/config";
+import { runCandidateJudge } from "../src/memory/candidateJudge";
 import { runDailyMemoryDigest } from "../src/memory/dream/orchestrator";
 import { buildDigestPrompt, callDigestModel, runExtractPhase } from "../src/memory/dream/extractPhase";
 import { callDreamModelJson, DreamModelTimeoutError } from "../src/memory/dream/modelCall";
@@ -335,7 +336,7 @@ test("Dream grounds speaker and modality in the supplied batch; tool arguments a
   assert.deepEqual((await run([])).memories, []);
 });
 
-test("nightly digest lands a cited scoped decision with only the supplied state_of targets", async (t) => {
+test("nightly review lands a cited scoped decision with only the supplied state_of targets", async (t) => {
   const rows = messages(1);
   rows[0].content = "我决定就用 ACP。";
   const proposed = {
@@ -343,13 +344,17 @@ test("nightly digest lands a cited scoped decision with only the supplied state_
     evidence_quote: rows[0].content, source_message_ids: [rows[0].id],
     decision: { scope_key: "user/aelios/integration", value: "ACP", state_of: ["old", "not-shown"] },
   };
-  const { env, sqlite } = fixture(t, input => ({ response: JSON.stringify(isDigest(input)
-    ? { ...DIGEST, decisions: [proposed] } : { memories: [] }) }));
+  const { env, sqlite } = fixture(t, input => input.questions
+    ? { answers: { grounded: { noul: 0.9 }, worth: { noul: 0.9 } } }
+    : { response: JSON.stringify(isDigest(input) ? { ...DIGEST, decisions: [proposed] } : { memories: [] }) });
   env.CURRENT_STATE_PROJECTION = "on";
   seedMessages(sqlite, rows);
   sqlite.prepare("INSERT INTO memories(id,namespace,type,content,status,created_at,updated_at) VALUES('old','default','note','old','active','2026-09-17','2026-09-17')").run();
   const result = await runDailyMemoryDigest(env, "default", { dateLabel: DATE });
   assert.equal(result.ran, true);
+  assert.equal(sqlite.prepare("SELECT status FROM memory_candidates").get()?.status, "pending");
+  assert.equal(sqlite.prepare("SELECT id FROM memories WHERE source='scoped_decision'").get(), undefined);
+  assert.equal((await runCandidateJudge(env, "default")).approved, 1);
   const saved = sqlite.prepare("SELECT * FROM memories WHERE source='scoped_decision'").get();
   assert.ok(saved);
   assert.equal(saved.fact_key, "decision:user/aelios/integration");

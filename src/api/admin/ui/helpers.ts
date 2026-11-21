@@ -96,7 +96,8 @@ export const CANDIDATE_CARD = `<article class="panel cand">
                   </div>
                 </template>
                 <p x-show="!candidate.editing && !candidate.existing_content" class="cand-text" x-text="candidate.content"></p>
-                <p x-show="candidate.source === 'dream_unclassified'" class="cand-note" x-text="operationReviewHint(candidate)"></p>
+                <p x-show="candidate.provenance && candidate.provenance.daily_decision" class="cand-note" x-text="dailyDecisionHint(candidate)"></p>
+                <p x-show="candidate.source === 'dream_unclassified' && !(candidate.provenance && candidate.provenance.daily_decision)" class="cand-note" x-text="operationReviewHint(candidate)"></p>
                 <p x-show="candidate.source === 'dream_delete'" class="cand-note">
                   <span x-text="L('原因：', 'Why: ') + (candidate.decision_note || L('整理时觉得不再成立', 'no longer seemed true'))"></span>
                   <span class="mono" x-text="candidate.target_memory_id ? ' · ' + candidate.target_memory_id : ''"></span>

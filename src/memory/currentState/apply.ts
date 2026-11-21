@@ -1,11 +1,11 @@
 import { getMessagesByIds } from "../../db/messages";
 import { getActiveMemoryByFactKey } from "../../db/v2";
-import type { Env } from "../../types";
+import type { CandidateApprovalWrite } from "../../db/v2/candidateReview";
+import type { Env, MessageRecord } from "../../types";
 import { sha256Hex } from "../../utils/hash";
 import type { ExtractedMemory } from "../extract";
-import { groundCandidate } from "../grounding";
 import { dreamOrigin, isExplicitMemory, parseOrigin } from "../provenance";
-import { isExplicitDecisionText } from "./decisionCues";
+import { findDecisionConfirmation } from "./evidence";
 import { decisionKey } from "./scopeKey";
 import {
   commitScopedDecision,
@@ -20,7 +20,11 @@ export async function applyScopedDecision(
   namespace: string,
   candidate: ExtractedMemory,
   contextIds: string[] = [],
-  options?: { guard?: D1PreparedStatement; rollingWindow?: { key: string; messageIds: string[] } }
+  options?: {
+    guard?: D1PreparedStatement;
+    rollingWindow?: { key: string; messageIds: string[] };
+    review?: { id: string; messages: MessageRecord[]; write: CandidateApprovalWrite };
+  }
 ) {
   const proposal = candidate.decision;
   const key = proposal && decisionKey(proposal.scope_key);
@@ -29,23 +33,12 @@ export async function applyScopedDecision(
   }
 
   const ids = [...new Set(candidate.source_message_ids)];
-  const messages = await getMessagesByIds(env.DB, { namespace, ids });
+  const messages = options?.review?.messages ?? await getMessagesByIds(env.DB, { namespace, ids });
   if (!ids.length || messages.length !== ids.length || !messages.some((m) => m.role === "user")) {
     return null;
   }
 
-  const quote = candidate.evidence_quote;
-  const support = quote && messages.find((m) => m.role === "user" && m.content.includes(quote));
-  const [checked] = support ? groundCandidate(candidate, [support]) : [];
-  if (
-    !checked ||
-    !support ||
-    !isExplicitDecisionText(support.content) ||
-    !quote?.toLowerCase().includes(proposal.value.toLowerCase()) ||
-    !candidate.content.toLowerCase().includes(proposal.value.toLowerCase())
-  ) {
-    return null;
-  }
+  if (!findDecisionConfirmation(candidate, messages)) return null;
 
   const newest = Math.max(...messages.map((m) => Date.parse(m.created_at)));
   if (!Number.isFinite(newest)) return null;
@@ -65,6 +58,7 @@ export async function applyScopedDecision(
   const origin = {
     ...dreamOrigin(ids, window ? { messages: window.messageIds, memories: contextIds } : {}),
     ...(window ? { recording_actor: "rolling_dream", rolling_window_key: window.key } : {}),
+    ...(options?.review ? { recording_actor: "judge", candidate_id: options.review.id } : {}),
     attributed_actor: "user" as const,
     evidence_relation: "paraphrase" as const,
     state_of: sameSpace?.results.map((row) => row.id) ?? []
@@ -96,7 +90,7 @@ export async function applyScopedDecision(
   const current =
     match &&
     (await env.DB.prepare(
-      `SELECT m.id, m.type, m.source, m.updated_at, m.vector_id, m.authored_by, m.provenance, lc.valid_as_of
+      `SELECT m.id, m.type, m.source, m.updated_at, m.vector_id, m.authored_by, m.provenance, m.pinned, lc.valid_as_of
        FROM memories m
        LEFT JOIN memory_lifecycle lc ON lc.memory_id = m.id
        WHERE m.namespace = ? AND m.id = ?`
@@ -110,12 +104,14 @@ export async function applyScopedDecision(
         vector_id: string | null;
         valid_as_of: string | null;
         authored_by: string | null;
+        pinned: number;
         provenance: string | null;
       }>());
   if (
     current &&
     (current.source !== SCOPED_DECISION_SOURCE ||
       current.type !== "decision" ||
+      current.pinned ||
       isExplicitMemory(current) ||
       !current.valid_as_of)
   ) {
@@ -123,6 +119,7 @@ export async function applyScopedDecision(
   }
 
   if (current?.valid_as_of && Date.parse(current.valid_as_of) >= newest) {
+    if (options?.review) return { id: current.id, current: false };
     await recordLateDecisionEvidence(env, {
       namespace,
       targetId: current.id,
@@ -148,6 +145,6 @@ export async function applyScopedDecision(
     confidence: candidate.confidence,
     importance: candidate.importance,
     previous: current ? { id: current.id, updatedAt: current.updated_at, vectorId: current.vector_id } : null
-  }, options?.guard);
+  }, options?.guard, options?.review?.write);
   return { id, current: true, write: "memory" as const };
 }

@@ -1,10 +1,17 @@
 import type { KeyProfile } from "../types";
+import type { ScopedDecision } from "./currentState/scopeKey";
 
 export const UNCLASSIFIED_DREAM_SOURCE = "dream_unclassified";
 
 export interface DreamOperationProposal {
   reported_op: string;
   target?: { id: string; revision: string };
+}
+
+export interface DailyDecisionProposal extends ScopedDecision {
+  date: string;
+  at: string;
+  ambiguous?: boolean;
 }
 
 // Only the writing entry point constructs this object. The public source/author
@@ -26,6 +33,7 @@ export interface MemoryProvenance {
   episode_date?: string;
   rolling_window_key?: string;
   proposed_operation?: DreamOperationProposal;
+  daily_decision?: DailyDecisionProposal;
 }
 
 export function explicitWrite(

@@ -7,7 +7,7 @@ import {
   listMemoryCandidates,
   updateMemoryCandidateStatus
 } from "../../../db/v2";
-import { settleOperationCandidate } from "../../../db/v2/operationReview";
+import { settlePendingCandidate } from "../../../db/v2/candidateReview";
 import { approveCandidate } from "../../../memory/candidateApproval";
 import { keepOperationAsNewMemory } from "../../../memory/operationReview";
 import {
@@ -93,7 +93,7 @@ export async function handleReviewTool(
           return toolError("The proposal or its cited messages changed during review. List candidates again.");
         }
       }
-      const result = await settleOperationCandidate(env.DB, candidate, { status: "discarded", note: decisionNote }).run();
+      const result = await settlePendingCandidate(env.DB, candidate, { status: "discarded", note: decisionNote }).run();
       return result.meta.changes ? textToolResult({ data: { id, status: "discarded", memory_id: null } })
         : toolError("Candidate changed during review. List candidates again.");
     }

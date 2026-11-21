@@ -1,6 +1,6 @@
 import { archiveMemory, getActiveMemoryByFactKey, supersedeMemory, upsertMemoryByFactKey } from "../db/v2/memories";
 import { approvedCandidateMemory, type MemoryCandidateRow } from "../db/v2/candidates";
-import type { CandidateApprovalWrite } from "../db/v2/operationReview";
+import type { CandidateApprovalWrite } from "../db/v2/candidateReview";
 import type { Env } from "../types";
 import { reviewedOrigin } from "./provenance";
 import { createVectorMemory } from "./vectorStore";

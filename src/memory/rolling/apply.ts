@@ -3,6 +3,7 @@ import type { RollingPacket } from "./payload";
 import type { WindowEvent, WindowProposal } from "./extract";
 import type { StateDelta } from "./state";
 import { decisionKey } from "../currentState/scopeKey";
+import { findDecisionConfirmation } from "../currentState/evidence";
 
 export interface GroundedWindowEvent extends WindowEvent {
   source_message_ids: string[];
@@ -55,7 +56,6 @@ export function groundWindowProposal(
     if (!evidenceIds.length || evidenceIds.some((id) => !messages.has(id)) || !event.attributed_role || !event.evidence_quote) return [];
     const target = event.target_memory_id ? recalled.get(event.target_memory_id) : undefined;
     const needsReview = event.op === "unclassified";
-    if (event.op === "update" && !target) return [];
     const evidence = evidenceIds.flatMap((id) => {
       const message = messages.get(id);
       return message ? [message] : [];
@@ -79,15 +79,18 @@ export function groundWindowProposal(
       (content && comparable(item.content) === content)
       || (item.source_message_ids.some(id => sourceIds.includes(id)) && item.content.includes(quote))
     );
-    const decision = !needsReview && event.type === "decision" && event.attributed_role === "user" && event.decision && decisionKey(event.decision.scope_key)
+    const proposedDecision = event.type === "decision" && event.attributed_role === "user" && event.decision && decisionKey(event.decision.scope_key)
       ? { ...event.decision, state_of: event.decision.state_of.filter(id => recalled.has(id)) }
       : undefined;
-    const reason = duplicate ? "explicit_write"
+    const decision = proposedDecision && findDecisionConfirmation({ ...checked, decision: proposedDecision }, evidence)
+      ? proposedDecision : undefined;
+    if (event.op === "update" && !target && !decision) return [];
+    const reason = duplicate && !decision ? "explicit_write"
       : !needsReview && target && (target.protected || target.status !== "active" || target.version_status === "superseded") && !decision
         ? "protected_target" : undefined;
     return [{
       ...event,
-      op: reason ? "no_op" : event.op,
+      op: reason ? "no_op" : event.op === "no_op" && decision ? "new" : event.op,
       reason,
       target_memory_id: event.op === "update" || needsReview ? target?.id : undefined,
       target_revision: needsReview ? target?.revision : undefined,

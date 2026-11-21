@@ -8,7 +8,7 @@ import { createMemory, getMemoryById } from "../../db/memories";
 import { getMessagesByIds, retainedMessageIds } from "../../db/messages";
 import { findSimilarActiveMemory } from "../../memory/dedupGate";
 import { approvedCandidateMemory } from "../../db/v2/candidates";
-import { settleOperationCandidate } from "../../db/v2/operationReview";
+import { settlePendingCandidate } from "../../db/v2/candidateReview";
 import { keepOperationAsNewMemory } from "../../memory/operationReview";
 import { reviewedOrigin, type MemoryProvenance, UNCLASSIFIED_DREAM_SOURCE } from "../../memory/provenance";
 import { clampMemoryType } from "../../memory/canonicalTypes";
@@ -216,7 +216,7 @@ export async function handleMemoryCandidates(request: Request, env: Env): Promis
 
   if (candidate.source === UNCLASSIFIED_DREAM_SOURCE || provenance.proposed_operation) {
     if (action === "discard" && candidate.source === UNCLASSIFIED_DREAM_SOURCE && candidate.status === "pending") {
-      const result = await settleOperationCandidate(env.DB, candidate, {
+      const result = await settlePendingCandidate(env.DB, candidate, {
         status: "discarded", note: readString(body.decision_note) || "discarded"
       }).run();
       if (!result.meta.changes) return openAiError("Candidate changed during review. Reload and try again.", 409);

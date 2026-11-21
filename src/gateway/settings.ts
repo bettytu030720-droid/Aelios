@@ -76,8 +76,8 @@ export const SETTINGS: SettingSpec[] = [
     name: "ROLLING_DREAM",
     label: "白天整理",
     labelEn: "Daytime Dream",
-    hint: "默认开。白天每攒够一段对话（默认 10 条或 8000 字），先用 Clef-flash 判断里面有没有值得记的，有就用 Dream 模型写成待审候选或明确决定；夜里只处理白天没整理到的消息，日记照常读全天。关掉就只在夜里整理。会调用模型：Dream 模型填的是 chatgpt/... 时，白天和夜里共用套餐额度；免费档的 Workers AI 每天只有 1 万 neurons，白天用掉后夜里可能跑不完",
-    hintEn: "On by default. Each stretch of conversation (10 messages or 8,000 characters by default) is checked with Clef-flash during the day, and stretches worth keeping are written by the Dream model as review candidates or explicit decisions. Nightly Dream only handles what the day left, and the journal still reads the whole day. Off: everything waits for the nightly run. This calls models: with a chatgpt/... Dream model, daytime and nightly calls share the plan allowance; on the Workers Free plan, Workers AI has 10,000 neurons a day, and daytime use can leave the nightly run short.",
+    hint: "默认开。每攒够一段对话（默认 10 条或 8000 字），Clef Flash 先筛选，Dream 模型再生成候选。同一事项的明确决定保留当天最后一次确认，等夜间审核。关闭后，所有对话留给夜间整理。使用 chatgpt/... 时，白天和夜里共用套餐额度。免费档的 Workers AI 每天共享 1 万 neurons。",
+    hintEn: "On by default. Clef Flash screens each stretch of chat (10 messages or 8,000 characters by default), and the Dream model drafts candidates. Explicit decisions on the same subject retain the day's last confirmation for nightly review. When off, chats wait for the nightly run. The chatgpt/... route shares the plan quota across daytime and nightly calls. Workers Free shares a daily budget of 10,000 neurons.",
     kind: "switch",
     defaultOn: true,
     common: true

@@ -1,5 +1,6 @@
 import { groundCandidate } from "../grounding";
 import { DECISION_FORMAT, extractDecisionFallback } from "../currentState/extract";
+import { isExplicitDecisionText } from "../currentState/decisionCues";
 import { isCurrentStateEnabled } from "../currentState/projection";
 import type { Env, MemoryApiRecord, MessageRecord, OpenAIChatRequest } from "../../types";
 import { callDreamModelJson, DreamModelTimeoutError } from "./modelCall";
@@ -8,6 +9,7 @@ import { CHAT_MATERIAL_RULES } from "../chatMaterial";
 import { extractDreamMemoriesFromMessages } from "../dreamExtract";
 import { dreamOutputLimit, readDreamModel } from "../dreamEnv";
 import type { ExtractedMemory } from "../extract";
+import { listPendingDecisionScopes } from "./dailyDecisions";
 import { nameOnlyRule } from "../speakers";
 import { loadConfig, speakersForNamespace, type DreamSpeakers } from "../../gateway/config";
 import {
@@ -299,6 +301,16 @@ export async function runExtractPhase(
   const deadlineAt = Date.now() + EXTRACT_PHASE_BUDGET_MS;
   const speakers = speakersForNamespace(await loadConfig(env), input.namespace);
   const owned = input.extractMessageIds;
+  const project = isCurrentStateEnabled(env);
+  const hasDecisionCue = messages.some(message => message.role === "user" && (!owned || owned.has(message.id))
+    && isExplicitDecisionText(message.content));
+  const pendingScopes = hasDecisionCue ? await listPendingDecisionScopes(env.DB, input.namespace) : [];
+  const existingScopes = input.existingMemories.flatMap(memory =>
+    memory.fact_key?.startsWith("decision:user/") ? [memory.fact_key.slice("decision:".length)] : []);
+  const scopedInstructions = project || hasDecisionCue ? [
+    DECISION_FORMAT,
+    `Existing and pending decision scopes (reuse when matching): ${JSON.stringify([...new Set([...existingScopes, ...pendingScopes])])}`
+  ].join("\n") : undefined;
 
   for (;;) {
     const extractMessages = owned ? messages.filter(message => owned.has(message.id)) : messages;
@@ -311,7 +323,7 @@ export async function runExtractPhase(
       existingMemories: input.existingMemories,
       hasMore,
       speakers,
-      scopedDecisions: isCurrentStateEnabled(env)
+      scopedDecisions: project
     });
     const modelResult = await callDigestModel(env, prompt, {
       dateLabel: input.dateLabel,
@@ -327,7 +339,7 @@ export async function runExtractPhase(
         messages: extractMessages,
         speakers,
         dateLabel: input.dateLabel,
-        decisionInstructions: isCurrentStateEnabled(env) ? DECISION_FORMAT : undefined,
+        decisionInstructions: scopedInstructions,
         deadlineAt
       });
     }
@@ -356,12 +368,12 @@ export async function runExtractPhase(
       digest.decisions = digest.decisions?.filter(citesOnlyNew);
     }
     if (modelResult.digest?.decisions) {
-      modelResult.digest.decisions = isCurrentStateEnabled(env)
+      modelResult.digest.decisions = project
         ? modelResult.digest.decisions.flatMap(candidate => groundCandidate(candidate, extractMessages))
         : undefined;
     }
     const candidates = [...(modelResult.digest?.decisions ?? []), ...(extractResult?.memories ?? [])];
-    if (modelResult.digest && extractResult && !extractResult.reason && isCurrentStateEnabled(env)) {
+    if (modelResult.digest && extractResult && !extractResult.reason && project) {
       candidates.push(...await extractDecisionFallback(env, { namespace: input.namespace, messages: extractMessages, candidates, deadlineAt }));
     }
     return {

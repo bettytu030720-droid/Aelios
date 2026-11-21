@@ -57,7 +57,7 @@ export async function applyDreamV2(
     queuedCandidates += await queueDreamExtractedMemories(env, {
       namespace,
       memories: extracted, digestDecisions: digest.decisions, contextIds: input.contextMemoryIds,
-      messageIds, guard: input.guard
+      messageIds, messages: input.messages, guard: input.guard
     });
     await recordDreamReviewProposal(env, { namespace, dateLabel, digest, messageIds });
     return { added: 0, updated: 0, deleted: 0, queuedCandidates, longtail: 0, errors: [] };
@@ -66,7 +66,7 @@ export async function applyDreamV2(
   queuedCandidates += await queueDreamExtractedMemories(env, {
     namespace,
     memories: extracted, digestDecisions: digest.decisions, contextIds: input.contextMemoryIds,
-    messageIds, guard: input.guard
+    messageIds, messages: input.messages, guard: input.guard
   });
 
   for (const item of digest.memories_to_add ?? []) {

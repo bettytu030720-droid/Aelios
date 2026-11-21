@@ -12,6 +12,7 @@ import type { DreamOperationProposal } from "./provenance";
 import { speakerLabel, type DreamSpeakers } from "./speakers";
 
 export const CLEF_MODEL = "@cf/cloudflare/clef";
+export const CLEF_REVIEW_TIMEOUT_MS = 30_000;
 // 一条候选挂的原文通常就几条；clef 有 64K 上下文，这个量只在贴了大段文字时才会压。
 const CLEF_TRANSCRIPT_BUDGET_CHARS = 12_000;
 /** 写进 decision_note 的 judge[...] 前缀，审核页显示成「clef · 记住了」。 */
@@ -200,8 +201,10 @@ export async function runClef(
   return body && typeof body === "object" ? (body as { answers?: unknown }).answers : undefined;
 }
 
-export async function askClef(env: Env, input: ReturnType<typeof buildClefInput>, kind: JudgeKind): Promise<JudgeModelResult | null> {
-  return clefVerdict(kind, await runClef(env, input));
+export async function askClef(
+  env: Env, input: ReturnType<typeof buildClefInput>, kind: JudgeKind, signal?: AbortSignal
+): Promise<JudgeModelResult | null> {
+  return clefVerdict(kind, await runClef(env, input, CLEF_MODEL, signal));
 }
 
 export async function classifyDreamOperation(

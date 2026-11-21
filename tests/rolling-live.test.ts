@@ -131,7 +131,7 @@ test("D6 continuation extends the pending episode and targets its approved deriv
   assert.equal(sqlite.prepare("SELECT content FROM memories WHERE id='approved'").get()?.content, candidate.content);
 });
 
-test("rolling decisions use P1 ordering and leave an older late arrival in history", async (t) => {
+test("rolling decisions leave one pending confirmation and ignore older late arrivals", async (t) => {
   const { sqlite, db } = sqliteFixture(t);
   const env = { ...liveEnv(db), ROLLING_WINDOW_MESSAGES: "1", CURRENT_STATE_PROJECTION: "on" };
   const decide = async (id: string, value: string, at: string) => {
@@ -148,14 +148,17 @@ test("rolling decisions use P1 ordering and leave an older late arrival in histo
   await decide("direct_1", "SDK", `${SYNTHETIC_DAY}T08:00:00.000Z`);
   await decide("direct_2", "ACP", `${SYNTHETIC_DAY}T10:00:00.000Z`);
   await decide("late_old", "REST", `${SYNTHETIC_DAY}T09:00:00.000Z`);
-  assert.match(String(sqlite.prepare("SELECT content FROM memories WHERE status='active'").get()?.content), /ACP/);
-  assert.match(String(sqlite.prepare("SELECT content FROM memory_revisions WHERE reason='late_evidence'").get()?.content), /REST/);
-  assert.match(String(sqlite.prepare("SELECT value FROM processing_cursors WHERE name='rolling_state:default'").get()?.value), /user\/lab\/protocol/);
-  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM memory_candidates").get()?.n, 0);
+  const pending = sqlite.prepare("SELECT * FROM memory_candidates").all();
+  assert.equal(pending.length, 1);
+  assert.equal(pending[0].status, "pending");
+  assert.match(String(pending[0].content), /ACP/);
+  assert.deepEqual(JSON.parse(String(pending[0].source_message_ids)), ["direct_2"]);
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM memories").get()?.n, 0);
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM memory_revisions").get()?.n, 0);
   assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM memory_events WHERE event_type='rolling_draft'").get()?.n, 0);
   const windows = (await getRollingDreamStatus(env, "default")).recent_windows;
-  assert.equal(windows.reduce((n, window) => n + (window.writes?.memories ?? 0), 0), 2);
-  assert.equal(windows.reduce((n, window) => n + (window.writes?.revisions ?? 0), 0), 1);
+  assert.equal(windows.reduce((n, window) => n + (window.writes?.candidates ?? 0), 0), 2);
+  assert.equal(windows.reduce((n, window) => n + (window.writes?.memories ?? 0), 0), 0);
 });
 
 test("a failure after the live write resumes with the same proposal even after switching off", async (t) => {

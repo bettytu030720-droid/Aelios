@@ -18,11 +18,14 @@ import {
   updateMemoryCandidateStatus,
   type MemoryCandidateRow
 } from "../db/v2";
-import { isExplicitMemory, UNCLASSIFIED_DREAM_SOURCE } from "./provenance";
+import { isExplicitMemory, parseOrigin, UNCLASSIFIED_DREAM_SOURCE } from "./provenance";
 import type { Env, MessageRecord } from "../types";
 import { askClef, buildClefInput, CLEF_JUDGE_NAME, CLEF_MODEL, isClefReviewOn } from "./clefJudge";
 import { approveCandidate } from "./candidateApproval";
 import { reviewDreamOperation } from "./operationReview";
+import { isDecisionDayComplete, reviewDailyDecision } from "./dream/dailyDecisionReview";
+import { readDreamTimeZone } from "./dreamEnv";
+import { formatDateLabel } from "../utils/time";
 import { loadSpeakersForNamespace, type DreamSpeakers } from "./speakers";
 
 // listMemoryCandidates 本身按 confidence ASC 排序，正好是"先看最没把握的"，直接复用，
@@ -137,12 +140,16 @@ export async function runCandidateJudge(
   const model = CLEF_MODEL;
   const judgedBy = CLEF_JUDGE_NAME;
   const limit = readPositiveInt(options.limit ?? env.JUDGE_MAX_CANDIDATES, CLEF_DEFAULT_MAX_CANDIDATES, MAX_CANDIDATES_CAP);
+  const timeZone = readDreamTimeZone(env);
+  const today = formatDateLabel(new Date(), timeZone);
+  const settledDays = new Map<string, boolean>();
 
   // 导入的候选等本人在审核页点，自动审不碰 (也找不到 messages 里的原文，会被一律判没依据)。
   const candidates = await listMemoryCandidates(env.DB, {
     namespace,
     status: "pending",
     limit,
+    dailyDecisionsBefore: today,
     excludeSources: IMPORT_CANDIDATE_SOURCES
   });
   if (candidates.length === 0) {
@@ -165,6 +172,19 @@ export async function runCandidateJudge(
       continue;
     }
     try {
+      const origin = candidate.type === "decision" ? parseOrigin(candidate.provenance) : undefined;
+      const daily = origin?.daily_decision;
+      if (daily) {
+        let complete = settledDays.get(daily.date);
+        if (complete === undefined) {
+          complete = daily.date < today && await isDecisionDayComplete(env.DB, namespace, daily.date, timeZone);
+          settledDays.set(daily.date, complete);
+        }
+        if (!complete) {
+          kept++;
+          continue;
+        }
+      }
       if (await targetsExplicitWrite(env.DB, namespace, candidate)) {
         kept++;
         continue;
@@ -175,8 +195,11 @@ export async function runCandidateJudge(
         ? await getMessagesByIds(env.DB, { namespace, ids: sourceMessageIds })
         : [];
 
-      if (candidate.source === UNCLASSIFIED_DREAM_SOURCE) {
-        const result = await reviewDreamOperation(env, candidate, {
+      if (daily || candidate.source === UNCLASSIFIED_DREAM_SOURCE) {
+        const result = daily ? await reviewDailyDecision(env, candidate, {
+          decision: daily, operation: origin.proposed_operation, messages, sourceIds: sourceMessageIds,
+          speakers, judgePrefix: judgeNotePrefix(judgedBy)
+        }) : await reviewDreamOperation(env, candidate, {
           messages, sourceIds: sourceMessageIds, tags, speakers, judgePrefix: judgeNotePrefix(judgedBy)
         });
         if (result === "approved") approved += 1;
@@ -285,7 +308,8 @@ export async function undoJudgeDecision(
   candidate: MemoryCandidateRow
 ): Promise<UndoJudgeResult> {
   const note = parseJudgeNote(candidate.decision_note);
-  if (!note || !note.undoable || candidate.source === UNCLASSIFIED_DREAM_SOURCE) {
+  if (!note || !note.undoable || candidate.source === UNCLASSIFIED_DREAM_SOURCE ||
+    (candidate.status === "discarded" && parseOrigin(candidate.provenance)?.daily_decision)) {
     return { ok: false, httpStatus: 409, error: "只有还没撤回过的自动审核决定能撤回" };
   }
   const decisionNote = `undo: ${candidate.decision_note}`;

@@ -141,6 +141,7 @@ export const ADMIN_SCRIPT_MEMORIES = String.raw`    async reloadAll() {
       return candidate.source === 'dream_update' || Boolean(candidate.existing_content);
     },
     candidateKindLabel(candidate) {
+      if (candidate.provenance && candidate.provenance.daily_decision) return this.L('当日决定', 'Daily decision');
       if (candidate.source === 'dream_unclassified') return this.L('操作待判定', 'Action needs review');
       if (candidate.source === 'dream_delete') return this.L('建议移除', 'Suggested removal');
       if (this.candidateIsUpdate(candidate)) return this.L('更新已有', 'Updates existing');
@@ -148,6 +149,7 @@ export const ADMIN_SCRIPT_MEMORIES = String.raw`    async reloadAll() {
       return this.L('新记忆', 'New');
     },
     candidateKindClass(candidate) {
+      if (candidate.provenance && candidate.provenance.daily_decision) return 'chip-warn';
       if (candidate.source === 'dream_unclassified') return 'chip-warn';
       if (candidate.source === 'dream_delete') return 'chip-err';
       if (this.candidateIsUpdate(candidate)) return 'chip-warn';
@@ -178,6 +180,25 @@ export const ADMIN_SCRIPT_MEMORIES = String.raw`    async reloadAll() {
         : ['Clef 自动审核已关闭，可以看原话后记成新记忆或丢弃。', 'Clef auto-review is off. Check the sources, then keep it as a new memory or discard it.']);
       const op = candidate.provenance && candidate.provenance.proposed_operation;
       return (op ? this.L('模型给出的操作 ', 'Model operation ') + op.reported_op + ' · ' : '') + this.L(note[0], note[1]);
+    },
+    dailyDecisionHint(candidate) {
+      const origin = candidate.provenance || {};
+      const decision = origin.daily_decision;
+      if (!decision) return '';
+      const notes = {
+        daily_decision_ambiguous: ['两次不同的确认时间相同，等待核对。', 'Conflicting confirmations share a timestamp.'],
+        daily_decision_evidence_missing: ['找不到最后一次确认的原话。', 'The last confirmation is unavailable.'],
+        daily_decision_uncertain: ['Clef 未能确定如何保存这条决定。', 'Clef could not determine how to save this decision.'],
+        daily_decision_review_failed: ['Clef 审核失败，仍在待审。', 'Clef review failed. This decision is still pending.'],
+        daily_decision_review_timeout: ['Clef 审核超时，仍在待审。', 'Clef review timed out. This decision is still pending.'],
+        daily_decision_target_protected: ['已有记忆受保护，等待人工核对。', 'The current memory is protected. Review it manually.'],
+        daily_decision_write_failed: ['写入失败，仍在待审。', 'The write failed. This decision is still pending.']
+      };
+      const note = notes[candidate.decision_note] || (this.autoReview
+        ? ['当天整理完成后，审核最后一次确认。', 'Clef reviews the last confirmation after that day is processed.']
+        : ['自动审核已关闭，等待人工处理。', 'Auto-review is off. This decision is waiting for manual review.']);
+      return decision.date + ' · ' + this.L(note[0], note[1]) +
+        (origin.proposed_operation ? ' · ' + this.L('模型操作 ', 'Model operation ') + origin.proposed_operation.reported_op : '');
     },
     reviewTypes() {
       const seen = {};

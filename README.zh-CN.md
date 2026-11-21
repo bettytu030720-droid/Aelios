@@ -112,7 +112,7 @@ GitHub Fork 不会自动同步上游新提交。
 ## 它如何工作
 
 - **每轮自动召回** 每次人类发往主模型的对话，Aelios 并行检索 Vectorize（`memo-kb`）与 D1 全文索引，通过 Workers AI 重排模型（`@cf/baai/bge-reranker-base`）一次批量打分，并将高相关原文片段附加到本轮请求。热路径不调用生成式大模型。
-- **白天整理（Daytime Dream）** 默认开启（`ROLLING_DREAM`）。白天对话每累积一段（默认 10 条或 8,000 字），先由 `@cf/cloudflare/clef-flash` 判断是否有值得留存的新信息或决定，再由 `DREAM_MODEL`（默认 `workers-ai/@cf/zai-org/glm-4.7-flash`）生成待审候选或明确决定。
+- **白天整理（Daytime Dream）** 默认开启（`ROLLING_DREAM`）。白天对话每累积一段（默认 10 条或 8,000 字），先由 `@cf/cloudflare/clef-flash` 筛选，再由 `DREAM_MODEL`（默认 `workers-ai/@cf/zai-org/glm-4.7-flash`）生成待审候选。同一事项当天反复确认时共用一条待审候选，全天抽取完成后只审核最后一次明确确认。
 - **夜间整理与 Clef 自动审核** 每日定时任务（`10 20 * * *` UTC）处理白天尚未覆盖的剩余对话（含 3 天回看补跑），由 Cloudflare 的 `@cf/cloudflare/clef` 决策模型审核待审候选（`CLEF_AUTO_REVIEW` 默认开启，支持在面板逐条撤回），随后生成每日日记、周记与月记并执行留存清理。
 - **多空间读取** 每位助手写入一个 `namespace`，可通过 `readNamespaces` 最多同时召回 8 个空间（如读取历史归档库或共享知识库）。
 - **溯源与数据留存** 原始聊天默认保留 7 天（`MESSAGES_RETENTION_DAYS`）。长期未改写、未召回、未再提及的记忆 180 天后标记过期（置顶、身份与人格记忆永不过期），再过 30 天硬删除。首页垃圾桶按钮默认只清理该条垃圾原话，按撤回模式删除时仅沿明确引用链移除相关衍生记忆。
