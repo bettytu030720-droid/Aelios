@@ -23,7 +23,7 @@ export const ADMIN_TAB_REVIEW = `      <!-- ===== 待审 ===== -->
         <div x-show="reviewTab === 'daily'" class="flex flex-col gap-4">
           <div class="banner" :class="autoReview === 'clef' ? 'banner-ok' : ''">
             <span x-show="autoReview === 'clef'">${I.check}</span><span x-show="autoReview !== 'clef'">${I.info}</span>
-            <span class="min-w-0 flex-1" x-text="autoReview === 'clef' ? L('自动审核已开启：今晚整理后会自动处理剩下的，不必一条条点。', 'Auto-review is on. Whatever’s left gets handled tonight, so there’s no need to go one by one.') : L('自动审核关着，这些等你确认；也可以让助手用 MCP 的 memory_review 自己审。', 'Auto-review is off, so these wait for you. Your assistant can also review them through MCP memory_review.')"></span>
+            <span class="min-w-0 flex-1" x-text="autoReview === 'clef' ? L('今晚整理后 Clef 会审核候选。需要继续等待的提案会显示原因。', 'Clef reviews proposals after Nightly Dream. Proposals that stay pending show a reason.') : L('自动审核已关闭。普通候选可在这里审批，也可由助手通过 MCP 审核。', 'Auto-review is off. You or your assistant can review ordinary proposals here or through MCP.')"></span>
             <button type="button" @click="go('settings')" class="link">${t("改设置", "Change")}</button>
           </div>
 

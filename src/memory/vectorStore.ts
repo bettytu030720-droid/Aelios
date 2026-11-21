@@ -6,6 +6,7 @@ import { createEmbedding } from "./embedding";
 import { deleteFtsRow, upsertMemoryFts } from "./fts";
 import { clampMemoryType } from "./canonicalTypes";
 import { deleteTriggersForMemory, saveMemoryRevision } from "../db/v2";
+import type { CandidateApprovalWrite } from "../db/v2/operationReview";
 import { deleteTriggerVectors } from "./triggers/store";
 
 type MetadataMap = Record<string, unknown>;
@@ -203,7 +204,7 @@ function toMemoryRecord(input: Required<VectorMemoryInput> & { id: string; vecto
   };
 }
 
-async function insertMemoryRecord(env: Env, record: MemoryRecord): Promise<void> {
+async function insertMemoryRecord(env: Env, record: MemoryRecord, approval?: CandidateApprovalWrite): Promise<void> {
   const memoryInsert = env.DB
     .prepare(
       `INSERT INTO memories (
@@ -230,22 +231,19 @@ async function insertMemoryRecord(env: Env, record: MemoryRecord): Promise<void>
       record.expires_at, record.provenance ?? null
     );
 
-  if (!isLifecycleEnabled(env)) {
-    await memoryInsert.run();
-    await upsertMemoryFts(env.DB, { namespace: record.namespace, memoryId: record.id, content: record.content });
-    return;
-  }
-
-  const lifecycleInsert = env.DB
+  const lifecycleInsert = isLifecycleEnabled(env) ? env.DB
     .prepare(
       `INSERT OR IGNORE INTO memory_lifecycle (
         memory_id, namespace, fact_key, supersedes_id, superseded_by_id,
         review_reason, valid_as_of, last_seen_at, seen_count, last_injected_at
       ) VALUES (?, ?, NULL, NULL, NULL, NULL, NULL, ?, 0, NULL)`
     )
-    .bind(record.id, record.namespace, record.created_at);
+    .bind(record.id, record.namespace, record.created_at) : null;
 
-  await env.DB.batch([memoryInsert, lifecycleInsert]);
+  if (approval) {
+    await env.DB.batch([approval.guard, memoryInsert, ...(lifecycleInsert ? [lifecycleInsert] : []), approval.complete(record.id)]);
+  } else if (lifecycleInsert) await env.DB.batch([memoryInsert, lifecycleInsert]);
+  else await memoryInsert.run();
   await upsertMemoryFts(env.DB, { namespace: record.namespace, memoryId: record.id, content: record.content });
 }
 
@@ -341,7 +339,11 @@ async function markMemoryRecordDeleted(env: Env, input: { namespace: string; id:
   await deleteFtsRow(env.DB, "memory_fts", "memory_id", input.id);
 }
 
-export async function createVectorMemory(env: Env, input: VectorMemoryInput & { provenance?: import("./provenance").MemoryProvenance }): Promise<MemoryApiRecord> {
+export async function createVectorMemory(
+  env: Env,
+  input: VectorMemoryInput & { provenance?: import("./provenance").MemoryProvenance },
+  approval?: CandidateApprovalWrite
+): Promise<MemoryApiRecord> {
   const content = input.content.trim();
   if (!content) throw new Error("content is required");
 
@@ -371,7 +373,7 @@ export async function createVectorMemory(env: Env, input: VectorMemoryInput & { 
 
   const record = toMemoryRecord(normalized);
   record.provenance = JSON.stringify(input.provenance) ?? null;
-  await insertMemoryRecord(env, record);
+  await insertMemoryRecord(env, record, approval);
 
   try {
     await requireVectorize(env).upsert([

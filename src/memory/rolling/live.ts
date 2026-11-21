@@ -5,7 +5,7 @@ import { applyScopedDecision } from "../currentState/apply";
 import { isCurrentStateEnabled } from "../currentState/projection";
 import { decisionKey } from "../currentState/scopeKey";
 import { readDreamTimeZone } from "../dreamEnv";
-import { dreamOrigin, type MemoryProvenance, parseOrigin } from "../provenance";
+import { dreamOrigin, type MemoryProvenance, parseOrigin, UNCLASSIFIED_DREAM_SOURCE } from "../provenance";
 import type { GroundedWindowEvent } from "./apply";
 import { assertRollingLease, finishRollingWindow, loadRollingDrafts, type RollingDraft } from "./checkpoint";
 import { episodeMemory, extendDreamCandidate, findEpisodeCandidate, writableTarget } from "./episodes";
@@ -49,7 +49,8 @@ async function applyEvent(
 
   const latest = Math.max(...rows.filter(row => cited.includes(row.id)).map(row => Date.parse(row.created_at)));
   const date = Number.isFinite(latest) ? formatDateLabel(new Date(latest), readDreamTimeZone(env)) : undefined;
-  const episode = date && event.episode_key ? { episode_key: event.episode_key, episode_date: date } : {};
+  const episode = date && event.episode_key && event.op !== "unclassified"
+    ? { episode_key: event.episode_key, episode_date: date } : {};
   let target = event.target_memory_id && event.op === "update" ? await writableTarget(db, namespace, event.target_memory_id) : null;
   if (event.op === "update" && !target) return null;
   const originFor = (targetId?: string): MemoryProvenance => ({
@@ -58,7 +59,12 @@ async function applyEvent(
     recording_actor: "rolling_dream",
     rolling_window_key: claim.key,
     attributed_actor: event.attributed_role ?? "unknown",
-    evidence_relation: "paraphrase"
+    evidence_relation: "paraphrase",
+    ...(event.op === "unclassified" && event.reported_op ? { proposed_operation: {
+      reported_op: event.reported_op,
+      ...(event.target_memory_id && event.target_revision
+        ? { target: { id: event.target_memory_id, revision: event.target_revision } } : {})
+    } } : {})
   });
   if (date && event.episode_key && event.op === "continuation") {
     const prior = await findEpisodeCandidate(db, namespace, event.episode_key, date);
@@ -84,7 +90,7 @@ async function applyEvent(
   const saved = await createMemoryCandidate(db, {
     namespace, type: candidate.type, content: candidate.content, confidence: candidate.confidence, importance: candidate.importance,
     sourceMessageIds: cited, provenance: originFor(target?.id),
-    source: target ? "dream_update" : "dream_extract",
+    source: event.op === "unclassified" ? UNCLASSIFIED_DREAM_SOURCE : target ? "dream_update" : "dream_extract",
     targetMemoryId: target?.id ?? null
   }, guard);
   return {
@@ -110,6 +116,7 @@ export async function commitRollingDrafts(env: Env, claim: RollingClaim): Promis
       const result = await applyEvent(env, claim, draft, event);
       if (!result) continue;
       if (result.write) writtenIds[result.write.kind].add(result.write.id);
+      if (event.op === "unclassified") continue;
       for (const id of event.source_message_ids) accepted.add(id);
       if (result.change) changes.push(result.change);
       if (event.episode_key && result.candidateId) episodeCandidates.set(event.episode_key, result.candidateId);

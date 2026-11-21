@@ -8,7 +8,8 @@ import { createMemory, getMemoryById } from "../../db/memories";
 import { getMessagesByIds, retainedMessageIds } from "../../db/messages";
 import { findSimilarActiveMemory } from "../../memory/dedupGate";
 import { approvedCandidateMemory } from "../../db/v2/candidates";
-import { reviewedOrigin, type MemoryProvenance } from "../../memory/provenance";
+import { settleOperationCandidate } from "../../db/v2/operationReview";
+import { reviewedOrigin, type MemoryProvenance, UNCLASSIFIED_DREAM_SOURCE } from "../../memory/provenance";
 import { clampMemoryType } from "../../memory/canonicalTypes";
 import {
   archiveMemory,
@@ -210,6 +211,25 @@ export async function handleMemoryCandidates(request: Request, env: Env): Promis
         ...(result.restoredId ? { restored_id: result.restoredId } : {})
       }
     });
+  }
+
+  if (candidate.source === UNCLASSIFIED_DREAM_SOURCE || provenance.proposed_operation) {
+    if (action === "discard" && candidate.source === UNCLASSIFIED_DREAM_SOURCE && candidate.status === "pending") {
+      const result = await settleOperationCandidate(env.DB, candidate, {
+        status: "discarded", note: readString(body.decision_note) || "discarded"
+      }).run();
+      if (!result.meta.changes) return openAiError("Candidate changed during review. Reload and try again.", 409);
+      const updated = await getMemoryCandidateById(env.DB, { namespace, id });
+      return json({ data: updated ? toCandidateApiRecord(updated) : null });
+    }
+    if (action === "approve" && candidate.status === "approved") {
+      return json({ data: { candidate: toCandidateApiRecord(candidate), memory_id: candidate.target_memory_id } });
+    }
+    if (["approve", "discard", "merge", "supersede"].includes(action ?? "")) {
+      return openAiError(candidate.status === "pending"
+        ? "Clef must classify this Dream proposal before it can change a memory."
+        : "This Dream proposal has already been reviewed.", 409);
+    }
   }
 
   if (action === "approve") {

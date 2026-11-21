@@ -6,6 +6,7 @@ import { decisionKey } from "../currentState/scopeKey";
 
 export interface GroundedWindowEvent extends WindowEvent {
   source_message_ids: string[];
+  target_revision?: string;
   reason?: "explicit_write" | "protected_target";
 }
 
@@ -20,7 +21,8 @@ function groundedStateDelta(
   events: GroundedWindowEvent[]
 ): StateDelta {
   const sources = new Map(packet.messages.map(message => [message.id, message.message_id ?? message.id]));
-  const grounded = new Set(events.filter(event => event.op !== "no_op").flatMap(event => event.evidence_ids));
+  const applicable = events.filter(event => event.op !== "no_op" && event.op !== "unclassified");
+  const grounded = new Set(applicable.flatMap(event => event.evidence_ids));
   const cited = (ids: string[]) => !ids.length || ids.some(id => !grounded.has(id))
     ? []
     : [...new Set(ids.map(id => sources.get(id) ?? id))];
@@ -28,14 +30,15 @@ function groundedStateDelta(
   return {
     episodes: delta.episodes?.flatMap((episode) => {
       const evidenceIds = cited(episode.evidence_ids);
-      if (!evidenceIds.length || !events.some(event => event.op !== "no_op" && event.episode_key === episode.key)) return [];
+      if (!evidenceIds.length || !applicable.some(event => event.episode_key === episode.key)) return [];
       return [{ key: episode.key, label: episode.label, last_seq: packet.window.to_seq, evidence_ids: evidenceIds }];
     }),
     open: delta.open?.flatMap((item) => {
       const evidenceIds = cited(item.evidence_ids);
       return evidenceIds.length ? [{ ...item, evidence_ids: evidenceIds }] : [];
     }),
-    close: delta.close?.filter((key) => topics.has(key)),
+    // Close entries carry no citations, so a mixed proposal cannot tie them to a known action.
+    close: events.some(event => event.op === "unclassified") ? [] : delta.close?.filter((key) => topics.has(key)),
   };
 }
 
@@ -51,6 +54,7 @@ export function groundWindowProposal(
     const evidenceIds = [...new Set(event.evidence_ids)];
     if (!evidenceIds.length || evidenceIds.some((id) => !messages.has(id)) || !event.attributed_role || !event.evidence_quote) return [];
     const target = event.target_memory_id ? recalled.get(event.target_memory_id) : undefined;
+    const needsReview = event.op === "unclassified";
     if (event.op === "update" && !target) return [];
     const evidence = evidenceIds.flatMap((id) => {
       const message = messages.get(id);
@@ -75,17 +79,18 @@ export function groundWindowProposal(
       (content && comparable(item.content) === content)
       || (item.source_message_ids.some(id => sourceIds.includes(id)) && item.content.includes(quote))
     );
-    const decision = event.type === "decision" && event.attributed_role === "user" && event.decision && decisionKey(event.decision.scope_key)
+    const decision = !needsReview && event.type === "decision" && event.attributed_role === "user" && event.decision && decisionKey(event.decision.scope_key)
       ? { ...event.decision, state_of: event.decision.state_of.filter(id => recalled.has(id)) }
       : undefined;
     const reason = duplicate ? "explicit_write"
-      : target && (target.protected || target.status !== "active" || target.version_status === "superseded") && !decision
+      : !needsReview && target && (target.protected || target.status !== "active" || target.version_status === "superseded") && !decision
         ? "protected_target" : undefined;
     return [{
       ...event,
       op: reason ? "no_op" : event.op,
       reason,
-      target_memory_id: event.op === "update" ? target?.id : undefined,
+      target_memory_id: event.op === "update" || needsReview ? target?.id : undefined,
+      target_revision: needsReview ? target?.revision : undefined,
       source_message_ids: sourceIds,
       evidence_ids: checked.source_message_ids,
       decision,

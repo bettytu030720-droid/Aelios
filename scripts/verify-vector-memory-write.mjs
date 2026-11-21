@@ -86,7 +86,7 @@ assert.match(source, /await env\.DB\.batch\(\[memoryInsert, lifecycleInsert\]\);
 assert.match(source, /UPDATE memories SET\s+type = \?, content = \?, summary = \?, importance = \?, confidence = \?, status = \?,/s);
 assert.match(source, /UPDATE memories SET status = 'deleted', updated_at = \? WHERE namespace = \? AND id = \?/);
 
-const d1Insert = indexOfOrThrow(createBody, "await insertMemoryRecord(env, record);");
+const d1Insert = indexOfOrThrow(createBody, "await insertMemoryRecord(env, record, approval);");
 const vectorUpsert = indexOfOrThrow(createBody, "await requireVectorize(env).upsert");
 assert.ok(d1Insert < vectorUpsert, "createVectorMemory must write D1 before Vectorize");
 

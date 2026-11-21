@@ -50,7 +50,8 @@ export async function createMemoryCandidate(
   if (observed) {
     const refs = input.sourceMessageIds?.length ? input.sourceMessageIds : input.provenance?.inputs;
     const target = input.source === "dream_extract" ? null : input.targetMemoryId;
-    const signature = [input.namespace, input.source, input.content, input.factKey, target, [...new Set(refs)].sort()];
+    const op = input.provenance?.proposed_operation;
+    const signature = [input.namespace, input.source, input.content, input.factKey, target, [...new Set(refs)].sort(), ...(op ? [op] : [])];
     id = `cand_${(await sha256Hex(JSON.stringify(signature))).slice(0, 32)}`;
   }
   const dup = observed ? await getMemoryCandidateById(db, { namespace: input.namespace, id }) : input.targetMemoryId

@@ -7,13 +7,15 @@ import {
   listMemoryCandidates,
   updateMemoryCandidateStatus
 } from "../../../db/v2";
+import { settleOperationCandidate } from "../../../db/v2/operationReview";
+import { approveCandidate } from "../../../memory/candidateApproval";
 import {
-  approveCandidate,
   judgeKindFor,
   judgeNotePrefix,
   loadOldMemoryForCandidate,
   parseJsonArray
 } from "../../../memory/candidateJudge";
+import { parseOrigin, UNCLASSIFIED_DREAM_SOURCE } from "../../../memory/provenance";
 import { formatSpeakerTranscript, loadSpeakersForNamespace } from "../../../memory/speakers";
 import type { Env, KeyProfile } from "../../../types";
 import { readPositiveInt, readString, resolveNamespace } from "../../../utils/request";
@@ -43,7 +45,9 @@ export async function handleReviewTool(
       const messages = ids.length > 0 ? await getMessagesByIds(env.DB, { namespace, ids }) : [];
       data.push({
         id: candidate.id,
-        action: judgeKindFor(candidate.source),
+        action: candidate.source === UNCLASSIFIED_DREAM_SOURCE ? "unclassified" : judgeKindFor(candidate.source),
+        ...(candidate.source === UNCLASSIFIED_DREAM_SOURCE
+          ? { reported_op: parseOrigin(candidate.provenance)?.proposed_operation?.reported_op } : {}),
         type: candidate.type,
         content: candidate.content,
         fact_key: candidate.fact_key,
@@ -70,6 +74,14 @@ export async function handleReviewTool(
     }
     if (isImportCandidateSource(candidate.source)) {
       return toolError("This candidate came from an import; the person reviews imports themselves on the review page");
+    }
+    if (candidate.source === UNCLASSIFIED_DREAM_SOURCE) {
+      if (decision === "approve") return toolError("Clef must classify this Dream proposal before it can change a memory.");
+      const result = await settleOperationCandidate(env.DB, candidate, {
+        status: "discarded", note: readString(args.reason)?.slice(0, 300) || "discarded"
+      }).run();
+      return result.meta.changes ? textToolResult({ data: { id, status: "discarded", memory_id: null } })
+        : toolError("Candidate changed during review. List candidates again.");
     }
     const speakers = await loadSpeakersForNamespace(env, namespace);
     const reviewer = (speakers?.assistantName ?? "").replace(/[\]\r\n]/g, "").trim().slice(0, 32) || "助手";

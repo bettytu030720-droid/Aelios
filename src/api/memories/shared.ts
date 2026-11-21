@@ -2,6 +2,7 @@ import type { createMemory } from "../../db/memories";
 import { deleteMemoryEmbedding, upsertMemoryEmbedding } from "../../memory/embedding";
 import type { MemoryCandidateRow } from "../../db/v2";
 import { parseJudgeNote } from "../../memory/candidateJudge";
+import { UNCLASSIFIED_DREAM_SOURCE } from "../../memory/provenance";
 import type { Env } from "../../types";
 
 export async function syncMemoryEmbeddingBestEffort(env: Env, memory: Awaited<ReturnType<typeof createMemory>>): Promise<void> {
@@ -73,7 +74,7 @@ export function toJudgeDecisionRecord(row: MemoryCandidateRow) {
     judged_by: note?.judgedBy ?? null,
     reason: note?.reason ?? row.decision_note,
     undone: note?.undone ?? false,
-    undoable: note?.undoable ?? false
+    undoable: row.source !== UNCLASSIFIED_DREAM_SOURCE && (note?.undoable ?? false)
   };
 }
 

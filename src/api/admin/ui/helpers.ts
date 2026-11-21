@@ -77,7 +77,7 @@ export const SETTING_ROW = `<div class="set-row" :class="item.under ? 'set-sub' 
 
 // 待审里的一张卡，日常和导入两栏共用；导入的没有勾选框，批量走 clef 那两个按钮。
 export const CANDIDATE_CARD = `<article class="panel cand">
-              <input type="checkbox" x-show="!candidate.import_id" class="cand-check" :checked="!!reviewSelected[candidate.id]" @change="reviewToggle(candidate.id)" :aria-label="L('选择这条', 'Select this one')">
+              <input type="checkbox" x-show="!candidate.import_id && candidate.source !== 'dream_unclassified'" class="cand-check" :checked="!!reviewSelected[candidate.id]" @change="reviewToggle(candidate.id)" :aria-label="L('选择这条', 'Select this one')">
               <div class="cand-body">
                 <div class="flex flex-wrap items-center gap-2">
                   <span class="chip" :class="typeChipClass(candidate.type)" x-text="typeLabel(candidate.type)"></span>
@@ -96,6 +96,7 @@ export const CANDIDATE_CARD = `<article class="panel cand">
                   </div>
                 </template>
                 <p x-show="!candidate.editing && !candidate.existing_content" class="cand-text" x-text="candidate.content"></p>
+                <p x-show="candidate.source === 'dream_unclassified'" class="cand-note" x-text="operationReviewHint(candidate)"></p>
                 <p x-show="candidate.source === 'dream_delete'" class="cand-note">
                   <span x-text="L('原因：', 'Why: ') + (candidate.decision_note || L('整理时觉得不再成立', 'no longer seemed true'))"></span>
                   <span class="mono" x-text="candidate.target_memory_id ? ' · ' + candidate.target_memory_id : ''"></span>
@@ -131,9 +132,9 @@ export const CANDIDATE_CARD = `<article class="panel cand">
                 </div>
               </div>
               <div class="cand-actions">
-                <button type="button" @click="approveCandidate(candidate)" class="btn btn-primary btn-sm">${I.check}<span x-text="candidate.editing ? L('改好记住', 'Save & remember') : candidateApproveLabel(candidate)"></span></button>
+                <button type="button" x-show="candidate.source !== 'dream_unclassified'" @click="approveCandidate(candidate)" class="btn btn-primary btn-sm">${I.check}<span x-text="candidate.editing ? L('改好记住', 'Save & remember') : candidateApproveLabel(candidate)"></span></button>
                 <button type="button" @click="discardCandidate(candidate)" class="btn btn-sm" x-text="candidateDiscardLabel(candidate)"></button>
-                <div class="relative">
+                <div x-show="candidate.source !== 'dream_unclassified'" class="relative">
                   <button type="button" @click="candidate.moreOpen = !candidate.moreOpen" class="btn btn-sm btn-icon-sm" :aria-expanded="candidate.moreOpen ? 'true' : 'false'" :aria-label="L('更多操作', 'More actions')">${I.more}</button>
                   <div x-show="candidate.moreOpen" @click.outside="candidate.moreOpen = false" class="menu">
                     <button type="button" @click="toggleCandidateEdit(candidate); candidate.moreOpen = false" x-text="candidate.editing ? L('取消编辑', 'Cancel editing') : L('编辑后记住', 'Edit, then remember')"></button>

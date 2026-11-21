@@ -141,12 +141,14 @@ export const ADMIN_SCRIPT_MEMORIES = String.raw`    async reloadAll() {
       return candidate.source === 'dream_update' || Boolean(candidate.existing_content);
     },
     candidateKindLabel(candidate) {
+      if (candidate.source === 'dream_unclassified') return this.L('操作待判定', 'Action needs review');
       if (candidate.source === 'dream_delete') return this.L('建议移除', 'Suggested removal');
       if (this.candidateIsUpdate(candidate)) return this.L('更新已有', 'Updates existing');
       if (candidate.import_id) return candidate.source === 'import_chat' ? this.L('来自聊天记录', 'From chat history') : this.L('来自清单', 'From a list');
       return this.L('新记忆', 'New');
     },
     candidateKindClass(candidate) {
+      if (candidate.source === 'dream_unclassified') return 'chip-warn';
       if (candidate.source === 'dream_delete') return 'chip-err';
       if (this.candidateIsUpdate(candidate)) return 'chip-warn';
       return 'chip-violet';
@@ -160,6 +162,21 @@ export const ADMIN_SCRIPT_MEMORIES = String.raw`    async reloadAll() {
       if (candidate.source === 'dream_delete') return this.L('保留', 'Keep');
       if (this.candidateIsUpdate(candidate)) return this.L('保持原样', 'Keep old');
       return this.L('丢弃', 'Discard');
+    },
+    operationReviewHint(candidate) {
+      const notes = {
+        operation_uncertain: ['Clef 未能从原话确定该怎么处理。', 'Clef could not determine an action from the cited messages.'],
+        operation_clef_failed: ['Clef 评审失败，候选仍在等待。', 'Clef review failed. The proposal is still pending.'],
+        operation_clef_timeout: ['Clef 评审超时，候选仍在等待。', 'Clef review timed out. The proposal is still pending.'],
+        operation_evidence_missing: ['原话已不完整，等待处理。', 'Some or all cited messages are missing.'],
+        operation_target_unavailable: ['要变更的记忆不存在、已变化或受保护。', 'The target memory is missing, changed, or protected.'],
+        operation_write_failed: ['评审后写入失败，候选仍在等待。', 'The write after review failed. The proposal is still pending.']
+      };
+      const note = notes[candidate.decision_note] || (this.autoReview
+        ? ['等夜间 Clef 审核判定。', 'Waiting for the nightly Clef review.']
+        : ['Clef 自动审核已关闭，可以查看原话或丢弃提案。', 'Clef auto-review is off. You can inspect the sources or discard the proposal.']);
+      const op = candidate.provenance && candidate.provenance.proposed_operation;
+      return (op ? this.L('模型给出的操作 ', 'Model operation ') + op.reported_op + ' · ' : '') + this.L(note[0], note[1]);
     },
     reviewTypes() {
       const seen = {};
@@ -177,21 +194,24 @@ export const ADMIN_SCRIPT_MEMORIES = String.raw`    async reloadAll() {
       else next[id] = true;
       this.reviewSelected = next;
     },
+    reviewSelectable() {
+      return this.reviewList().filter(function(item) { return item.source !== 'dream_unclassified'; });
+    },
     reviewSelectedItems() {
       const selected = this.reviewSelected;
-      return this.reviewList().filter(function(item) { return selected[item.id]; });
+      return this.reviewSelectable().filter(function(item) { return selected[item.id]; });
     },
     reviewSelectedCount() {
       return this.reviewSelectedItems().length;
     },
     reviewAllSelected() {
-      const list = this.reviewList();
+      const list = this.reviewSelectable();
       const selected = this.reviewSelected;
       return list.length > 0 && list.every(function(item) { return selected[item.id]; });
     },
     reviewSelectAll(on) {
       const next = {};
-      if (on) this.reviewList().forEach(function(item) { next[item.id] = true; });
+      if (on) this.reviewSelectable().forEach(function(item) { next[item.id] = true; });
       this.reviewSelected = next;
     },
     // 勾选的几条一条条走跟单个按钮一样的接口，失败的留在队列里。
@@ -235,6 +255,7 @@ export const ADMIN_SCRIPT_MEMORIES = String.raw`    async reloadAll() {
       }
     },
     judgeDecisionLabel(item) {
+      if (item.source === 'dream_unclassified') return (item.judged_by || 'Clef') + ' · ' + this.L('跳过了', 'skipped');
       const archive = item.source === 'dream_delete';
       if (item.undone) {
         if (archive) return item.status === 'approved' ? this.L('撤回后归档', 'Undone, archived') : this.L('撤回后放回', 'Undone, restored');

@@ -415,7 +415,8 @@ export function getTools(options: ToolListOptions): Array<Record<string, unknown
       description:
         "List memory candidates waiting for review in this space: proposals the nightly dream pass drew from " +
         "conversations to add a memory, update an existing one (old_memory holds the current text), or archive one. " +
-        "When Clef auto-review is enabled, candidates are decided automatically overnight; when it is off, they wait here for the person or model to review. " +
+        "When Clef auto-review is enabled, candidates are reviewed overnight; when it is off, they wait here for the person or model to review. " +
+        "An unclassified action needs Clef to resolve it before approval. " +
         "transcript holds the conversation lines it came from so you can verify each proposal against what was actually " +
         "said, then decide with memory_review. Returns { data: [...], pending }.",
       annotations: { title: "List memory candidates", ...READ_ONLY },
@@ -432,7 +433,7 @@ export function getTools(options: ToolListOptions): Array<Record<string, unknown
       description:
         "Decide one candidate from memory_candidates. approve applies the proposal (adding the memory, replacing the old " +
         "version while keeping its history, or archiving the target). discard drops the proposal and leaves memories " +
-        "unchanged. Candidates blocked because the memory space is full cannot be approved here. " +
+        "unchanged. Unclassified proposals can be discarded here and wait for Clef if kept. Candidates blocked because the memory space is full cannot be approved here. " +
         "Write reason as one clear sentence in your own voice; the person sees it on the review page, where " +
         "any decision can be undone. Returns { data: { id, status, memory_id } }.",
       annotations: {

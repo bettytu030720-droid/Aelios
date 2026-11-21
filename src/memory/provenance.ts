@@ -1,5 +1,12 @@
 import type { KeyProfile } from "../types";
 
+export const UNCLASSIFIED_DREAM_SOURCE = "dream_unclassified";
+
+export interface DreamOperationProposal {
+  reported_op: string;
+  target?: { id: string; revision: string };
+}
+
 // Only the writing entry point constructs this object. The public source/author
 // strings can both be supplied by a client and cannot establish identity.
 export interface MemoryProvenance {
@@ -18,6 +25,7 @@ export interface MemoryProvenance {
   episode_key?: string;
   episode_date?: string;
   rolling_window_key?: string;
+  proposed_operation?: DreamOperationProposal;
 }
 
 export function explicitWrite(
@@ -93,10 +101,15 @@ export function reviewedOrigin(
           evidence_relation: "unknown",
           completeness: "unknown",
         } as const));
+  const target = candidate.source === "dream_update" && candidate.target_memory_id
+    ? `memory:${candidate.target_memory_id}` : null;
   return {
     ...origin,
-    ...(candidate.source === "dream_update" && candidate.target_memory_id
-      ? {inputs:[...new Set([...("inputs" in origin ? origin.inputs ?? [] : []), `memory:${candidate.target_memory_id}`])]} : {}),
+    ...(target ? {
+      inputs: [...new Set([...("inputs" in origin ? origin.inputs ?? [] : []), target])],
+      ...("context_refs" in origin && origin.context_refs
+        ? { context_refs: origin.context_refs.filter(ref => ref !== target) } : {})
+    } : {}),
     recording_actor: reviewer,
     candidate_id: candidate.id,
     ...(edited ? ({ attributed_actor: "unknown", evidence_relation: "interpretation" } as const) : {}),

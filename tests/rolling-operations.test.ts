@@ -24,10 +24,10 @@ function geminiEnv(db: D1Database, respond: (query: OpenAIChatRequest) => Respon
   };
 }
 
-function modelResponse(op: string) {
+function modelResponse(op: string, content = "The lab got a new telescope.") {
   return Response.json({ choices: [{ finish_reason: "stop", message: {
     content: JSON.stringify({ events: [{
-      op, type: "event", content: "The lab got a new telescope.", attributed_role: "user",
+      op, type: "event", content, attributed_role: "user",
       evidence_ids: ["telescope"], evidence_quote: "The lab got a new telescope."
     }], state_delta: {} })
   } }] });
@@ -52,11 +52,24 @@ test("Gemini's observed add operation creates a grounded candidate and reports a
   assert.equal(window.message_count, 1);
 });
 
-test("an unsupported operation leaves the retained chat to nightly Dream after one call", async (t) => {
+test("Gemini can send a new operation name without another daytime inference", async (t) => {
   const { sqlite, db } = sqliteFixture(t);
   insertLine(sqlite, "telescope", "The lab got a new telescope.");
   let calls = 0;
-  const env = geminiEnv(db, () => { calls += 1; return modelResponse("delete"); });
+  const env = geminiEnv(db, () => { calls += 1; return modelResponse("carry_forward"); });
+  assert.equal((await runRollingWindow(env, "default", { triage })).extracted, true);
+  assert.equal(calls, 1);
+  const row = sqlite.prepare("SELECT source, provenance, status FROM memory_candidates").get();
+  assert.equal(row?.source, "dream_unclassified");
+  assert.equal(row?.status, "pending");
+  assert.equal(JSON.parse(String(row?.provenance)).proposed_operation.reported_op, "carry_forward");
+});
+
+test("an unsupported operation without a usable candidate leaves the chat to nightly Dream", async (t) => {
+  const { sqlite, db } = sqliteFixture(t);
+  insertLine(sqlite, "telescope", "The lab got a new telescope.");
+  let calls = 0;
+  const env = geminiEnv(db, () => { calls += 1; return modelResponse("delete", ""); });
   const failure = await runRollingWindow(env, "default", { triage });
   assert.equal(failure.reason, "extractor_invalid_operation");
   assert.equal(failure.retryAfter, undefined);
