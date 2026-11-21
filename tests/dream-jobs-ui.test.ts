@@ -146,6 +146,47 @@ test("status read failure stops polling and visibly warns that completion is unc
   assert.equal(timers.size, 0);
 });
 
+test("Daytime Dream refreshes only the lightweight status and stops once the lease is stale", async () => {
+  const { app, timers } = panel();
+  const current = { window_key: "rolling_synthetic", model: "synthetic-model", phase: "extraction", state: "running" };
+  app.dreamStatus = { rolling: { backlog: 10, current_window: current } };
+  app.request = async (path: string) => {
+    assert.match(path, /^\/v1\/dream\/status\?view=rolling&namespace=synthetic-space$/);
+    return { data: { rolling: { current_window: { ...current, state: "stalled" } } } };
+  };
+  app.scheduleDreamPolling();
+  assert.equal(timers.size, 1);
+  await app.loadRollingStatus();
+  assert.equal(app.rollingStatus().backlog, 10);
+  assert.equal(app.rollingCurrentLabel(app.rollingStatus().current_window), "可能卡住");
+  assert.equal(timers.size, 0);
+});
+
+test("the home page shows recent writes and a prior failure even if the journal request fails", async () => {
+  const { app } = panel();
+  app.page = "today";
+  app.apiKey = "synthetic";
+  const complete = { status: "completed", extractor_calls: 1, writes: { candidates: 2, memories: 1, revisions: 0 } };
+  const failed = { status: "failed", error: "extractor_invalid_operation", finished_at: new Date().toISOString() };
+  app.request = async (path: string) => {
+    if (path.includes("/admin/diary")) throw new Error("journal unavailable");
+    if (path.startsWith("/v1/dream/status")) {
+      return { data: { rolling: { on: true, queue_available: true, recent_windows: [complete], failed_windows: [failed] } } };
+    }
+    return { data: {} };
+  };
+  await app.loadHome();
+  assert.match(app.homeRollingSummary(), /待审候选 2 条 · 入库记忆 1 条/);
+  assert.match(app.homeRollingWarning(), /模型返回了未知的记忆操作/);
+  assert.match(ADMIN_HTML, /id="daytime-dream"/);
+  assert.match(ADMIN_HTML, /原话已留给夜间抽取/);
+
+  app.request = async () => { throw new Error("status unavailable"); };
+  await app.loadHome();
+  assert.equal(app.homeRollingSummary(), "");
+  assert.equal(app.homeRollingWarning(), "白天整理状态读取失败。");
+});
+
 test("a stale task offers an explicit close-out that confirms, posts the run id, then refreshes and unblocks submission", async () => {
   assert.match(ADMIN_HTML, /核查后标记为已中断/);
   const { app, notices } = panel();

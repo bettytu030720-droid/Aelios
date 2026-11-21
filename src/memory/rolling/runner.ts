@@ -1,12 +1,14 @@
 import type { Env, MessageRecord } from "../../types";
+import { nowIso } from "../../utils/time";
 import { isExplicitDecisionText } from "../currentState/decisionCues";
-import { DreamModelTimeoutError } from "../dream/modelCall";
+import { DreamModelTimeoutError, withDreamModelDeadline } from "../dream/modelCall";
 import { groundWindowProposal } from "./apply";
 import { finishRollingWindow, releaseInterruptedWindow, saveRollingDraft, saveRollingProgress } from "./checkpoint";
 import { dreamWindowExtractor, type WindowExtractor } from "./extract";
 import { claimRollingWindow, type RollingClaim } from "./inbox";
 import { commitRollingDrafts } from "./live";
 import { rollingExplicitWrites, rollingRecallHits, type RollingPacket } from "./payload";
+import { type RollingFailure, rollingPhase, RollingStepError } from "./progress";
 import { isDaytimeDreamOn, rollingSettings } from "./settings";
 import { loadRollingState } from "./state";
 import { needsExtraction, type WindowTriage } from "./triage";
@@ -26,7 +28,7 @@ interface RollingAdapters {
   extractor?: WindowExtractor;
 }
 
-class RollingStageError extends Error {}
+const CLEF_TRIAGE_TIMEOUT_MS = 30_000;
 
 async function preparePacket(env: Env, claim: RollingClaim, adapters: RollingAdapters): Promise<RollingPacket | null> {
   const { namespace, key, rows, progress } = claim;
@@ -54,8 +56,15 @@ async function preparePacket(env: Env, claim: RollingClaim, adapters: RollingAda
     return [prefix];
   });
   progress.clefCalls += 1;
-  progress.triage = await (adapters.triage ?? clefTriage(env)).classify({ ...packet, messages: transcript }).catch(() => null);
-  if (!progress.triage && !cue) throw new RollingStageError("triage_failed");
+  const triage = adapters.triage ?? clefTriage(env);
+  progress.triage = await withDreamModelDeadline(
+    (signal) => triage.classify({ ...packet, messages: transcript }, signal),
+    CLEF_TRIAGE_TIMEOUT_MS
+  ).catch((error: unknown) => {
+    if (cue) return null;
+    throw new RollingStepError(error instanceof DreamModelTimeoutError ? "triage_timeout" : "triage_failed");
+  });
+  if (!progress.triage && !cue) throw new RollingStepError("triage_failed");
   progress.extract = needsExtraction(progress.triage, cue);
   return await saveRollingProgress(env.DB, claim) ? packet : null;
 }
@@ -71,7 +80,7 @@ async function processParts(env: Env, claim: RollingClaim, packet: RollingPacket
     const input = { ...packet, rolling_state: snapshot.state, messages };
     progress.extractorCalls += 1;
     const proposal = await extractor.extract(input);
-    if (!proposal) throw new RollingStageError("extraction_failed");
+    if (!proposal) throw new RollingStepError("extraction_failed");
     const grounded = groundWindowProposal(input, proposal);
     const count = grounded.events.filter(event => event.op !== "no_op").length;
     progress.eventCount += count;
@@ -79,7 +88,7 @@ async function processParts(env: Env, claim: RollingClaim, packet: RollingPacket
     try {
       const saved = await saveRollingDraft(env.DB, claim, { part: index, grounded, recall_ids: packet.recall_hits.map(hit => hit.id) });
       if (!saved) {
-        throw new RollingStageError("lease_changed");
+        throw new RollingStepError("lease_changed");
       }
     } catch (error) {
       progress.completed.pop();
@@ -104,25 +113,37 @@ async function runWindow(env: Env, namespace: string, adapters: RollingAdapters,
   const { key, attempts, progress } = claim;
   const maxAttempts = rollingSettings(env).maxAttempts;
   try {
-    if (attempts > maxAttempts) throw new RollingStageError("attempts_exhausted");
+    if (attempts > maxAttempts) throw new RollingStepError(progress.lastFailure?.reason ?? "attempts_exhausted", false, progress.lastFailure?.http_status);
     if (!progress.committing) {
       const packet = await preparePacket(env, claim, adapters);
-      if (!packet) throw new RollingStageError("lease_changed");
+      if (!packet) throw new RollingStepError("lease_changed");
       await processParts(env, claim, packet, adapters.extractor ?? dreamWindowExtractor(env, namespace, progress.model));
       if (progress.extract) {
         progress.committing = true;
-        if (!await saveRollingProgress(env.DB, claim)) throw new RollingStageError("lease_changed");
+        if (!await saveRollingProgress(env.DB, claim)) throw new RollingStepError("lease_changed");
       }
     }
     const finished = progress.committing ? await commitRollingDrafts(env, claim) : await finishRollingWindow(env.DB, claim);
-    if (!finished) throw new RollingStageError("lease_changed");
+    if (!finished) throw new RollingStepError("lease_changed");
     return { ran: true, windowKey: key, extracted: progress.extract === true };
   } catch (error) {
-    const reason = error instanceof RollingStageError ? error.message
-      : error instanceof DreamModelTimeoutError ? "extractor_timeout" : "window_processing_failed";
-    console.warn("rolling: window attempt failed", { namespace, window: key, attempt: attempts, reason });
-    if (attempts >= maxAttempts && reason !== "lease_changed" && await finishRollingWindow(env.DB, claim, reason)) {
-      return { ran: true, windowKey: key, extracted: false, reason };
+    const stepError = error instanceof RollingStepError ? error
+      : new RollingStepError(error instanceof DreamModelTimeoutError ? "extractor_timeout" : "window_processing_failed");
+    const { reason, retryable, httpStatus } = stepError;
+    const failure: RollingFailure = {
+      reason, phase: rollingPhase(progress), at: nowIso(), http_status: httpStatus
+    };
+    progress.lastFailure = failure;
+    console.warn("rolling: window attempt failed", { namespace, window: key, model: progress.model, attempt: attempts, ...failure });
+    if ((!retryable || attempts >= maxAttempts) && reason !== "lease_changed") {
+      try {
+        if (await finishRollingWindow(env.DB, claim, { failure })) {
+          return { ran: true, windowKey: key, extracted: false, reason };
+        }
+      } catch (settlementError) {
+        await saveRollingProgress(env.DB, claim, true).catch(() => false);
+        throw settlementError;
+      }
     }
     const released = await saveRollingProgress(env.DB, claim, true) || await releaseInterruptedWindow(env.DB, claim);
     return {

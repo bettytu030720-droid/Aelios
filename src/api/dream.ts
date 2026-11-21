@@ -53,6 +53,15 @@ export async function handleDreamStatus(request: Request, env: Env): Promise<Res
 
   const url = new URL(request.url);
   const namespace = readString(url.searchParams.get("namespace")) || auth.profile.namespace;
+  const canReadRolling = resolveNamespace(auth.profile, namespace) === namespace;
+  if (url.searchParams.get("view") === "rolling") {
+    if (!canReadRolling) return openAiError("This key cannot access that memory space", 403);
+    try {
+      return json({ data: { namespace, rolling: await getRollingDreamStatus(env, namespace, { includeBacklog: false }) } });
+    } catch (error) {
+      return json({ ok: false, error: error instanceof Error ? error.message : String(error) }, { status: 500 });
+    }
+  }
   const timeZone = readDreamTimeZoneFromEnv(env);
   const anchorDateLabel = getTargetDigestDateLabel(timeZone);
   const cursorDateLabels = getDateLabelsLookback(anchorDateLabel, DREAM_CURSOR_DATE_LABELS, timeZone);
@@ -74,7 +83,7 @@ export async function handleDreamStatus(request: Request, env: Env): Promise<Res
           raw_messages: await countRawMessagesForDateLabel(env.DB, { namespace, dateLabel, timeZone })
         }))
       ),
-      resolveNamespace(auth.profile, namespace) === namespace ? getRollingDreamStatus(env, namespace) : undefined
+      canReadRolling ? getRollingDreamStatus(env, namespace) : undefined
     ]);
 
     return json({

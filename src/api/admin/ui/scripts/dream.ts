@@ -112,12 +112,16 @@ export const ADMIN_SCRIPT_DREAM = `    async loadDiary() {
     },
     scheduleDreamPolling() {
       this.stopDreamPolling();
-      if (this.page !== 'dream' || !this.dreamActiveRun || this.dreamActiveRun.stale) return;
+      if (this.page !== 'dream') return;
+      const nightly = this.dreamActiveRun && !this.dreamActiveRun.stale;
+      if (!nightly && (!this.rollingShouldPoll() || document.hidden)) return;
       const revision = this.spaceRevision;
       this.dreamPollTimer = window.setTimeout(() => {
         this.dreamPollTimer = null;
-        if (revision === this.spaceRevision && this.page === 'dream') this.loadDreamStatus();
-      }, 5000);
+        if (revision !== this.spaceRevision || this.page !== 'dream') return;
+        if (nightly) this.loadDreamStatus();
+        else if (!document.hidden) this.loadRollingStatus();
+      }, nightly ? 5000 : 15000);
     },
     async loadDreamStatus() {
       const revision = this.spaceRevision;
@@ -129,6 +133,7 @@ export const ADMIN_SCRIPT_DREAM = `    async loadDiary() {
         if (revision !== this.spaceRevision) return;
         const payload = data.data || {};
         this.dreamStatus = payload;
+        this.rollingStatusError = '';
         this.dreamRuns = payload.dream_runs || [];
         this.dreamActiveRun = payload.active_run || this.dreamRuns.find(function(run) {
           return run.status === 'queued' || run.status === 'running';

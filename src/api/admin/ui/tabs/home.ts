@@ -36,6 +36,15 @@ export const ADMIN_TAB_HOME = `      <!-- ===== 首页 ===== -->
           </div>
         </div>
 
+        <section x-show="home.rolling || home.dreamStatusError" class="panel panel-pad flex flex-wrap items-center justify-between gap-3">
+          <div class="min-w-0">
+            <h2 class="h2">${t("白天整理", "Daytime Dream")}</h2>
+            <p class="mt-1 text-[13px] muted" x-show="homeRollingSummary()" x-text="homeRollingSummary()"></p>
+            <p class="mt-1 text-[13px]" role="status" style="color: var(--warn)" x-show="homeRollingWarning()" x-text="homeRollingWarning()"></p>
+          </div>
+          <button type="button" @click="go('dream')" class="btn btn-sm">${t("查看整理记录", "View Dream activity")}</button>
+        </section>
+
         <section x-show="pendingCount || importPendingCount || homeRunBroken()" class="flex flex-col gap-3">
           <h2 class="h2">${t("需要你处理", "Needs you")}</h2>
           <div class="panel divide">

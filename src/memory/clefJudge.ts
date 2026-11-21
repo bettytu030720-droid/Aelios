@@ -142,10 +142,11 @@ export async function runClef(
     questions: Record<string, Noul>;
   },
   model = CLEF_MODEL,
+  signal?: AbortSignal,
 ): Promise<unknown> {
   if (!env.AI) throw new Error("clef needs the Workers AI binding");
   type RunArgs = Parameters<Ai["run"]>;
-  const raw = (await env.AI.run(model as RunArgs[0], input as unknown as RunArgs[1])) as unknown;
+  const raw = (await env.AI.run(model as RunArgs[0], input as unknown as RunArgs[1], signal ? { signal } : undefined)) as unknown;
   const body = raw && typeof raw === "object" && "result" in raw ? (raw as { result: unknown }).result : raw;
   return body && typeof body === "object" ? (body as { answers?: unknown }).answers : undefined;
 }

@@ -2,14 +2,17 @@ import { I, t } from "../helpers";
 import { rollingStatusPanel } from "../../rolling";
 
 export const ADMIN_TAB_DREAM = `      <!-- ===== 夜间整理 ===== -->
-      <section x-show="savedApiKey.trim() && page === 'dream'" class="page">
+      <section x-show="savedApiKey.trim() && page === 'dream'" class="page" @visibilitychange.document="if (!document.hidden && page === 'dream' && !rollingStatusError) scheduleDreamPolling()">
         <header class="page-head">
           <div>
             <h1 class="h1">${t("夜间整理", "Nightly")}</h1>
-            <p class="sub">${t("每晚把当天的对话整理成记忆和日记，平时不用管。", "Every night, the day’s chats become memories and a journal entry. Usually nothing to do here.")}</p>
+            <p class="sub">${t("查看白天整理、夜间运行和写入结果。", "Check daytime results, nightly runs, and what was saved.")}</p>
           </div>
-          <button type="button" @click="refreshDream()" class="btn btn-icon hidden md:inline-flex" :aria-label="L('刷新', 'Refresh')" :title="L('刷新', 'Refresh')">${I.refresh}</button>
+          <button type="button" @click="refreshDream()" class="btn btn-icon inline-flex" :aria-label="L('刷新', 'Refresh')" :title="L('刷新', 'Refresh')">${I.refresh}</button>
         </header>
+
+        <p x-show="dreamStatusError" role="status" class="banner banner-warn" x-text="dreamStatusError"></p>
+        ${rollingStatusPanel(t)}
 
         <div class="stats">
           <div class="panel dream-stat stat">
@@ -65,7 +68,6 @@ export const ADMIN_TAB_DREAM = `      <!-- ===== 夜间整理 ===== -->
               </div>
               <p class="text-xs muted">${t("预览时请保持页面打开，结果不写入。关掉预览才是真跑，提交后可以关页。", "Keep this page open while a preview runs; nothing is saved. Untick preview to run for real; once it’s queued you can close the page.")}</p>
 
-              <p x-show="dreamStatusError" class="banner banner-warn" x-text="dreamStatusError"></p>
               <div x-show="dreamActiveRun" class="banner" :class="dreamActiveRun && dreamActiveRun.stale ? 'banner-warn' : ''">
                 <div class="min-w-0 flex-1">
                   <div x-text="dreamActiveRun && (L('任务 ', 'Run ') + dreamActiveRun.id + ' · ' + dreamStatusLabel(dreamActiveRun.status, dreamActiveRun.stale))"></div>
@@ -150,8 +152,6 @@ export const ADMIN_TAB_DREAM = `      <!-- ===== 夜间整理 ===== -->
             </div>
           </section>
         </div>
-
-        ${rollingStatusPanel(t)}
 
         <section class="panel">
           <div class="panel-head pb-1">

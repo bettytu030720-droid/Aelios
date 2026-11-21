@@ -42,22 +42,28 @@ export const ADMIN_SCRIPT_MEMORIES = String.raw`    async reloadAll() {
         this.notify(error.message);
       }
     },
-    // 首页右栏和「昨晚整理」那张卡：最新一篇日记、最近一次整理和那一晚记住的。读不到就空着，不弹错。
+    // Reuse the status request for the Home page's daytime and nightly summaries.
     async loadHome() {
       const revision = this.spaceRevision;
       if (!this.apiKey.trim()) return;
-      try {
-        const results = await Promise.all([
-          this.request(this.withNamespace('/admin/diary?limit=1')),
-          this.request(this.withNamespace('/v1/dream/status'))
-        ]);
-        if (revision !== this.spaceRevision) return;
-        const dailies = (results[0].data && results[0].data.dailies) || [];
-        const status = results[1].data || {};
-        const runs = status.dream_runs || [];
-        const run = runs.find(function(item) { return item.status !== 'queued' && item.status !== 'running'; }) || runs[0] || null;
+      const [diaries, dream] = await Promise.allSettled([
+        this.request(this.withNamespace('/admin/diary?limit=1')),
+        this.request(this.withNamespace('/v1/dream/status'))
+      ]);
+      if (revision !== this.spaceRevision) return;
+      if (diaries.status === 'fulfilled') {
+        const dailies = (diaries.value.data && diaries.value.data.dailies) || [];
         this.home.diary = dailies[0] || null;
-        this.home.run = run;
+      }
+      this.home.dreamStatusError = dream.status === 'rejected';
+      if (dream.status === 'rejected') return;
+      const status = dream.value.data || {};
+      const runs = status.dream_runs || [];
+      const run = status.active_run && status.active_run.stale ? status.active_run
+        : runs.find(function(item) { return item.status !== 'queued' && item.status !== 'running'; }) || runs[0] || null;
+      this.home.run = run;
+      this.home.rolling = status.rolling || null;
+      try {
         const date = (run && run.date_label) || status.anchor_date_label || this.yesterdayLabel();
         const harvest = await this.request(this.withNamespace('/admin/dream/harvest?date=' + encodeURIComponent(date)));
         if (revision !== this.spaceRevision) return;

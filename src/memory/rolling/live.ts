@@ -5,15 +5,24 @@ import { applyScopedDecision } from "../currentState/apply";
 import { isCurrentStateEnabled } from "../currentState/projection";
 import { decisionKey } from "../currentState/scopeKey";
 import { readDreamTimeZone } from "../dreamEnv";
-import { dreamOrigin, type MemoryProvenance } from "../provenance";
+import { dreamOrigin, type MemoryProvenance, parseOrigin } from "../provenance";
 import type { GroundedWindowEvent } from "./apply";
 import { assertRollingLease, finishRollingWindow, loadRollingDrafts, type RollingDraft } from "./checkpoint";
 import { episodeMemory, extendDreamCandidate, findEpisodeCandidate, writableTarget } from "./episodes";
 import type { RollingClaim } from "./inbox";
+import type { RollingWrites } from "./progress";
 import { rollingSettings } from "./settings";
 import { applyStateDelta, loadRollingState, type StateDelta } from "./state";
 
-async function applyEvent(env: Env, claim: RollingClaim, draft: RollingDraft, event: GroundedWindowEvent) {
+interface AppliedEvent {
+  candidateId?: string;
+  change?: NonNullable<StateDelta["changes"]>[number];
+  write?: { kind: keyof RollingWrites; id: string };
+}
+
+async function applyEvent(
+  env: Env, claim: RollingClaim, draft: RollingDraft, event: GroundedWindowEvent
+): Promise<AppliedEvent | null> {
   const { namespace, rows } = claim;
   const db = env.DB;
   const seen = rows.map(row => row.id);
@@ -26,10 +35,15 @@ async function applyEvent(env: Env, claim: RollingClaim, draft: RollingDraft, ev
   };
   const key = event.decision && decisionKey(event.decision.scope_key);
   if (isCurrentStateEnabled(env) && key && event.decision) {
-    const saved = await applyScopedDecision(env, namespace, candidate, draft.recall_ids, { guard, rollingMessages: seen });
+    const saved = await applyScopedDecision(env, namespace, candidate, draft.recall_ids, {
+      guard, rollingWindow: { key: claim.key, messageIds: seen }
+    });
     if (saved) {
       const active = await getActiveMemoryByFactKey(db, { namespace, factKey: key });
-      return { change: active ? { scope_key: event.decision.scope_key, decision_id: active.id } : undefined };
+      return {
+        change: active ? { scope_key: event.decision.scope_key, decision_id: active.id } : undefined,
+        write: saved.write ? { kind: saved.write === "memory" ? "memories" : "revisions", id: saved.id } : undefined
+      };
     }
   }
 
@@ -42,6 +56,7 @@ async function applyEvent(env: Env, claim: RollingClaim, draft: RollingDraft, ev
     ...dreamOrigin(cited, { messages: seen, memories: draft.recall_ids, target: targetId }),
     ...episode,
     recording_actor: "rolling_dream",
+    rolling_window_key: claim.key,
     attributed_actor: event.attributed_role ?? "unknown",
     evidence_relation: "paraphrase"
   });
@@ -52,12 +67,17 @@ async function applyEvent(env: Env, claim: RollingClaim, draft: RollingDraft, ev
         content: event.content, sources: cited, origin: originFor(prior.target_memory_id ?? undefined), guard
       });
       if (!current) throw new Error("Pending episode changed during the rolling commit");
-      return { candidateId: prior.id };
+      // A resumed commit sees its own evidence marker even when the continuation is already covered.
+      const written = current === "updated" || parseOrigin(prior.provenance)?.rolling_window_key === claim.key;
+      return { candidateId: prior.id, write: written ? { kind: "candidates", id: prior.id } : undefined };
     }
     if (prior?.status === "approved") {
       target = await episodeMemory(db, namespace, prior.id);
       if (!target) return null;
-      if (target.content.includes(event.content)) return { candidateId: prior.id };
+      if (target.content.includes(event.content)) {
+        const written = parseOrigin(prior.provenance)?.rolling_window_key === claim.key;
+        return { candidateId: prior.id, write: written ? { kind: "candidates", id: prior.id } : undefined };
+      }
     }
   }
   if (target?.content.trim() === event.content.trim()) return null;
@@ -67,7 +87,10 @@ async function applyEvent(env: Env, claim: RollingClaim, draft: RollingDraft, ev
     source: target ? "dream_update" : "dream_extract",
     targetMemoryId: target?.id ?? null
   }, guard);
-  return { candidateId: saved.id };
+  return {
+    candidateId: saved.id,
+    write: parseOrigin(saved.provenance)?.rolling_window_key === claim.key ? { kind: "candidates", id: saved.id } : undefined
+  };
 }
 
 export async function commitRollingDrafts(env: Env, claim: RollingClaim): Promise<boolean> {
@@ -76,6 +99,7 @@ export async function commitRollingDrafts(env: Env, claim: RollingClaim): Promis
   const snapshot = await loadRollingState(env, namespace);
   let state = snapshot.state;
   const drafts = await loadRollingDrafts(env.DB, claim);
+  const writtenIds: Record<keyof RollingWrites, Set<string>> = { candidates: new Set(), memories: new Set(), revisions: new Set() };
   for (const draft of drafts) {
     const { events, state_delta: delta } = draft.grounded;
     const accepted = new Set<string>();
@@ -85,6 +109,7 @@ export async function commitRollingDrafts(env: Env, claim: RollingClaim): Promis
       if (event.op === "no_op" || !event.source_message_ids.every(id => retained.has(id))) continue;
       const result = await applyEvent(env, claim, draft, event);
       if (!result) continue;
+      if (result.write) writtenIds[result.write.kind].add(result.write.id);
       for (const id of event.source_message_ids) accepted.add(id);
       if (result.change) changes.push(result.change);
       if (event.episode_key && result.candidateId) episodeCandidates.set(event.episode_key, result.candidateId);
@@ -99,5 +124,8 @@ export async function commitRollingDrafts(env: Env, claim: RollingClaim): Promis
       changes
     }, `${key}:${draft.part}`, rollingSettings(env).stateChars);
   }
-  return finishRollingWindow(env.DB, claim, undefined, { ...snapshot, state });
+  const writes: RollingWrites = {
+    candidates: writtenIds.candidates.size, memories: writtenIds.memories.size, revisions: writtenIds.revisions.size
+  };
+  return finishRollingWindow(env.DB, claim, { state: { ...snapshot, state }, writes });
 }
