@@ -68,7 +68,7 @@ function memoryAdmin() {
     todayMessages: [],
     homeRole: 'all',
     homeAll: false,
-    home: { diary: null, run: null, harvest: null, rolling: null, dreamStatusError: false },
+    home: { diary: null, diaryLoaded: false, status: null, harvest: null, dreamStatusError: false },
     rollingStatusError: '',
     candidates: [],
     judgeDecisions: [],
@@ -127,7 +127,6 @@ function memoryAdmin() {
     dreamHarvestDate: '',
     dreamHarvest: null,
     dreamHarvestLoading: false,
-    dreamExpanded: {},
     harvestOpen: { new: true, dim: true, judged: false },
 
     reviewTab: 'daily',

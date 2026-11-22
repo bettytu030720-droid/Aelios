@@ -67,18 +67,18 @@ export { countRawMessagesForDateLabel, readDreamCursorValue };
 export async function runDreamBackfill(
   env: Env,
   namespace: string,
-  options: { maxDates?: number; lookback?: number } = {}
+  options: { maxDates?: number; lookback?: number; anchorDateLabel?: string; deadlineAt?: number } = {}
 ): Promise<Array<{ dateLabel: string; result: DailyDigestRunResult }>> {
   const maxDates = options.maxDates ?? 2;
   const lookback = options.lookback ?? 3;
   const timeZone = readDreamTimeZone(env);
-  const anchorDateLabel = getTargetDigestDateLabel(timeZone);
+  const anchorDateLabel = options.anchorDateLabel ?? getTargetDigestDateLabel(timeZone);
   const candidateLabels = getDateLabelsLookback(anchorDateLabel, lookback + 1, timeZone).slice(1);
   const results: Array<{ dateLabel: string; result: DailyDigestRunResult }> = [];
   let backfilled = 0;
 
   for (const dateLabel of candidateLabels) {
-    if (backfilled >= maxDates) break;
+    if (backfilled >= maxDates || (options.deadlineAt !== undefined && Date.now() + 30_000 >= options.deadlineAt)) break;
 
     const { startIso, endIso } = getDateRangeForLabel(dateLabel, timeZone);
     const cursor = await readDreamCursorValue(env.DB, { namespace, dateLabel });
@@ -88,7 +88,7 @@ export async function runDreamBackfill(
     const rawCount = await countRawMessagesForDateLabel(env.DB, { namespace, dateLabel, timeZone });
     if (rawCount === 0) continue;
 
-    const result = await runDailyMemoryDigest(env, namespace, { dateLabel, trigger: "cron" });
+    const result = await runDailyMemoryDigest(env, namespace, { dateLabel, trigger: "cron", deadlineAt: options.deadlineAt });
     results.push({ dateLabel, result });
     if (result.ran) backfilled += 1;
   }
@@ -171,7 +171,7 @@ async function performDailyMemoryDigest(
   }
   try {
     return await processDailyDigestBatch(env, namespace, run, {
-      dryRun, startIso, endIso, cursor, cursorName, fetchedMessages, maxMessages, claim, lateBatch
+      dryRun, startIso, endIso, cursor, cursorName, fetchedMessages, maxMessages, claim, lateBatch, deadlineAt: options.deadlineAt
     });
   } finally {
     await releaseNightlyExtraction(env.DB, namespace, claim);
@@ -189,6 +189,7 @@ async function processDailyDigestBatch(
     dryRun: boolean; startIso: string; endIso: string; cursor: string | null; cursorName: string;
     fetchedMessages: MessageRecord[]; maxMessages: number; lateBatch: boolean;
     claim: Awaited<ReturnType<typeof claimNightlyExtraction>> | null;
+    deadlineAt?: number;
   }
 ): Promise<DailyDigestRunResult> {
   const { dreamRunId, dateLabel } = run;
@@ -226,7 +227,8 @@ async function processDailyDigestBatch(
     messages: fetchedMessages,
     existingMemories,
     hasMore: fetchedHasMore,
-    extractMessageIds: claim?.messageIds
+    extractMessageIds: claim?.messageIds,
+    deadlineAt: input.deadlineAt
   });
   const { messages, hasMore, modelResult, extractedMemories } = extractPhase;
   const digest = modelResult.digest;

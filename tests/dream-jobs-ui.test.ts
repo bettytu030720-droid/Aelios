@@ -44,7 +44,7 @@ test("unclassified candidates show the model operation and failure without enter
   assert.doesNotMatch(ADMIN_HTML, /x-show="candidate.source !== 'dream_unclassified'" @click="approveCandidate/);
 });
 
-test("manual UI sends background true, displays acceptance ID, polls queued/running and stops on completion", async () => {
+test("manual UI tracks the accepted run ID and polls until the batch completes", async () => {
   const { app, timers, notices } = panel();
   app.dreamDryRun = false;
   let state = run();
@@ -67,7 +67,7 @@ test("manual UI sends background true, displays acceptance ID, polls queued/runn
   assert.equal(app.dreamRunResult.status, "queued");
   assert.equal(app.dreamTriggering, false);
   assert.equal(app.dreamActiveRun.id, "drm_synthetic");
-  assert.match(notices[0], /已排队.*drm_synthetic/);
+  assert.match(notices[0], /已提交.*后台/);
   assert.equal(timers.size, 1);
   state = run("running");
   await app.loadDreamStatus();
@@ -92,21 +92,20 @@ test("fresh/refresh status reconstructs an active job and stale jobs show unconf
   state = run("running", true);
   await app.loadDreamStatus();
   assert.equal(app.dreamActiveRun.stale, true);
-  assert.equal(app.dreamStatusLabel(state.status, state.stale), "可能中断 / 状态未确认");
+  assert.equal(app.dreamStatusLabel(state.status, state.stale), "完成状态待确认");
   assert.equal(app.dreamDuration(state), "状态未确认");
-  assert.match(app.dreamRunNote(state), /不会自动重跑/);
+  assert.match(app.dreamRunNote(state), /20 分钟未收到完成结果/);
   assert.equal(timers.size, 0);
   app.dreamDryRun = false;
   app.dreamForce = true;
   app.request = async () => { throw new Error("active tasks must block submission"); };
   await app.triggerDream();
   assert.equal(app.dreamRunResult, null);
-  assert.match(ADMIN_HTML, /「已经整理过的也重来」也盖不过它/);
+  assert.match(ADMIN_HTML, /确认任务已经停止后，可以标记中断并继续这一天/);
   assert.match(ADMIN_HTML, /run.status === 'running' && !run.stale/);
 });
 
 test("dry-run results retain proposal/extraction/routing rendering and do not poll", async () => {
-  assert.match(ADMIN_HTML, /预览时请保持页面打开/);
   assert.match(ADMIN_HTML, /预览中，请保持页面打开/);
   const { app, timers } = panel();
   const result = {
@@ -175,7 +174,7 @@ test("Daytime Dream refreshes only the lightweight status and stops once the lea
   assert.equal(timers.size, 0);
 });
 
-test("the home page shows recent writes and a prior failure even if the journal request fails", async () => {
+test("the home page shows the latest daytime writes and leaves recovered failures in history", async () => {
   const { app } = panel();
   app.page = "today";
   app.apiKey = "synthetic";
@@ -189,19 +188,88 @@ test("the home page shows recent writes and a prior failure even if the journal 
     return { data: {} };
   };
   await app.loadHome();
-  assert.match(app.homeRollingSummary(), /待审候选 2 条 · 入库记忆 1 条/);
-  assert.match(app.homeRollingWarning(), /模型返回了未知的记忆操作/);
+  assert.match(app.homeRollingSummary(), /新增 2 条待确认，入库 1 条记忆/);
+  assert.equal(app.homeRollingWarning(), "");
+  app.home.status.rolling.recent_windows = [{ status: "completed", extractor_calls: 1, writes: { candidates: 2, memories: 0, revisions: 0 } }];
+  assert.equal(app.homeRollingSummary(), "最近一批新增 2 条待确认。");
+  assert.doesNotMatch(app.homeRollingSummary(), /入库 0 条/);
+  app.home.status.rolling.current_window = { state: "retrying", last_failure: failed };
+  assert.match(app.homeRollingSummary(), /自动再试/);
+  app.home.status.rolling.current_window = null;
+  app.home.status.rolling.recent_windows = [{ ...failed, disposition: "nightly" }];
+  assert.match(app.homeRollingSummary(), /原话留给夜间整理/);
+  assert.equal(app.homeRollingWarning(), "");
   assert.match(ADMIN_HTML, /id="daytime-dream"/);
   assert.match(ADMIN_HTML, /原话已留给夜间抽取/);
+  const homeHtml = ADMIN_HTML.slice(ADMIN_HTML.indexOf("<!-- ===== 首页 ====="), ADMIN_HTML.indexOf("<!-- ===== 待审 ====="));
+  const statsEnd = homeHtml.indexOf("<!-- ===== 首页 =====") >= 0 ? homeHtml.indexOf("</div>\n\n        <section x-show=\"home.status?.rolling") : -1;
+  assert.ok(statsEnd > homeHtml.indexOf('<div class="stats">'), "Daytime Dream should sit below the stats grid");
+  assert.equal((homeHtml.match(/class="panel dream-stat stat"/g) || []).length, 4, "Home stats grid should keep 4 balanced tiles");
+  assert.match(homeHtml, /需要你处理/);
+  assert.match(homeHtml, /条新记忆等你确认/);
+  assert.match(homeHtml, /整理时拿不准的，确认后才会长期记住/);
+  assert.doesNotMatch(homeHtml, /待审与导入|条候选待审/);
 
   app.request = async () => { throw new Error("status unavailable"); };
   await app.loadHome();
   assert.equal(app.homeRollingSummary(), "");
-  assert.equal(app.homeRollingWarning(), "白天整理状态读取失败。");
+  assert.equal(app.home.dreamStatusError, true);
+  assert.equal(app.homeNightlyProgress(), null);
+});
+
+test("a failed catch-up is separate from the latest dialogue date, and Continue resumes only that date", async () => {
+  const { app } = panel();
+  const date = "2026-11-21";
+  const older = { ...run("error"), date_label: "2026-11-19", reason: "marked_interrupted", error: "Raw diagnostic text" };
+  const status = {
+    anchor_date_label: date,
+    dream_runs: [older, { ...run("ok"), id: "drm_last_night", date_label: date }],
+    cursors: [{ date_label: date, cursor: "done:2026-11-21T15:00:00.000Z" }],
+    raw_message_counts: [{ date_label: date, raw_messages: 52 }],
+    diary_enabled: true,
+    review_enabled: true,
+    followups: {} as Record<string, unknown>
+  };
+  app.page = "today";
+  app.apiKey = "synthetic";
+  let dateRead = "";
+  app.request = async (path: string) => {
+    if (path.startsWith("/admin/diary")) return { data: { dailies: [{ date: "2026-11-20" }] } };
+    if (path.startsWith("/v1/dream/status")) {
+      assert.match(path, /view=home/);
+      return { data: status };
+    }
+    if (path.startsWith("/admin/dream/harvest")) { dateRead = new URL(path, "https://synthetic.test").searchParams.get("date") ?? ""; }
+    return { data: {} };
+  };
+  await app.loadHome();
+  assert.equal(dateRead, date);
+  const progress = app.homeNightlyProgress();
+  assert.equal(progress.title, "对话已整理");
+  assert.equal(progress.review, "还没有审核结果");
+  assert.equal(progress.diary, "日记还没写好");
+  assert.equal(progress.canContinue, true);
+  assert.equal(app.homeNightlyColor(), "var(--warn)");
+  assert.match(app.homeNightlySub(), /日记还没写好/);
+  assert.doesNotMatch(app.dreamRunNote(older), /Raw diagnostic/);
+  app.go = (page: string) => { app.page = page; };
+  app.dreamForce = true;
+  app.openDreamProgress(progress, status);
+  assert.equal(app.page, "dream");
+  assert.equal(app.dreamDate, date);
+  assert.equal(app.dreamForce, false);
+  assert.equal(app.dreamDryRun, false);
+
+  status.followups[date] = { review: { status: "done", approved: 2 }, diary: { status: "written" } };
+  const settled = app.nightlyProgress(status, date, true);
+  assert.equal(settled.review, "本轮自动通过 2 条");
+  assert.equal(settled.diary, "日记已写好");
+  assert.equal(settled.needsAttention, false);
+  assert.equal(settled.done, true);
 });
 
 test("a stale task offers an explicit close-out that confirms, posts the run id, then refreshes and unblocks submission", async () => {
-  assert.match(ADMIN_HTML, /核查后标记为已中断/);
+  assert.match(ADMIN_HTML, /标记为中断/);
   const { app, notices } = panel();
   let state = run("running", true);
   const calls: string[] = [];
@@ -223,8 +291,9 @@ test("a stale task offers an explicit close-out that confirms, posts the run id,
   assert.equal(app.dreamActiveRun, null);
   assert.equal(app.dreamResolving, false);
   assert.deepEqual(calls.filter((path) => path === "/v1/dream/resolve"), ["/v1/dream/resolve"]);
-  assert.match(notices.at(-1) ?? "", /已标记为已中断.*drm_synthetic/);
-  assert.equal(app.dreamReasonLabel("marked_interrupted"), "已核查并标记为中断");
+  assert.match(notices.at(-1) ?? "", /已标记为中断.*继续整理/);
+  assert.equal(app.dreamReasonLabel("marked_interrupted"), "这次任务被手动标记为中断。");
+  assert.equal(app.dreamDate, state.date_label);
 });
 
 test("close-out needs confirmation and is never offered for a task that is not stale", async () => {

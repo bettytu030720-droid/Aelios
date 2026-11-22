@@ -51,7 +51,8 @@ export const ADMIN_SCRIPT_DREAM = `    async loadDiary() {
         no_messages: '这一天没有可用的聊天原文',
         week_already_rolled_up: '这一周已经汇总成周记，不再重写',
         ungrounded_sources: '模型给的原文来源对不上，没有写入',
-        model_error: '模型出错',
+        model_error: '模型服务没有完成请求',
+        model_timeout: '模型请求超时',
         model_invalid_json: '模型返回格式不合要求'
       };
       const en = {
@@ -59,7 +60,8 @@ export const ADMIN_SCRIPT_DREAM = `    async loadDiary() {
         no_messages: 'No chat transcript for that day',
         week_already_rolled_up: 'That week is already in a weekly summary, so it can’t be rewritten',
         ungrounded_sources: 'The model’s sources didn’t match the transcript; nothing written',
-        model_error: 'Model error',
+        model_error: 'The model service could not complete the request',
+        model_timeout: 'Model request timed out',
         model_invalid_json: 'The model returned an invalid format'
       };
       return (this.lang === 'en' ? en : zh)[reason] || error || reason || this.L('原因未知', 'Unknown reason');
@@ -180,11 +182,10 @@ export const ADMIN_SCRIPT_DREAM = `    async loadDiary() {
       this.loadDreamStatus();
       this.loadDreamHarvest();
     },
-    // 失败的那一晚：把日期填进「手动整理一晚」，切成真跑，滚过去等你点「开始」。
-    prepareRerun(run) {
-      if (!run) return;
+    prepareDreamResume(date) {
+      if (!date) return;
       if (this.page !== 'dream') this.go('dream');
-      this.dreamDate = run.date_label;
+      this.dreamDate = date;
       this.dreamDryRun = false;
       this.dreamForce = false;
       this.revealSoon('dream-run');
@@ -192,7 +193,7 @@ export const ADMIN_SCRIPT_DREAM = `    async loadDiary() {
     async resolveDreamRun() {
       const run = this.dreamActiveRun;
       if (this.dreamResolving || !run || !run.stale) return;
-      if (!window.confirm(this.L('确认任务 ' + run.id + ' 已经不在执行？标记后可以重新发起，但它可能已经写入了部分记忆，建议先查 Worker 日志。', 'Confirm run ' + run.id + ' is no longer running? You can start again afterwards, but it may have saved some memories already; check the Worker logs first.'))) return;
+      if (!window.confirm(this.L('确认这次任务已经停止？标记后仍保留已保存的内容，可以从上次进度继续。', 'Confirm this task has stopped. Anything already saved will stay. You can continue from the saved progress afterwards.'))) return;
       const revision = this.spaceRevision;
       this.dreamResolving = true;
       try {
@@ -201,8 +202,9 @@ export const ADMIN_SCRIPT_DREAM = `    async loadDiary() {
           body: JSON.stringify({ namespace: this.namespace, run_id: run.id })
         });
         if (revision !== this.spaceRevision) return;
-        this.notify(this.L('已标记为已中断：', 'Marked as stopped: ') + run.id);
+        this.notify(this.L('已标记为中断，可以继续整理。', 'Marked as stopped. You can continue processing.'));
         await this.loadDreamStatus();
+        if (revision === this.spaceRevision && !this.dreamActiveRun) this.prepareDreamResume(run.date_label);
       } catch (error) {
         if (revision !== this.spaceRevision) return;
         this.notify(error.message);
@@ -231,7 +233,7 @@ export const ADMIN_SCRIPT_DREAM = `    async loadDiary() {
         if (!dryRun) {
           this.dreamHarvestDate = date;
           if (this.dreamRunResult && this.dreamRunResult.run_id) {
-            this.notify(this.L('已排队，任务 ', 'Queued: run ') + this.dreamRunResult.run_id);
+            this.notify(this.L('已提交，会在后台继续整理。', 'Queued. Processing continues in the background.'));
           }
           await this.loadDreamStatus();
         }
@@ -243,38 +245,14 @@ export const ADMIN_SCRIPT_DREAM = `    async loadDiary() {
       this.dreamTriggering = false;
       this.icons();
     },
-    dreamLatestRun() {
-      return this.dreamRuns.length ? this.dreamRuns[0] : null;
-    },
-    dreamLatestLabel() {
-      const run = this.dreamLatestRun();
-      return run ? this.dreamStatusLabel(run.status, run.stale) : this.L('还没有记录', 'No runs yet');
-    },
-    dreamLatestSub() {
-      const run = this.dreamLatestRun();
-      return run ? this.dayLabel(run.date_label, true) + ' · ' + this.clock(run.started_at) + ' · ' + this.dreamDuration(run) : '';
-    },
     dreamOkCount() {
       return this.dreamRuns.filter(function(run) { return run.status === 'ok'; }).length;
     },
     dreamFinishedCount() {
       return this.dreamRuns.filter(function(run) { return run.status === 'ok' || run.status === 'error'; }).length;
     },
-    dreamFirstFailed() {
-      return this.dreamRuns.find(function(run) { return run.status === 'error' && !run.stale; }) || null;
-    },
-    dreamSuccessRate() {
-      const total = this.dreamFinishedCount();
-      if (!total) return '—';
-      return Math.round((this.dreamOkCount() / total) * 100) + '%';
-    },
     dreamProcessedTotal() {
-      return this.dreamRuns.reduce(function(sum, run) { return sum + (Number(run.processed_messages) || 0); }, 0);
-    },
-    dreamAnchorLabel() {
-      const payload = this.dreamStatus || {};
-      if (!payload.anchor_date_label) return '';
-      return this.L('锚点 ', 'Anchor ') + payload.anchor_date_label + (payload.time_zone ? ' · ' + payload.time_zone : '');
+      return this.dreamRuns.reduce(function(sum, run) { return sum + (run.status === 'ok' ? Number(run.processed_messages) || 0 : 0); }, 0);
     },
     dreamDayBars() {
       const payload = this.dreamStatus || {};
@@ -298,9 +276,9 @@ export const ADMIN_SCRIPT_DREAM = `    async loadDiary() {
       });
     },
     dreamStatusLabel(status, stale) {
-      if (stale && (status === 'queued' || status === 'running')) return this.L('可能中断 / 状态未确认', 'May have stopped / unconfirmed');
-      const zh = { ok: '完成', error: '失败', skipped: '跳过', queued: '排队中', running: '进行中' };
-      const en = { ok: 'Done', error: 'Failed', skipped: 'Skipped', queued: 'Queued', running: 'Running' };
+      if (stale && (status === 'queued' || status === 'running')) return this.L('完成状态待确认', 'Completion unconfirmed');
+      const zh = { ok: '本批完成', error: '本批未完成', skipped: '跳过', queued: '排队中', running: '进行中' };
+      const en = { ok: 'Batch complete', error: 'Batch did not finish', skipped: 'Skipped', queued: 'Queued', running: 'Running' };
       return (this.lang === 'en' ? en : zh)[status] || status || this.L('未知', 'Unknown');
     },
     dreamStatusChipClass(status) {
@@ -336,9 +314,9 @@ export const ADMIN_SCRIPT_DREAM = `    async loadDiary() {
         extract_model_error: '抽取模型出错',
         extract_model_timeout: '抽取模型请求超时',
         extract_invalid_json: '抽取结果格式不合要求',
-        run_failed: '整理异常退出，请先核查是否部分落库',
+        run_failed: '这一批中途停止。可以从上次保存的进度继续。',
         enqueue_failed: '任务未确认入队',
-        marked_interrupted: '已核查并标记为中断',
+        marked_interrupted: '这次任务被手动标记为中断。',
         execution_failed: '后台任务异常退出',
         v2_disabled: 'v2 未启用'
       };
@@ -353,40 +331,19 @@ export const ADMIN_SCRIPT_DREAM = `    async loadDiary() {
         extract_model_error: 'Extraction model error',
         extract_model_timeout: 'Extraction model timed out',
         extract_invalid_json: 'Extraction returned an invalid format',
-        run_failed: 'The run stopped unexpectedly; check whether some memories were saved first',
+        run_failed: 'This batch stopped. You can continue from the saved progress.',
         enqueue_failed: 'Couldn’t confirm the run was queued',
-        marked_interrupted: 'Checked and marked as stopped',
+        marked_interrupted: 'This task was marked as stopped manually.',
         execution_failed: 'The background job stopped unexpectedly',
         v2_disabled: 'v2 is not enabled'
       };
-      return (this.lang === 'en' ? en : zh)[reason] || reason || this.L('原因未知', 'Unknown reason');
+      return (this.lang === 'en' ? en : zh)[reason] || this.L('整理未能完成，原因待核查', 'Processing did not finish. See technical details.');
     },
     dreamRunNote(run) {
-      const parts = [];
-      if (run.stale) parts.push(this.L('超过 20 分钟未确认完成，可能中断；不会自动重跑', 'Not confirmed done after 20 minutes; it may have stopped and won’t re-run on its own'));
-      if (run.reason) parts.push(this.dreamReasonLabel(run.reason));
-      if (run.error) {
-        let text = run.error;
-        try {
-          const parsed = JSON.parse(run.error);
-          if (Array.isArray(parsed)) {
-            text = this.L(parsed.length + ' 条落库出错：', parsed.length + ' failed to save: ') + parsed.map(function(item) {
-              return (item.target_id || '?') + '（' + (item.reason || '?') + '）';
-            }).join(this.L('；', '; '));
-          }
-        } catch (error) {}
-        parts.push(text);
-      }
-      return parts.join(' · ');
-    },
-    isDreamExpanded(id) {
-      return Boolean(this.dreamExpanded[id]);
-    },
-    toggleDreamExpand(id) {
-      const next = Object.assign({}, this.dreamExpanded);
-      if (next[id]) delete next[id];
-      else next[id] = true;
-      this.dreamExpanded = next;
+      if (run.stale) return this.L('超过 20 分钟未收到完成结果。', 'No completion was recorded within 20 minutes.');
+      if (run.reason) return this.dreamReasonLabel(run.reason);
+      if (run.error && run.status === 'ok') return this.L('有些条目没能保存。', 'Some items could not be saved.');
+      return '';
     },
     dreamProposal() {
       return this.dreamRunResult && this.dreamRunResult.proposal ? this.dreamRunResult.proposal : null;

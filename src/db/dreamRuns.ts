@@ -185,19 +185,18 @@ export async function resolveStaleDreamRun(
 
 export async function listDreamRunsForNamespace(
   db: D1Database,
-  input: { namespace: string; sinceIso: string; limit?: number }
+  input: { namespace: string; sinceIso: string; limit?: number; dateLabel?: string }
 ): Promise<DreamRunRow[]> {
-  const limit = input.limit ?? 200;
   const result = await db
     .prepare(
       `SELECT id, namespace, date_label, started_at, finished_at, status, reason, model,
               processed_messages, error, trigger
        FROM dream_runs
-       WHERE namespace = ? AND started_at >= ?
+       WHERE namespace = ? AND started_at >= ? ${input.dateLabel ? "AND date_label = ?" : ""}
        ORDER BY started_at DESC
        LIMIT ?`
     )
-    .bind(input.namespace, input.sinceIso, limit)
+    .bind(input.namespace, input.sinceIso, ...(input.dateLabel ? [input.dateLabel] : []), input.limit ?? 200)
     .all<DreamRunRow>();
   return result.results ?? [];
 }

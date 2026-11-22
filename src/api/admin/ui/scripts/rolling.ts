@@ -73,9 +73,11 @@ export const ADMIN_SCRIPT_ROLLING = `    rollingStatus() {
       }
       if (!window.writes) return this.L('这条历史记录没有写入明细。', 'This older run has no write details.');
       const { candidates, memories, revisions } = window.writes;
-      const summary = this.L('待审候选 ' + candidates + ' 条 · 入库记忆 ' + memories + ' 条',
-        candidates + ' review candidates · ' + memories + ' memories saved');
-      return summary + (revisions ? this.L(' · 历史修订 ' + revisions + ' 条', ' · ' + revisions + ' historical revisions') : '');
+      const parts = [];
+      if (candidates) parts.push(this.L('待确认 ' + candidates + ' 条', candidates + ' to confirm'));
+      if (memories) parts.push(this.L('入库记忆 ' + memories + ' 条', memories + ' memories saved'));
+      if (revisions) parts.push(this.L('历史修订 ' + revisions + ' 条', revisions + ' historical revisions'));
+      return parts.length ? parts.join(' · ') : this.L('没有新写入。', 'Nothing saved.');
     },
     rollingDispositionLabel(window) {
       if (window.disposition === 'nightly') return this.L('原话已留给夜间抽取。', 'The original messages were left for nightly extraction.');
@@ -94,28 +96,37 @@ export const ADMIN_SCRIPT_ROLLING = `    rollingStatus() {
       return rolling.failed_windows.filter(window => !recent.has(window.window_key));
     },
     homeRollingWarning() {
-      const rolling = this.home.rolling;
-      if (this.home.dreamStatusError) return this.L('白天整理状态读取失败。', 'Couldn’t read Daytime Dream status.');
-      if (!rolling) return '';
-      if (rolling.on && rolling.queue_available === false) return this.L('白天整理无法启动，找不到处理队列。', 'Daytime Dream cannot start because the queue is missing.');
-      const failure = rolling.failed_windows && rolling.failed_windows[0];
-      if (failure && Date.parse(failure.finished_at) > Date.now() - 7 * 86400000) {
-        return this.L('最近一次失败 ', 'Last failure ') + this.rollingWindowTime(failure.finished_at) + ' · ' + this.rollingFailureLabel(failure);
-      }
+      const rolling = this.home.status?.rolling;
+      if (!rolling?.on || this.home.dreamStatusError) return '';
+      if (rolling.queue_available === false) return this.L('白天整理没有启动。打开整理记录可查看原因。', 'Daytime Dream could not start. See Dream activity for the reason.');
+      const current = rolling.current_window;
+      if (current?.state === 'stalled') return this.L('这一批暂时没有进展。打开整理记录可查看状态。', 'This batch has not reported progress. Check its status in Dream activity.');
+      if (current) return '';
+      const last = rolling.recent_windows?.[0];
+      if (last?.status === 'failed' && last.disposition !== 'nightly') return this.L('最近一批的写入未确认。可以去整理记录查看。', 'Saving was unconfirmed for the latest batch. Check Dream activity for details.');
       return '';
     },
     homeRollingSummary() {
-      const rolling = this.home.rolling;
+      const rolling = this.home.status?.rolling;
       if (!rolling || this.home.dreamStatusError) return '';
-      const current = rolling.current_window;
-      if (current) {
-        const summary = this.rollingCurrentLabel(current) + ' · ' + this.rollingPhaseLabel(current.phase);
-        return summary + (current.last_failure ? ' · ' + this.rollingFailureLabel(current) : '');
-      }
-      const last = rolling.recent_windows && rolling.recent_windows[0];
       if (!rolling.on) return this.L('白天整理已关闭。', 'Daytime Dream is off.');
-      if (last && last.status === 'failed') return this.rollingDispositionLabel(last);
-      return last ? this.L('最近一批 ', 'Latest window ') + this.rollingOutcomeLabel(last) + ' · ' + this.rollingWriteSummary(last)
-        : this.L('还没有白天整理记录。', 'No Daytime Dream windows yet.');
+      if (rolling.queue_available === false) return '';
+      const current = rolling.current_window;
+      if (current?.state === 'running') return this.L('正在整理最近一段对话。', 'Organizing a recent stretch of chat.');
+      if (current?.state === 'retrying') return this.L('这一批会自动再试一次。', 'This batch will retry automatically.');
+      if (current) return '';
+      const last = rolling.recent_windows?.[0];
+      if (!last) return this.L('还没有白天整理记录。', 'No daytime batches yet.');
+      if (last.status === 'failed') return last.disposition === 'nightly'
+        ? this.L('这一批白天没有整理完，原话留给夜间整理。', 'This batch stopped during the day. Its chats were left for Nightly Dream.') : '';
+      if (!last.extractor_calls) return this.L('最近一批对话筛选完毕，没有要记的新内容。', 'The latest chat batch was screened and found nothing new to save.');
+      if (!last.writes) return this.L('最近一批对话已整理。', 'The latest chat batch was processed.');
+      const { candidates, memories, revisions } = last.writes;
+      if (!candidates && !memories && !revisions) return this.L('最近一批没有写入新记忆。', 'The latest batch saved no new memories.');
+      const parts = [];
+      if (candidates) parts.push(this.L('新增 ' + candidates + ' 条待确认', candidates + ' to confirm'));
+      if (memories) parts.push(this.L('入库 ' + memories + ' 条记忆', memories + ' memories saved'));
+      if (revisions) parts.push(this.L('修订 ' + revisions + ' 条旧记录', revisions + ' historical revisions'));
+      return this.L('最近一批', 'Latest batch ') + parts.join(this.L('，', ', ')) + this.L('。', '.');
     },
 `;

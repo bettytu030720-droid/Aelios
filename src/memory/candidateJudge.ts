@@ -20,10 +20,11 @@ import {
 } from "../db/v2";
 import { isExplicitMemory, parseOrigin, UNCLASSIFIED_DREAM_SOURCE } from "./provenance";
 import type { Env, MessageRecord } from "../types";
-import { askClef, buildClefInput, CLEF_JUDGE_NAME, CLEF_MODEL, isClefReviewOn } from "./clefJudge";
+import { askClef, buildClefInput, CLEF_JUDGE_NAME, CLEF_MODEL, CLEF_REVIEW_TIMEOUT_MS, isClefReviewOn } from "./clefJudge";
 import { approveCandidate } from "./candidateApproval";
 import { reviewDreamOperation } from "./operationReview";
 import { isDecisionDayComplete, reviewDailyDecision } from "./dream/dailyDecisionReview";
+import { withDreamModelDeadline } from "./dream/modelCall";
 import { readDreamTimeZone } from "./dreamEnv";
 import { formatDateLabel } from "../utils/time";
 import { loadSpeakersForNamespace, type DreamSpeakers } from "./speakers";
@@ -46,7 +47,7 @@ export interface JudgeRunResult {
   failed: number;
   model?: string;
   judgedBy?: string;
-  reason?: "clef_off" | "no_candidates";
+  reason?: "clef_off" | "no_candidates" | "time_budget";
 }
 
 function readPositiveInt(value: unknown, fallback: number, max: number): number {
@@ -115,7 +116,8 @@ async function callClef(
   const kind = judgeKindFor(candidate.source);
   const oldMemory = kind === "update" ? await loadOldMemoryForCandidate(env, namespace, candidate) : null;
   try {
-    return await askClef(env, buildClefInput(kind, candidate, messages, speakers, oldMemory), kind);
+    const input = buildClefInput(kind, candidate, messages, speakers, oldMemory);
+    return await withDreamModelDeadline((signal) => askClef(env, input, kind, signal), CLEF_REVIEW_TIMEOUT_MS);
   } catch (error) {
     console.error("candidate judge: clef call failed", { id: candidate.id, error });
     return null;
@@ -132,7 +134,7 @@ async function targetsExplicitWrite(db: D1Database, namespace: string, candidate
 export async function runCandidateJudge(
   env: Env,
   namespace: string,
-  options: { limit?: number } = {}
+  options: { limit?: number; deadlineAt?: number } = {}
 ): Promise<JudgeRunResult> {
   if (!isClefReviewOn(env)) {
     return { ran: false, judged: 0, approved: 0, discarded: 0, kept: 0, failed: 0, reason: "clef_off" };
@@ -163,8 +165,13 @@ export async function runCandidateJudge(
   let discarded = 0;
   let kept = 0;
   let failed = 0;
+  let reason: JudgeRunResult["reason"];
 
   for (const candidate of candidates) {
+    if (options.deadlineAt !== undefined && Date.now() + CLEF_REVIEW_TIMEOUT_MS >= options.deadlineAt) {
+      reason = "time_budget";
+      break;
+    }
     // zone_full 候选不是质量问题，是区满了被挡下来的——judge 打分再高也不能替它绕过
     // 每区硬上限，自动 approve 会把刚设的闸拆掉。留给人工或 dream 合并腾位后再处理。
     if (candidate.source === "zone_full") {
@@ -265,7 +272,7 @@ export async function runCandidateJudge(
     }
   }
 
-  return { ran: true, judged, approved, discarded, kept, failed, model, judgedBy };
+  return { ran: true, judged, approved, discarded, kept, failed, model, judgedBy, ...(reason ? { reason } : {}) };
 }
 
 // decision_note 前缀：`judge[名字]: ` 是 clef 或助手用 MCP 自己审的，`judge: ` 是以前的代审，

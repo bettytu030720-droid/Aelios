@@ -10,7 +10,7 @@ function windowResult(t: Translate) {
     <p class="mt-1 text-sm" x-text="window.status === 'failed' ? rollingFailureLabel(window) : rollingWriteSummary(window)"></p>
     <p x-show="window.disposition" class="mt-1 text-xs muted" x-text="rollingDispositionLabel(window)"></p>
     <div x-show="window.writes" class="mt-1 flex flex-wrap gap-3 text-xs">
-      <button x-show="window.writes && window.writes.candidates" type="button" @click="reviewTab = 'daily'; go('review')" class="link">${t("查看待审候选", "Open Review")}</button>
+      <button x-show="window.writes && window.writes.candidates" type="button" @click="reviewTab = 'daily'; go('review')" class="link">${t("去待审查看", "Open Review")}</button>
       <button x-show="window.writes && (window.writes.memories || window.writes.revisions)" type="button" @click="go('memory')" class="link">${t("打开记忆库", "Open Memories")}</button>
     </div>
     <details class="mt-1 text-xs muted">
@@ -33,7 +33,6 @@ export function rollingStatusPanel(t: Translate): string {
         <span class="chip" :class="rollingStatus().on ? 'chip-ok' : 'chip-dim'" x-text="rollingStatus().on ? L('已开启', 'On') : L('已关闭', 'Off')"></span>
         <span x-show="rollingStatus().on && rollingStatus().backlog != null" class="text-xs muted" x-text="L('上次刷新时待整理 ' + rollingStatus().backlog + ' 条', rollingStatus().backlog + ' messages waiting at last refresh')"></span>
       </div>
-      <p class="text-xs muted break-all" x-show="rollingStatus().model" x-text="L('抽取模型 ', 'Extraction model ') + rollingStatus().model"></p>
       <p role="status" x-show="rollingStatusError" class="banner banner-warn" x-text="rollingStatusError"></p>
       <p x-show="rollingStatus().on && rollingStatus().queue_available === false" class="banner banner-warn">${t("白天整理缺少队列，无法启动。", "Daytime Dream cannot start because its queue is missing.")}</p>
       <template x-for="current in rollingStatus().current_window ? [rollingStatus().current_window] : []" :key="current.window_key">
@@ -41,10 +40,13 @@ export function rollingStatusPanel(t: Translate): string {
           <div class="min-w-0 space-y-1">
             <div class="font-semibold" x-text="rollingCurrentLabel(current) + ' · ' + rollingPhaseLabel(current.phase)"></div>
             <p class="text-xs" x-text="L('尝试 ', 'Attempts ') + current.attempts + (current.max_attempts ? ' / ' + current.max_attempts : '') + L(' · 最近进度 ', ' · Last progress ') + rollingWindowTime(current.last_activity_at)"></p>
-            <p class="text-xs break-all" x-show="current.phase === 'extraction'" x-text="current.model"></p>
             <p class="text-xs" x-show="current.last_failure" x-text="rollingFailureLabel(current)"></p>
-            <p class="text-xs" x-show="current.state === 'stalled'">${t("这一批长时间没有确认进度。可用下方的窗口编号核对 Worker 日志。", "This window has reported no progress for some time. Use the window ID to check the Worker logs.")}</p>
-            <code class="text-xs break-all" x-text="current.window_key"></code>
+            <p class="text-xs" x-show="current.state === 'stalled'">${t("这一批暂时没有进展。稍后刷新，可以看有没有新的处理结果。", "This batch has not reported progress. Refresh later to check for a result.")}</p>
+            <details class="text-xs muted">
+              <summary class="cursor-pointer">${t("技术详情", "Technical details")}</summary>
+              <p class="break-all" x-show="current.model" x-text="current.model"></p>
+              <code class="break-all" x-text="current.window_key"></code>
+            </details>
           </div>
         </div>
       </template>

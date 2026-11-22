@@ -1,11 +1,15 @@
 import { strict as assert } from "node:assert";
 import type { DatabaseSync } from "node:sqlite";
 import { test, type TestContext } from "node:test";
+import { readDreamFollowup } from "../src/db/dreamFollowup";
 import { invalidateSettingsCache } from "../src/gateway/config";
 import { runCandidateJudge } from "../src/memory/candidateJudge";
+import { runDiaryWriter } from "../src/memory/diaryWriter";
 import { runDailyMemoryDigest } from "../src/memory/dream/orchestrator";
 import { buildDigestPrompt, callDigestModel, runExtractPhase } from "../src/memory/dream/extractPhase";
 import { callDreamModelJson, DreamModelTimeoutError } from "../src/memory/dream/modelCall";
+import { runNightlyCatchup, runNightlyDream } from "../src/memory/dream/nightly";
+import { addDaysToDateLabel } from "../src/memory/dreamDates";
 import { extractDreamMemoriesFromMessages } from "../src/memory/dreamExtract";
 import { extractMemoriesFromMessages } from "../src/memory/extract";
 import { draftTriggersForMemory } from "../src/memory/triggers/build";
@@ -155,6 +159,53 @@ test("a model deadline is reported distinctly and is not automatically retried",
   const result = await callDigestModel(env, "synthetic", { dateLabel: DATE, messageCount: 1, memoryCount: 0, hasMore: false, deadlineAt: Date.now() + 10 });
   assert.equal(result.reason, "model_timeout");
   assert.equal(calls, 1);
+});
+
+test("nightly review and diary finish before older catch-up, which respects the remaining budget", async (t) => {
+  const older = addDaysToDateLabel(DATE, -2, "UTC");
+  const steps: string[] = [];
+  const { env, db, sqlite } = fixture(t, input => {
+    if (input.questions) {
+      steps.push("review");
+      return { answers: { grounded: { noul: 0.9 }, worth: { noul: 0.1 } } };
+    }
+    if (!Array.isArray(input.messages)) return { data: [[0.1]] };
+    const prompt = String(input.messages?.[1]?.content);
+    if (prompt.includes("msg_older")) {
+      steps.push("older_digest");
+      return { response: "{}" };
+    }
+    if (prompt.startsWith("You are Aelios, writing a warm")) {
+      steps.push("diary");
+      return { response: JSON.stringify({ ...DIGEST, source_message_ids: ["msg_0"] }) };
+    }
+    steps.push(isDigest(input) ? "digest" : "extraction");
+    return { response: JSON.stringify(isDigest(input) ? DIGEST : extraction()) };
+  });
+  seedMessages(sqlite, [...messages(1), { ...messages(1)[0], id: "msg_older", created_at: `${older}T10:00:00.000Z` }]);
+  const deadlineAt = Date.now() + 12 * 60_000;
+  await runNightlyDream(env, "default", DATE, deadlineAt);
+  assert.deepEqual(steps, ["digest", "extraction", "review", "diary"]);
+  assert.equal((await readDreamFollowup(db, "default", DATE))?.review?.status, "done");
+  assert.equal((await readDreamFollowup(db, "default", DATE))?.diary?.status, "written");
+  assert.equal(sqlite.prepare("SELECT status FROM memory_candidates").get()?.status, "discarded");
+
+  assert.deepEqual(await runNightlyCatchup(env, "default", DATE, Date.now() + 20_000), []);
+  assert.equal(steps.length, 4);
+  await runNightlyCatchup(env, "default", DATE, deadlineAt);
+  assert.deepEqual(steps, ["digest", "extraction", "review", "diary", "older_digest"]);
+  assert.equal(sqlite.prepare("SELECT status FROM dream_runs WHERE date_label=?").get(older)?.status, "error");
+  assert.equal(sqlite.prepare("SELECT title FROM daily_log WHERE date=?").get(DATE)?.title, DIGEST.title);
+});
+
+test("an expired diary deadline never starts an inference or publishes a draft", async (t) => {
+  let calls = 0;
+  const { env, sqlite } = fixture(t, () => { calls++; throw new Error("unexpected model call"); });
+  seedMessages(sqlite, messages(1));
+  const result = await runDiaryWriter(env, "default", DATE, { deadlineAt: Date.now() });
+  assert.equal(result.reason, "model_timeout");
+  assert.equal(calls, 0);
+  assert.equal(sqlite.prepare("SELECT COUNT(*) AS n FROM daily_log").get()?.n, 0);
 });
 
 test("a queued run that is disabled before execution still reaches a terminal state", async (t) => {

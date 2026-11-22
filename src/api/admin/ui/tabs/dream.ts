@@ -1,39 +1,19 @@
 import { I, t } from "../helpers";
 import { rollingStatusPanel } from "../../rolling";
+import { nightlyProgressCard } from "../components/dreamProgress";
 
 export const ADMIN_TAB_DREAM = `      <!-- ===== 夜间整理 ===== -->
       <section x-show="savedApiKey.trim() && page === 'dream'" class="page" @visibilitychange.document="if (!document.hidden && page === 'dream' && !rollingStatusError) scheduleDreamPolling()">
         <header class="page-head">
           <div>
-            <h1 class="h1">${t("夜间整理", "Nightly")}</h1>
-            <p class="sub">${t("查看白天整理、夜间运行和写入结果。", "Check daytime results, nightly runs, and what was saved.")}</p>
+            <h1 class="h1">${t("整理记录", "Dream activity")}</h1>
           </div>
           <button type="button" @click="refreshDream()" class="btn btn-icon inline-flex" :aria-label="L('刷新', 'Refresh')" :title="L('刷新', 'Refresh')">${I.refresh}</button>
         </header>
 
         <p x-show="dreamStatusError" role="status" class="banner banner-warn" x-text="dreamStatusError"></p>
+        ${nightlyProgressCard()}
         ${rollingStatusPanel(t)}
-
-        <div class="stats">
-          <div class="panel dream-stat stat">
-            <span class="stat-label">${t("最近一次", "Last run")}</span>
-            <span class="flex items-center gap-2 text-[22px] font-semibold leading-[42px]" :style="'color: ' + runColor(dreamLatestRun())">
-              <span x-show="dreamLatestRun() && dreamLatestRun().status === 'ok' && !dreamLatestRun().stale">${I.checkBig}</span>
-              <span class="truncate" x-text="dreamLatestLabel()"></span>
-            </span>
-            <span class="stat-sub truncate" x-text="dreamLatestSub()"></span>
-          </div>
-          <div class="panel dream-stat stat">
-            <span class="stat-label">${t("近 7 晚", "Last 7 nights")}</span>
-            <span class="stat-num"><span x-text="dreamOkCount()"></span><span class="text-sm font-medium muted" x-text="' / ' + dreamFinishedCount() + L(' 成功', ' succeeded')"></span></span>
-            <button type="button" x-show="dreamFirstFailed()" @click="prepareRerun(dreamFirstFailed())" class="link self-start" x-text="dreamFirstFailed() ? L(dayLabel(dreamFirstFailed().date_label) + ' 失败了，去重跑 →', dayLabel(dreamFirstFailed().date_label) + ' failed. Re-run →') : ''"></button>
-          </div>
-          <div class="panel dream-stat stat">
-            <span class="stat-label">${t("近 7 天整理了", "Processed this week")}</span>
-            <span class="stat-num"><span x-text="dreamProcessedTotal()"></span><span class="text-sm font-medium muted" x-text="L(' 条消息', ' messages')"></span></span>
-            <span class="stat-sub" x-text="dreamRuns.length ? L('平均每晚 ', 'About ') + Math.round(dreamProcessedTotal() / Math.max(dreamRuns.length, 1)) + L(' 条', ' a night') : ''"></span>
-          </div>
-        </div>
 
         <div class="grid gap-5 lg:grid-cols-[minmax(0,1fr)_360px] lg:items-start">
           <div class="flex flex-col gap-5">
@@ -57,34 +37,40 @@ export const ADMIN_TAB_DREAM = `      <!-- ===== 夜间整理 ===== -->
 
             <section id="dream-run" class="panel panel-pad flex flex-col gap-4">
               <div>
-                <h2 class="h2">${t("手动整理一晚", "Run a night by hand")}</h2>
-                <p class="mt-1 text-[13px] muted">${t("补跑某一晚，或者先看看会整理出什么。", "Catch up a missed night, or preview what it would produce.")}</p>
+                <h2 class="h2">${t("按日期继续整理", "Continue by date")}</h2>
+                <p class="mt-1 text-[13px] muted">${t("从上次保存的进度接着做。提交后可以关掉页面。", "Continue from the last saved progress. You can close this page after submitting.")}</p>
               </div>
               <div class="flex flex-wrap items-end gap-3">
-                <label class="block"><span class="label">${t("哪一晚", "Night of")}</span><input type="date" x-model="dreamDate" class="field w-auto"></label>
+                <label class="block"><span class="label">${t("对话日期", "Chat date")}</span><input type="date" x-model="dreamDate" class="field w-auto"></label>
                 <label class="check"><input type="checkbox" x-model="dreamDryRun"><span>${t("只预览，不写入", "Preview only, don’t save")}</span></label>
-                <label class="check"><input type="checkbox" x-model="dreamForce"><span>${t("已经整理过的也重来", "Redo if already processed")}</span></label>
-                <button type="button" @click="triggerDream()" :disabled="dreamTriggering || (!dreamDryRun && dreamActiveRun)" class="btn btn-primary ml-auto">${I.moon}<span x-text="dreamTriggering ? (dreamDryRun ? L('预览中，请保持页面打开…', 'Previewing — keep this page open…') : L('提交中…', 'Submitting…')) : (dreamDryRun ? L('预览', 'Preview') : L('开始', 'Start'))"></span></button>
+                <button type="button" @click="triggerDream()" :disabled="dreamTriggering || (!dreamDryRun && dreamActiveRun)" class="btn btn-primary ml-auto">${I.moon}<span x-text="dreamTriggering ? (dreamDryRun ? L('预览中，请保持页面打开…', 'Previewing. Keep this page open…') : L('提交中…', 'Submitting…')) : (dreamDryRun ? L('预览', 'Preview') : L('继续整理', 'Continue'))"></span></button>
               </div>
-              <p class="text-xs muted">${t("预览时请保持页面打开，结果不写入。关掉预览才是真跑，提交后可以关页。", "Keep this page open while a preview runs; nothing is saved. Untick preview to run for real; once it’s queued you can close the page.")}</p>
+              <details class="text-xs muted">
+                <summary class="cursor-pointer">${t("更多选项", "More options")}</summary>
+                <label class="check mt-2"><input type="checkbox" x-model="dreamForce"><span>${t("从头重新整理这一天", "Start this date from the beginning")}</span></label>
+              </details>
 
-              <div x-show="dreamActiveRun" class="banner" :class="dreamActiveRun && dreamActiveRun.stale ? 'banner-warn' : ''">
+              <div id="dream-active-run" x-show="dreamActiveRun" class="banner flex-wrap" :class="dreamActiveRun && dreamActiveRun.stale ? 'banner-warn' : ''">
                 <div class="min-w-0 flex-1">
-                  <div x-text="dreamActiveRun && (L('任务 ', 'Run ') + dreamActiveRun.id + ' · ' + dreamStatusLabel(dreamActiveRun.status, dreamActiveRun.stale))"></div>
-                  <p class="mt-1 text-xs" x-show="dreamActiveRun && dreamActiveRun.stale">${t("任务可能已经中断，完成状态还没确认。不会自动重跑，勾了「已经整理过的也重来」也盖不过它，请先核查（比如看 Worker 日志）。", "This run may have stopped, and whether it finished isn’t confirmed. It won’t re-run on its own, and “Redo” can’t override it. Check first (for example in the Worker logs).")}</p>
+                  <div x-text="dreamActiveRun && (dayLabel(dreamActiveRun.date_label, true) + ' · ' + dreamStatusLabel(dreamActiveRun.status, dreamActiveRun.stale))"></div>
+                  <p class="mt-1 text-xs" x-show="dreamActiveRun && dreamActiveRun.stale">${t("超过 20 分钟没收到完成结果。确认任务已经停止后，可以标记中断并继续这一天。", "No completion was recorded within 20 minutes. If the task has stopped, mark it as stopped and continue this date.")}</p>
+                  <details class="mt-1 text-xs muted" x-show="dreamActiveRun">
+                    <summary class="cursor-pointer">${t("技术详情", "Technical details")}</summary>
+                    <code class="break-all" x-text="dreamActiveRun?.id"></code>
+                  </details>
                 </div>
-                <button type="button" x-show="dreamActiveRun && dreamActiveRun.stale" @click="resolveDreamRun()" :disabled="dreamResolving" class="btn btn-sm btn-warn"><span x-text="dreamResolving ? L('标记中…', 'Marking…') : L('核查后标记为已中断', 'Checked — mark as stopped')"></span></button>
+                <button type="button" x-show="dreamActiveRun && dreamActiveRun.stale" @click="resolveDreamRun()" :disabled="dreamResolving" class="btn btn-sm btn-warn"><span x-text="dreamResolving ? L('标记中…', 'Marking…') : L('标记为中断', 'Mark as stopped')"></span></button>
               </div>
 
               <div x-show="dreamRunResult" class="flex flex-col gap-3">
                 <template x-if="dreamRunResult && dreamRunResult.run_id">
-                  <div class="banner" x-text="L('任务 ', 'Run ') + dreamRunResult.run_id + ' · ' + dreamStatusLabel(dreamRunResult.status, dreamRunResult.stale)"></div>
+                  <div class="banner" x-text="dayLabel(dreamRunResult.date, true) + ' · ' + dreamStatusLabel(dreamRunResult.status, dreamRunResult.stale)"></div>
                 </template>
                 <template x-if="dreamRunResult && dreamRunResult.result && !dreamRunResult.result.ran">
-                  <div class="banner" x-text="L('这一晚没有整理：', 'Nothing was run for this night: ') + dreamReasonLabel(dreamRunResult.result.reason)"></div>
+                  <div class="banner" x-text="dreamReasonLabel(dreamRunResult.result.reason)"></div>
                 </template>
                 <template x-if="dreamRunResult && !dreamRunResult.dry_run && dreamRunResult.result && dreamRunResult.result.ran">
-                  <div class="banner banner-ok"><span class="font-semibold">${t("这一晚整理完了。", "This night is done.")}</span> <span x-text="dreamRunStatsLine()"></span></div>
+                  <div class="banner banner-ok"><span class="font-semibold">${t("这一批对话已整理。", "This batch of chats is processed.")}</span> <span x-text="dreamRunStatsLine()"></span></div>
                 </template>
                 <template x-if="dreamRunResult && dreamRunResult.dry_run && dreamRunResult.result && dreamRunResult.result.ran">
                   <div class="flex flex-col gap-3 rounded-[12px] p-4" style="background: var(--soft)">
@@ -126,7 +112,8 @@ export const ADMIN_TAB_DREAM = `      <!-- ===== 夜间整理 ===== -->
           </div>
 
           <section class="panel panel-pad">
-            <h2 class="h2 mb-4">${t("最近 7 晚", "Last 7 nights")}</h2>
+            <h2 class="h2">${t("最近 7 天的整理批次", "Processing batches in the last 7 days")}</h2>
+            <p x-show="dreamFinishedCount()" class="mb-4 mt-1 text-xs muted" x-text="L(dreamOkCount() + ' / ' + dreamFinishedCount() + ' 批完成 · 处理 ' + dreamProcessedTotal() + ' 条消息', dreamOkCount() + ' / ' + dreamFinishedCount() + ' batches completed · ' + dreamProcessedTotal() + ' messages processed')"></p>
             <template x-if="dreamRuns.length === 0"><p class="text-[13px] muted">${t("近 7 天还没有整理记录。", "No runs in the last 7 days.")}</p></template>
             <div class="dream-rail flex flex-col gap-4">
               <template x-for="run in dreamRuns" :key="run.id">
@@ -139,14 +126,17 @@ export const ADMIN_TAB_DREAM = `      <!-- ===== 夜间整理 ===== -->
                     </span>
                     <span class="text-xs muted" x-text="dreamTriggerLabel(run.trigger) + ' · ' + dreamDuration(run)"></span>
                   </div>
-                  <div class="mt-0.5 text-xs muted" x-text="(run.model || L('模型未知', 'Unknown model')) + ' · ' + L((run.processed_messages == null ? '—' : run.processed_messages) + ' 条消息', (run.processed_messages == null ? '—' : run.processed_messages) + ' messages')"></div>
-                  <template x-if="dreamRunNote(run)">
-                    <div class="mt-1.5">
-                      <p class="text-xs leading-5" style="color: var(--t2)" :class="isDreamExpanded(run.id) ? '' : 'line-clamp-2'" x-text="dreamRunNote(run)"></p>
-                      <button type="button" x-show="dreamRunNote(run).length > 80" @click="toggleDreamExpand(run.id)" class="link-btn" x-text="isDreamExpanded(run.id) ? L('收起', 'Show less') : L('展开', 'Show more')"></button>
+                  <p x-show="run.processed_messages != null" class="mt-0.5 text-xs muted" x-text="L(run.processed_messages + ' 条消息', run.processed_messages + ' messages')"></p>
+                  <p x-show="dreamRunNote(run)" class="mt-1 text-xs leading-5" x-text="dreamRunNote(run)"></p>
+                  <button type="button" x-show="canResumeDreamRun(run)" @click="prepareDreamResume(run.date_label)" class="btn btn-sm mt-2" x-text="L('继续这一天', 'Continue this date')"></button>
+                  <details class="mt-1 text-xs muted">
+                    <summary class="cursor-pointer">${t("技术详情", "Technical details")}</summary>
+                    <div class="mt-1 space-y-1 break-all">
+                      <p x-text="run.model || L('模型未记录', 'Model not recorded')"></p>
+                      <code x-text="run.id"></code>
+                      <pre x-show="run.reason || run.error" class="whitespace-pre-wrap" x-text="[run.reason, run.error].filter(Boolean).join(' · ')"></pre>
                     </div>
-                  </template>
-                  <button type="button" x-show="run.status === 'error' && !run.stale" @click="prepareRerun(run)" class="btn btn-sm mt-2" x-text="L('重跑这一晚', 'Re-run this night')"></button>
+                  </details>
                 </div>
               </template>
             </div>
@@ -156,8 +146,8 @@ export const ADMIN_TAB_DREAM = `      <!-- ===== 夜间整理 ===== -->
         <section class="panel">
           <div class="panel-head pb-1">
             <div>
-              <h2 class="h2">${t("某一晚的收成", "What a night produced")}</h2>
-              <p class="mt-1 text-[13px] muted">${t("那晚新记住了什么，哪些淡出了。", "What was remembered that night, and what faded.")}</p>
+              <h2 class="h2">${t("按日期查看记忆变动", "Memory changes by date")}</h2>
+              <p class="mt-1 text-[13px] muted">${t("以实际写入和审核的日期为准。", "Dates reflect when records were saved or reviewed.")}</p>
             </div>
             <label class="flex items-center gap-2 text-[13px] muted"><span>${t("日期", "Date")}</span><input type="date" x-model="dreamHarvestDate" @change="loadDreamHarvest()" class="field field-sm"></label>
           </div>
@@ -171,7 +161,7 @@ export const ADMIN_TAB_DREAM = `      <!-- ===== 夜间整理 ===== -->
                 <span class="chev ml-auto" :class="harvestOpen.new ? 'is-open' : ''">${I.chevron}</span>
               </button>
               <div x-show="harvestOpen.new" class="mt-3 flex flex-col gap-2.5">
-                <template x-if="dreamHarvestCreated().length === 0"><p class="text-xs muted">${t("这一晚没有新记住的。", "Nothing new that night.")}</p></template>
+                <template x-if="dreamHarvestCreated().length === 0"><p class="text-xs muted">${t("这一天没有新增记忆。", "No memories were added on this date.")}</p></template>
                 <template x-for="item in dreamHarvestCreated()" :key="item.id">
                   <div class="flex items-start gap-2"><span class="chip" :class="typeChipClass(item.type)" x-text="typeLabel(item.type)"></span><span class="min-w-0 flex-1 text-[13px] leading-6" x-text="item.content"></span></div>
                 </template>
@@ -184,7 +174,7 @@ export const ADMIN_TAB_DREAM = `      <!-- ===== 夜间整理 ===== -->
                 <span class="chev ml-auto" :class="harvestOpen.dim ? 'is-open' : ''">${I.chevron}</span>
               </button>
               <div x-show="harvestOpen.dim" class="mt-3 flex flex-col gap-2.5">
-                <template x-if="dreamHarvestDormant().length === 0"><p class="text-xs muted">${t("这一晚没有淡出的。", "Nothing faded that night.")}</p></template>
+                <template x-if="dreamHarvestDormant().length === 0"><p class="text-xs muted">${t("这一天没有记忆归档或被替换。", "No memories were archived or replaced on this date.")}</p></template>
                 <template x-for="item in dreamHarvestDormant()" :key="item.id">
                   <div class="text-[13px] leading-6">
                     <div class="flex flex-wrap items-center gap-2 text-xs"><span class="chip chip-dim" x-text="dreamDormantLabel(item.status)"></span><span class="chip" :class="typeChipClass(item.type)" x-text="typeLabel(item.type)"></span></div>
@@ -201,7 +191,7 @@ export const ADMIN_TAB_DREAM = `      <!-- ===== 夜间整理 ===== -->
                 <span class="chev ml-auto" :class="harvestOpen.judged ? 'is-open' : ''">${I.chevron}</span>
               </button>
               <div x-show="harvestOpen.judged" class="mt-3 flex flex-col gap-2.5">
-                <template x-if="dreamHarvestCandidates().length === 0"><p class="text-xs muted">${t("这一晚没有审核。", "No review decisions that night.")}</p></template>
+                <template x-if="dreamHarvestCandidates().length === 0"><p class="text-xs muted">${t("这一天没有审核结果。", "No review decisions on this date.")}</p></template>
                 <template x-for="item in dreamHarvestCandidates()" :key="item.id">
                   <div class="text-[13px] leading-6">
                     <div class="flex flex-wrap items-center gap-2 text-xs"><span class="chip" :class="item.status === 'approved' ? 'chip-ok' : 'chip-dim'" x-text="dreamCandidateStatusLabel(item.status)"></span><span class="muted" x-text="dreamCandidateSourceLabel(item.source)"></span></div>
