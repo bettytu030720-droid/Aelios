@@ -408,6 +408,25 @@ export const ADMIN_SCRIPT_SETTINGS = String.raw`    async init() {
         if (current()) this.recallHistoryLoading = false;
       }
     },
+    async loadRecallSources(record, item, index) {
+      if (item.sourcesLoading || item.sources || !this.recallHistory.includes(record)) return;
+      const revision = this.recallHistoryRevision;
+      const identity = this.selectedIdentity;
+      const base = this.base(), key = this.apiKey;
+      const current = () => revision === this.recallHistoryRevision && identity === this.selectedIdentity &&
+        base === this.base() && key === this.apiKey;
+      item.sourcesLoading = true;
+      item.sourcesError = '';
+      try {
+        const params = new URLSearchParams({ identity, recall: record.id, item: String(index) });
+        const sources = await this.request('/api/gateway/recalls?' + params);
+        if (current()) item.sources = sources;
+      } catch (error) {
+        if (current()) item.sourcesError = this.L('原始消息读取失败：', 'Couldn’t load original messages: ') + error.message;
+      } finally {
+        if (current()) item.sourcesLoading = false;
+      }
+    },
     async gwLoad(manual) {
       if (this.gwBusy) return;
       this.gwBusy = true;

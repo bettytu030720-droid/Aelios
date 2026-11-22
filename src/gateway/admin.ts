@@ -1,6 +1,7 @@
 import { authenticate } from "../auth/apiKey";
+import { getMessagesByIds } from "../db/messages";
 import type { Env } from "../types";
-import { identityNamespace, invalidateSettingsCache, loadConfig, object, validateConfig, type GatewayConfig } from "./config";
+import { identityNamespace, identityReadNamespaces, invalidateSettingsCache, loadConfig, object, validateConfig, type GatewayConfig, type Identity } from "./config";
 import { describeSettings } from "./settings";
 
 export async function ownerOnly(request: Request, env: Env): Promise<boolean> {
@@ -62,13 +63,42 @@ export async function handleGatewaySpaces(request: Request, env: Env): Promise<R
   return Response.json({ spaces: (rows.results || []).map(row => ({ namespace: row.namespace, memories: Number(row.memories) })) },
     { headers: { "cache-control": "no-store" } });
 }
-/** Read-only recall explanations for one configured identity, including empty/error decisions. */
+async function recallSources(env: Env, identity: Identity, params: URLSearchParams): Promise<Response> {
+  const id = params.get("recall");
+  const item = params.get("item");
+  const index = Number(item);
+  if (!id || id.length > 128 || item === null || !/^\d+$/.test(item) || !Number.isSafeInteger(index)) {
+    return Response.json({ error: "A recall ID and item index are required" }, { status: 400 });
+  }
+  const row = await env.DB.prepare(`SELECT payload_json FROM memory_events
+    WHERE id = ? AND namespace = ? AND event_type = 'recall_explain' AND json_extract(payload_json, '$.identity') = ?`)
+    .bind(id, identityNamespace(identity), identity.slug).first<{ payload_json: string }>();
+  const entry = row && JSON.parse(row.payload_json)?.items?.[index];
+  if (!object(entry) || !identityReadNamespaces(identity).includes(entry.namespace)) {
+    return Response.json({ error: "Recalled item not found in this assistant's spaces" }, { status: 404 });
+  }
+
+  // The stored item supplies both the space and the citations. Retention may have removed some originals.
+  const sourceIds = Array.isArray(entry.source_ids)
+    ? [...new Set(entry.source_ids.filter((id: unknown): id is string => typeof id === "string" && id.length > 0))]
+    : [];
+  const ids = sourceIds.slice(0, 90);
+  const messages = await getMessagesByIds(env.DB, { namespace: entry.namespace, ids });
+  return Response.json({
+    messages: messages.map(({ id, role, created_at, content }) => ({ id, role, created_at, content })),
+    missing: ids.length - new Set(messages.map(message => message.id)).size,
+    omitted: sourceIds.length - ids.length
+  }, { headers: { "cache-control": "no-store" } });
+}
+
+/** Read-only recall explanations and their sources for one configured identity. */
 export async function handleRecallHistory(request: Request, env: Env): Promise<Response> {
   if (!await ownerOnly(request, env)) return Response.json({ error: "Owner key required" }, { status: 401 });
-  const slug = new URL(request.url).searchParams.get("identity");
+  const params = new URL(request.url).searchParams;
   const config = await loadConfig(env);
-  const identity = config.identities.find(i => i.slug === slug);
+  const identity = config.identities.find(i => i.slug === params.get("identity"));
   if (!identity) return Response.json({ error: "Unknown identity" }, { status: 400 });
+  if (params.has("recall") || params.has("item")) return recallSources(env, identity, params);
   const rows = await env.DB.prepare(`SELECT id, created_at, payload_json FROM memory_events
     WHERE namespace = ? AND event_type = 'recall_explain' AND json_extract(payload_json, '$.identity') = ?
     ORDER BY created_at DESC, id DESC LIMIT 20`).bind(identityNamespace(identity), identity.slug)
