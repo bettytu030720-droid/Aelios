@@ -82,6 +82,15 @@ function meetingDayClock() {
       const days = (this.meetingToday - Date.parse(metOn)) / 86400000;
       return Number.isInteger(days) && days >= 0 ? days : null;
     },
+    // Same month and day as the first meeting, in a later year. Feb 29 counts as Feb 28 in other years.
+    isMeetingAnniversary(metOn) {
+      const [metYear, month, day] = String(metOn || '').split('-').map(Number);
+      if (!metYear || !month || !day || !Number.isFinite(this.meetingToday)) return false;
+      const today = new Date(this.meetingToday);
+      const year = today.getUTCFullYear();
+      const lastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+      return year > metYear && today.getUTCMonth() + 1 === month && today.getUTCDate() === Math.min(day, lastDay);
+    },
     celebrateMeetingDay(identity) {
       const days = this.daysSinceMeeting(identity?.metOn);
       const milestone = [identity?.slug, this.meetingToday, days].join(':');
@@ -89,7 +98,7 @@ function meetingDayClock() {
       viewedMilestone = milestone;
       window.clearTimeout(starsTimer);
       this.meetingStars = [];
-      if (!days || (days !== 520 && days % 100 !== 0 && days % 365 !== 0) ||
+      if (!days || (days !== 520 && days % 100 !== 0 && !this.isMeetingAnniversary(identity?.metOn)) ||
         playedMeetingMilestones.has(milestone) || window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
       playedMeetingMilestones.add(milestone);
       const count = 18;
