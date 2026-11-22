@@ -20,11 +20,29 @@ export const ADMIN_SCRIPT_DREAM_PROGRESS = `    nightlyProgress(status, date, vi
       else if (off) title = this.L('夜间整理已关闭', 'Nightly Dream is off');
       else if (stopped || cursor) title = this.L('还有对话待整理', 'Some chats still need processing');
       return {
-        date, title, canContinue,
+        date, title, done, busy, canContinue,
         needsAttention: !busy && !empty && (canContinue || Boolean(active?.stale && active.date_label === date)),
         review: empty ? '' : this.nightlyReviewLabel(stages.review, status.review_enabled, done),
         diary: empty ? '' : this.nightlyDiaryLabel(stages.diary, status.diary_enabled, done, visibleDiary)
       };
+    },
+    homeNightlyProgress() {
+      const status = this.home.status;
+      if (!status || !status.anchor_date_label || this.home.dreamStatusError) return null;
+      return this.nightlyProgress(status, status.anchor_date_label, this.homeHasDiary(status.anchor_date_label));
+    },
+    homeNightlyColor() {
+      const progress = this.homeNightlyProgress();
+      if (!progress) return 'var(--t3)';
+      if (progress.needsAttention || progress.busy) return 'var(--warn)';
+      if (progress.done) return 'var(--ok)';
+      return 'var(--t3)';
+    },
+    homeNightlySub() {
+      if (this.home.dreamStatusError) return this.L('刷新再看', 'Refresh to retry');
+      const progress = this.homeNightlyProgress();
+      if (!progress) return this.L('还没有记录', 'No runs yet');
+      return [progress.review, progress.diary].filter(Boolean).join(' · ') || this.dayLabel(progress.date, true);
     },
     homeHasDiary(date) {
       if (!this.home.diaryLoaded || this.home.diary?.date > date) return undefined;
@@ -34,13 +52,13 @@ export const ADMIN_SCRIPT_DREAM_PROGRESS = `    nightlyProgress(status, date, vi
       if (review?.status === 'off' || (!review && enabled === false)) return this.L('自动审核已关闭', 'Auto-review is off');
       if (review?.status === 'failed') return this.L('自动审核没完成', 'Auto-review did not finish');
       if (review?.status === 'partial') {
-        return review.failed ? this.L('有 ' + review.failed + ' 条候选暂未审完', review.failed + ' candidates could not be reviewed')
-          : this.L('还有候选待审', 'More candidates are waiting');
+        return review.failed ? this.L('有 ' + review.failed + ' 条暂未审完', review.failed + ' items could not be reviewed')
+          : this.L('还有记忆待审核', 'More items are waiting for review');
       }
       if (review?.status === 'done') return review.approved
         ? this.L('本轮自动通过 ' + review.approved + ' 条', review.approved + ' approved in the last review')
-        : this.L('本轮没有自动通过的候选', 'No candidates approved in the last review');
-      return done ? this.L('还没有审核结果', 'No review result recorded') : this.L('等待候选审核', 'Waiting for review');
+        : this.L('本轮没有自动通过的新记忆', 'No memories approved in the last review');
+      return done ? this.L('还没有审核结果', 'No review result recorded') : this.L('等待自动审核', 'Waiting for review');
     },
     nightlyDiaryLabel(diary, enabled, done, visibleDiary) {
       if (diary?.status === 'failed') return this.L('日记还没写成', 'Journal could not be written')

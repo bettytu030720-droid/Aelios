@@ -1,6 +1,5 @@
 import { I, HEART_FILLED, t } from "../helpers";
 import { MEETING_CARD } from "../components/meetingCard";
-import { nightlyProgressCard } from "../components/dreamProgress";
 
 export const ADMIN_TAB_HOME = `      <!-- ===== 首页 ===== -->
       <section x-show="savedApiKey.trim() && page === 'today'" class="page">
@@ -15,15 +14,6 @@ export const ADMIN_TAB_HOME = `      <!-- ===== 首页 ===== -->
         ${MEETING_CARD}
 
         <p x-show="home.dreamStatusError" class="banner banner-warn" role="status">${t("暂时读不到整理状态，可以刷新再看。", "Dream status is temporarily unavailable. Refresh to check again.")}</p>
-        <section x-show="home.status?.rolling && !home.dreamStatusError" class="panel panel-pad flex flex-wrap items-center justify-between gap-3">
-          <div class="min-w-0">
-            <h2 class="h2">${t("白天整理", "Daytime Dream")}</h2>
-            <p class="mt-1 text-[13px] muted" x-show="homeRollingSummary()" x-text="homeRollingSummary()"></p>
-            <p class="mt-1 text-[13px]" role="status" style="color: var(--warn)" x-show="homeRollingWarning()" x-text="homeRollingWarning()"></p>
-          </div>
-          <button type="button" @click="go('dream')" class="btn btn-sm">${t("查看整理记录", "View Dream activity")}</button>
-        </section>
-        ${nightlyProgressCard("home.status")}
 
         <div class="stats">
           <div class="panel dream-stat stat">
@@ -37,20 +27,37 @@ export const ADMIN_TAB_HOME = `      <!-- ===== 首页 ===== -->
             <button type="button" @click="go('review')" class="link self-start">${t("去审核 →", "Start review →")}</button>
           </div>
           <div class="panel dream-stat stat">
+            <span class="stat-label">${t("昨晚整理", "Last night")}</span>
+            <span class="flex items-center gap-2 text-[22px] font-semibold leading-[42px]" :style="'color: ' + homeNightlyColor()">
+              <span x-show="homeNightlyProgress()?.done && !homeNightlyProgress()?.needsAttention">${I.checkBig}</span>
+              <span class="truncate" x-text="home.dreamStatusError ? L('暂不可读', 'Unavailable') : (homeNightlyProgress()?.title || L('还没跑过', 'Not yet'))"></span>
+            </span>
+            <span class="stat-sub" x-text="homeNightlySub()"></span>
+          </div>
+          <div class="panel dream-stat stat">
             <span class="stat-label">${t("记忆库", "Memories")}</span>
             <span class="stat-num"><span x-text="capacityUsed()"></span><span class="text-sm font-medium muted" x-text="' / ' + capacityTotal()"></span></span>
             <span class="bar mt-2" aria-hidden="true"><div :style="'width:' + capacityPercent() + '%'"></div></span>
           </div>
         </div>
 
-        <section x-show="pendingCount || importPendingCount" class="flex flex-col gap-3">
-          <h2 class="h2">${t("待审与导入", "Review and imports")}</h2>
+        <section x-show="home.status?.rolling && !home.dreamStatusError" class="panel panel-pad flex flex-wrap items-center justify-between gap-3">
+          <div class="min-w-0">
+            <h2 class="h2">${t("白天整理", "Daytime Dream")}</h2>
+            <p class="mt-1 text-[13px] muted" x-show="homeRollingSummary()" x-text="homeRollingSummary()"></p>
+            <p class="mt-1 text-[13px]" role="status" style="color: var(--warn)" x-show="homeRollingWarning()" x-text="homeRollingWarning()"></p>
+          </div>
+          <button type="button" @click="go('dream')" class="btn btn-sm">${t("查看整理记录", "View Dream activity")}</button>
+        </section>
+
+        <section x-show="pendingCount || importPendingCount || homeNightlyProgress()?.needsAttention" class="flex flex-col gap-3">
+          <h2 class="h2">${t("需要你处理", "Needs you")}</h2>
           <div class="panel divide">
             <div x-show="pendingCount" class="row">
               <span class="avatar">${I.inbox}</span>
               <div class="min-w-0 flex-1">
-                <div class="font-semibold" x-text="L(pendingCount + ' 条候选待审', pendingCount + ' candidates to review')"></div>
-                <div class="text-[13px] muted">${t("候选在审核通过后才会进入记忆库。", "Review approves which candidates enter Memories.")}</div>
+                <div class="font-semibold" x-text="L(pendingCount + ' 条新记忆等你确认', pendingCount + ' new memories to confirm')"></div>
+                <div class="text-[13px] muted">${t("整理时拿不准的，确认后才会长期记住。", "Found during Dream. They’re kept long-term only after you confirm.")}</div>
               </div>
               <button type="button" @click="reviewTab = 'daily'; go('review')" class="btn btn-primary btn-sm">${t("开始审核", "Start review")}</button>
             </div>
@@ -61,6 +68,14 @@ export const ADMIN_TAB_HOME = `      <!-- ===== 首页 ===== -->
                 <div class="text-[13px] muted">${t("从别处导进来的，要你自己点。", "Brought in from elsewhere. These wait for you.")}</div>
               </div>
               <button type="button" @click="go('review'); openImportReview()" class="btn btn-sm">${t("查看", "View")}</button>
+            </div>
+            <div x-show="homeNightlyProgress()?.needsAttention" class="row">
+              <span class="avatar" style="background: var(--warnbg); color: var(--warn)">${I.alert}</span>
+              <div class="min-w-0 flex-1">
+                <div class="font-semibold" x-text="homeNightlyProgress() ? (L('昨晚整理 · ', 'Last night · ') + homeNightlyProgress().title) : ''"></div>
+                <div class="text-[13px] muted" x-text="homeNightlySub()"></div>
+              </div>
+              <button type="button" @click="openDreamProgress(homeNightlyProgress(), home.status)" class="btn btn-sm" x-text="home.status?.active_run ? L('查看任务状态', 'Check task status') : L('继续整理', 'Continue processing')"></button>
             </div>
           </div>
         </section>

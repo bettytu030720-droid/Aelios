@@ -12,7 +12,7 @@ export const ADMIN_TAB_DREAM = `      <!-- ===== 夜间整理 ===== -->
         </header>
 
         <p x-show="dreamStatusError" role="status" class="banner banner-warn" x-text="dreamStatusError"></p>
-        ${nightlyProgressCard("dreamStatus")}
+        ${nightlyProgressCard()}
         ${rollingStatusPanel(t)}
 
         <div class="grid gap-5 lg:grid-cols-[minmax(0,1fr)_360px] lg:items-start">

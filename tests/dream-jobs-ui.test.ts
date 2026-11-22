@@ -188,8 +188,11 @@ test("the home page shows the latest daytime writes and leaves recovered failure
     return { data: {} };
   };
   await app.loadHome();
-  assert.match(app.homeRollingSummary(), /生成 2 条待审候选，入库 1 条记忆/);
+  assert.match(app.homeRollingSummary(), /新增 2 条待确认，入库 1 条记忆/);
   assert.equal(app.homeRollingWarning(), "");
+  app.home.status.rolling.recent_windows = [{ status: "completed", extractor_calls: 1, writes: { candidates: 2, memories: 0, revisions: 0 } }];
+  assert.equal(app.homeRollingSummary(), "最近一批新增 2 条待确认。");
+  assert.doesNotMatch(app.homeRollingSummary(), /入库 0 条/);
   app.home.status.rolling.current_window = { state: "retrying", last_failure: failed };
   assert.match(app.homeRollingSummary(), /自动再试/);
   app.home.status.rolling.current_window = null;
@@ -198,11 +201,20 @@ test("the home page shows the latest daytime writes and leaves recovered failure
   assert.equal(app.homeRollingWarning(), "");
   assert.match(ADMIN_HTML, /id="daytime-dream"/);
   assert.match(ADMIN_HTML, /原话已留给夜间抽取/);
+  const homeHtml = ADMIN_HTML.slice(ADMIN_HTML.indexOf("<!-- ===== 首页 ====="), ADMIN_HTML.indexOf("<!-- ===== 待审 ====="));
+  const statsEnd = homeHtml.indexOf("<!-- ===== 首页 =====") >= 0 ? homeHtml.indexOf("</div>\n\n        <section x-show=\"home.status?.rolling") : -1;
+  assert.ok(statsEnd > homeHtml.indexOf('<div class="stats">'), "Daytime Dream should sit below the stats grid");
+  assert.equal((homeHtml.match(/class="panel dream-stat stat"/g) || []).length, 4, "Home stats grid should keep 4 balanced tiles");
+  assert.match(homeHtml, /需要你处理/);
+  assert.match(homeHtml, /条新记忆等你确认/);
+  assert.match(homeHtml, /整理时拿不准的，确认后才会长期记住/);
+  assert.doesNotMatch(homeHtml, /待审与导入|条候选待审/);
 
   app.request = async () => { throw new Error("status unavailable"); };
   await app.loadHome();
   assert.equal(app.homeRollingSummary(), "");
   assert.equal(app.home.dreamStatusError, true);
+  assert.equal(app.homeNightlyProgress(), null);
 });
 
 test("a failed catch-up is separate from the latest dialogue date, and Continue resumes only that date", async () => {
@@ -232,11 +244,13 @@ test("a failed catch-up is separate from the latest dialogue date, and Continue 
   };
   await app.loadHome();
   assert.equal(dateRead, date);
-  const progress = app.nightlyProgress(app.home.status, date, app.homeHasDiary(date));
+  const progress = app.homeNightlyProgress();
   assert.equal(progress.title, "对话已整理");
   assert.equal(progress.review, "还没有审核结果");
   assert.equal(progress.diary, "日记还没写好");
   assert.equal(progress.canContinue, true);
+  assert.equal(app.homeNightlyColor(), "var(--warn)");
+  assert.match(app.homeNightlySub(), /日记还没写好/);
   assert.doesNotMatch(app.dreamRunNote(older), /Raw diagnostic/);
   app.go = (page: string) => { app.page = page; };
   app.dreamForce = true;
@@ -251,6 +265,7 @@ test("a failed catch-up is separate from the latest dialogue date, and Continue 
   assert.equal(settled.review, "本轮自动通过 2 条");
   assert.equal(settled.diary, "日记已写好");
   assert.equal(settled.needsAttention, false);
+  assert.equal(settled.done, true);
 });
 
 test("a stale task offers an explicit close-out that confirms, posts the run id, then refreshes and unblocks submission", async () => {

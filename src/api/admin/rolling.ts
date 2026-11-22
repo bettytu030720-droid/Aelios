@@ -10,7 +10,7 @@ function windowResult(t: Translate) {
     <p class="mt-1 text-sm" x-text="window.status === 'failed' ? rollingFailureLabel(window) : rollingWriteSummary(window)"></p>
     <p x-show="window.disposition" class="mt-1 text-xs muted" x-text="rollingDispositionLabel(window)"></p>
     <div x-show="window.writes" class="mt-1 flex flex-wrap gap-3 text-xs">
-      <button x-show="window.writes && window.writes.candidates" type="button" @click="reviewTab = 'daily'; go('review')" class="link">${t("查看待审候选", "Open Review")}</button>
+      <button x-show="window.writes && window.writes.candidates" type="button" @click="reviewTab = 'daily'; go('review')" class="link">${t("去待审查看", "Open Review")}</button>
       <button x-show="window.writes && (window.writes.memories || window.writes.revisions)" type="button" @click="go('memory')" class="link">${t("打开记忆库", "Open Memories")}</button>
     </div>
     <details class="mt-1 text-xs muted">

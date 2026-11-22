@@ -73,9 +73,11 @@ export const ADMIN_SCRIPT_ROLLING = `    rollingStatus() {
       }
       if (!window.writes) return this.L('这条历史记录没有写入明细。', 'This older run has no write details.');
       const { candidates, memories, revisions } = window.writes;
-      const summary = this.L('待审候选 ' + candidates + ' 条 · 入库记忆 ' + memories + ' 条',
-        candidates + ' review candidates · ' + memories + ' memories saved');
-      return summary + (revisions ? this.L(' · 历史修订 ' + revisions + ' 条', ' · ' + revisions + ' historical revisions') : '');
+      const parts = [];
+      if (candidates) parts.push(this.L('待确认 ' + candidates + ' 条', candidates + ' to confirm'));
+      if (memories) parts.push(this.L('入库记忆 ' + memories + ' 条', memories + ' memories saved'));
+      if (revisions) parts.push(this.L('历史修订 ' + revisions + ' 条', revisions + ' historical revisions'));
+      return parts.length ? parts.join(' · ') : this.L('没有新写入。', 'Nothing saved.');
     },
     rollingDispositionLabel(window) {
       if (window.disposition === 'nightly') return this.L('原话已留给夜间抽取。', 'The original messages were left for nightly extraction.');
@@ -117,13 +119,13 @@ export const ADMIN_SCRIPT_ROLLING = `    rollingStatus() {
       if (!last) return this.L('还没有白天整理记录。', 'No daytime batches yet.');
       if (last.status === 'failed') return last.disposition === 'nightly'
         ? this.L('这一批白天没有整理完，原话留给夜间整理。', 'This batch stopped during the day. Its chats were left for Nightly Dream.') : '';
-      if (!last.extractor_calls) return this.L('最近一批对话筛选完毕，没有生成新候选。', 'The latest chat batch was screened and produced no candidates.');
+      if (!last.extractor_calls) return this.L('最近一批对话筛选完毕，没有要记的新内容。', 'The latest chat batch was screened and found nothing new to save.');
       if (!last.writes) return this.L('最近一批对话已整理。', 'The latest chat batch was processed.');
       const { candidates, memories, revisions } = last.writes;
-      if (!candidates && !memories && !revisions) return this.L('最近一批没有生成候选或写入记忆。', 'The latest batch produced no candidates or memories.');
+      if (!candidates && !memories && !revisions) return this.L('最近一批没有写入新记忆。', 'The latest batch saved no new memories.');
       const parts = [];
-      if (candidates) parts.push(this.L('生成 ' + candidates + ' 条待审候选', candidates + ' sent to Review'));
-      if (candidates || memories) parts.push(this.L('入库 ' + memories + ' 条记忆', memories + ' memories saved'));
+      if (candidates) parts.push(this.L('新增 ' + candidates + ' 条待确认', candidates + ' to confirm'));
+      if (memories) parts.push(this.L('入库 ' + memories + ' 条记忆', memories + ' memories saved'));
       if (revisions) parts.push(this.L('修订 ' + revisions + ' 条旧记录', revisions + ' historical revisions'));
       return this.L('最近一批', 'Latest batch ') + parts.join(this.L('，', ', ')) + this.L('。', '.');
     },
