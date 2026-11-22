@@ -1,4 +1,9 @@
 import { I, navLink, t } from "./helpers";
+import {
+  BRAND_APPLE_TOUCH_ICON_DATA_URI,
+  BRAND_LOGO_DARK_DATA_URI,
+  BRAND_LOGO_LIGHT_DATA_URI
+} from "./components/brandLogo";
 import { chatParseBrowserScript } from "../../../memory/transfer/chatParse";
 
 const CHAT_PARSE_SCRIPT = chatParseBrowserScript();
@@ -9,6 +14,9 @@ export const ADMIN_HEAD = `<!doctype html>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Aelios</title>
+<link rel="icon" type="image/webp" href="${BRAND_LOGO_LIGHT_DATA_URI}" media="(prefers-color-scheme: light)">
+<link rel="icon" type="image/webp" href="${BRAND_LOGO_DARK_DATA_URI}" media="(prefers-color-scheme: dark)">
+<link rel="apple-touch-icon" sizes="128x128" href="${BRAND_APPLE_TOUCH_ICON_DATA_URI}">
 <script>
 // 先定好语言和明暗，免得页面先闪一下另一套。没选过语言就看浏览器：中文浏览器用中文，其余用英文。
 (function() {
@@ -36,7 +44,7 @@ export const ADMIN_BODY_START = `<body>
 <div x-data="memoryAdmin()" x-init="init()" x-cloak class="app" @keydown.escape.window="navOpen = false">
   <div x-show="navOpen" x-transition.opacity.duration.150ms class="side-scrim" @click="navOpen = false"></div>
   <aside class="side" :class="navOpen ? 'is-open' : ''" :aria-label="L('主导航', 'Main navigation')">
-    <div class="brand"><span class="logo" aria-hidden="true">A</span><span>Aelios</span></div>
+    <div class="brand"><span class="logo" aria-hidden="true"></span><span>Aelios</span></div>
 
     <button type="button" @click="spaceOpen = true; navOpen = false" class="viewing" :aria-label="L('切换查看的记忆空间', 'Switch the memory space you are viewing')">
       <span class="min-w-0 flex-1">
@@ -88,7 +96,7 @@ export const ADMIN_BODY_START = `<body>
     <!-- 手机上只有这一条：左边 ☰ 打开侧边栏（导航只有那一套），右边刷新。 -->
     <header class="topbar">
       <button type="button" @click="navOpen = true" class="btn btn-icon relative" :aria-label="L('打开菜单', 'Open menu')">${I.menu}<span x-show="pendingCount" class="badge" x-text="pendingCount"></span></button>
-      <div class="brand min-w-0 flex-1"><span class="logo" aria-hidden="true">A</span><span>Aelios</span></div>
+      <div class="brand min-w-0 flex-1"><span class="logo" aria-hidden="true"></span><span>Aelios</span></div>
       <button type="button" @click="reloadAll()" class="btn btn-icon" :aria-label="L('刷新', 'Refresh')">${I.refresh}</button>
     </header>
 

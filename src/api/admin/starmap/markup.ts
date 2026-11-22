@@ -1,9 +1,13 @@
+import { BRAND_APPLE_TOUCH_ICON_DATA_URI, BRAND_LOGO_DARK_DATA_URI } from "../ui/components/brandLogo";
+
 export const STARMAP_HEAD = `<!doctype html>
 <html lang="zh-CN">
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
-<title>记忆星图 · 两江交汇 — Aelios</title>`;
+<title>记忆星图 · 两江交汇 — Aelios</title>
+<link rel="icon" type="image/webp" href="${BRAND_LOGO_DARK_DATA_URI}">
+<link rel="apple-touch-icon" sizes="128x128" href="${BRAND_APPLE_TOUCH_ICON_DATA_URI}">`;
 
 export const STARMAP_BODY = `<script type="importmap">
 {
