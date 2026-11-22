@@ -1,3 +1,5 @@
+import { BRAND_LOGO_DARK_DATA_URI, BRAND_LOGO_LIGHT_DATA_URI } from "./components/brandLogo";
+
 export const ADMIN_STYLES = `<style>
   /* ===== 色板：白天是晨昏渐变，夜里是深空星野。整页颜色都从这组变量来 ===== */
   :root {
@@ -22,6 +24,8 @@ export const ADMIN_STYLES = `<style>
     --bo: #9F2A3B; --bob: rgba(240, 110, 140, .16); --de: #5B4BC4; --deb: rgba(139, 124, 246, .18);
     --ev: #1C6B6B; --evb: rgba(80, 200, 200, .18); --ha: #2F6B2A; --hab: rgba(120, 200, 110, .2);
     --re: #8A3A7A; --reb: rgba(220, 120, 200, .16); --no: #3C3E5C; --nob: rgba(109, 92, 210, .09);
+    --logo-img: url("${BRAND_LOGO_LIGHT_DATA_URI}");
+    --logo-border: rgba(109, 92, 210, .2); --logo-shadow: 0 2px 8px rgba(88, 76, 160, .14);
   }
   :root[data-theme="dark"] {
     color-scheme: dark;
@@ -45,6 +49,8 @@ export const ADMIN_STYLES = `<style>
     --bo: #F9A8B8; --bob: rgba(240, 110, 140, .15); --de: #B9AFFF; --deb: rgba(139, 124, 246, .2);
     --ev: #67E8F9; --evb: rgba(80, 200, 220, .13); --ha: #A3E39A; --hab: rgba(120, 200, 110, .13);
     --re: #F0ABE0; --reb: rgba(220, 120, 200, .13); --no: #C9CDEA; --nob: rgba(148, 163, 255, .11);
+    --logo-img: url("${BRAND_LOGO_DARK_DATA_URI}");
+    --logo-border: rgba(176, 164, 255, .28); --logo-shadow: 0 2px 10px rgba(8, 10, 32, .45);
   }
 
   /* 中英两套文字只显示一套 */
@@ -109,7 +115,7 @@ export const ADMIN_STYLES = `<style>
     .side-scrim, .topbar { display: none !important; }
   }
   .brand { display: flex; align-items: center; gap: 10px; padding: 0 6px; font-size: 16px; font-weight: 600; letter-spacing: -.01em; }
-  .logo { width: 32px; height: 32px; border-radius: 9px; background: var(--coral); color: var(--on-coral); display: grid; place-items: center; font-size: 15px; font-weight: 700; flex: none; }
+  .logo { width: 32px; height: 32px; border-radius: 9px; background-image: var(--logo-img); background-size: cover; background-position: center; background-repeat: no-repeat; border: 1px solid var(--logo-border); box-shadow: var(--logo-shadow); flex: none; }
   .viewing { display: flex; align-items: center; gap: 10px; min-height: 52px; padding: 8px 12px; border-radius: 12px; border: 1px solid var(--line); background: var(--panel); text-align: left; width: 100%; }
   .nav-title { padding: 0 12px 6px; font-size: 11px; font-weight: 600; letter-spacing: .04em; color: var(--t3); }
   .nav-link { display: flex; width: 100%; align-items: center; gap: 12px; min-height: 44px; padding: 0 12px; border-radius: 10px; color: var(--t2); font-size: 14px; font-weight: 500; background: transparent; border: 0; }
