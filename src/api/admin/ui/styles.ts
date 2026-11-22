@@ -204,6 +204,11 @@ export const ADMIN_STYLES = `<style>
   .heart { width: 36px; height: 36px; border-radius: 10px; display: grid; place-items: center; flex: none; border: 0; background: transparent; color: var(--t3); }
   .heart:hover { background: var(--soft); color: var(--coral); }
   .heart.is-on { color: var(--coral); }
+  /* A line's trash and heart: one tight pair, same size, centred on each other. */
+  .msg-actions { display: flex; align-items: center; gap: 2px; flex: none; }
+  .msg-actions .icon-btn, .msg-actions .heart { width: 32px; height: 32px; border-radius: 999px; }
+  .msg-actions .heart > span { display: grid; place-items: center; }
+  .msg-actions svg { width: 17px; height: 17px; }
   .quotes { margin-top: 8px; display: grid; gap: 8px; }
   .quotes blockquote { margin: 0; padding: 8px 12px; border-left: 3px solid var(--aurb); border-radius: 0 8px 8px 0; background: var(--soft); font-size: 13px; color: var(--t2); line-height: 1.7; }
   .cand { display: flex; flex-wrap: wrap; gap: 14px; padding: 16px 18px; align-items: flex-start; }
