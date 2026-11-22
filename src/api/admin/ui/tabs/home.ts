@@ -96,15 +96,26 @@ export const ADMIN_TAB_HOME = `      <!-- ===== 首页 ===== -->
                 <div class="empty">${t("今天还没有聊天记录。", "No chats yet today.")}</div>
               </template>
               <template x-for="message in homeMessages()" :key="message.id">
-                <article class="flex items-start gap-3 px-[18px] py-3.5" x-data="{ more: false }" :title="message.source || ''">
+                <article class="flex items-start gap-3 px-[18px] py-3.5" x-data="{ more: false, deleteOpen: false }" :title="message.source || ''">
                   <span class="avatar" :class="message.role === 'user' ? 'avatar-user' : ''" aria-hidden="true" x-text="roleName(message.role).slice(0, 1)"></span>
                   <div class="min-w-0 flex-1">
                     <div class="flex items-baseline gap-2 text-xs muted"><span class="font-semibold" style="color: var(--t2)" x-text="roleName(message.role)"></span><span x-text="clock(message.created_at)"></span></div>
                     <p class="mt-1 whitespace-pre-wrap text-sm leading-7" :class="more ? '' : 'line-clamp-6'" x-text="message.content"></p>
                     <button type="button" x-show="(message.content || '').length > 320" @click="more = !more" class="link-btn mt-1" x-text="more ? L('收起', 'Show less') : L('展开', 'Show more')"></button>
                   </div>
-                  <button type="button" @click="deleteRaw(message)" class="icon-btn mt-0.5" :aria-label="L('删除这句', 'Delete this line')" :title="L('删除这句', 'Delete this line')">${I.trash}</button>
-                  <button type="button" @click="deleteRaw(message, 'withdraw')" class="text-xs muted" :title="L('撤回这句及其已知衍生记忆', 'Withdraw this line and its known derived memories')" x-text="L('撤回及已知衍生', 'Withdraw with derived')"></button>
+                  <div class="relative">
+                    <button type="button" @click="deleteOpen = !deleteOpen" class="icon-btn mt-0.5" aria-haspopup="menu" :aria-expanded="deleteOpen ? 'true' : 'false'" :aria-label="L('删除', 'Delete')" :title="L('删除', 'Delete')">${I.trash}</button>
+                    <div x-show="deleteOpen" @click.outside="deleteOpen = false" @keydown.escape.window="deleteOpen = false" class="menu delete-menu" role="menu">
+                      <button type="button" role="menuitem" @click="deleteOpen = false; deleteRaw(message)">
+                        <span class="block" x-text="L('只删这句', 'Delete this line')"></span>
+                        <span class="block text-xs muted" x-text="L('由它整理出的记忆保留', 'Memories made from it stay')"></span>
+                      </button>
+                      <button type="button" role="menuitem" @click="deleteOpen = false; deleteRaw(message, 'withdraw')">
+                        <span class="block" x-text="L('连同整理出的记忆一起撤回', 'Delete with its memories')"></span>
+                        <span class="block text-xs muted" x-text="L('引用它的记忆和待审一起隐藏', 'Also hides memories citing it')"></span>
+                      </button>
+                    </div>
+                  </div>
                   <button type="button" @click="togglePin(message)" class="heart" :class="isPinned(message) ? 'is-on' : ''" :aria-pressed="isPinned(message) ? 'true' : 'false'" :aria-label="isPinned(message) ? L('取消珍贵', 'Remove from keepsakes') : L('收藏为珍贵', 'Save as a keepsake')" :title="isPinned(message) ? L('取消珍贵', 'Remove from keepsakes') : L('收藏为珍贵', 'Save as a keepsake')">
                     <span x-show="isPinned(message)">${HEART_FILLED}</span><span x-show="!isPinned(message)">${I.heart}</span>
                   </button>

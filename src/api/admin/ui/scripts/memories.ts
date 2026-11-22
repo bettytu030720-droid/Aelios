@@ -385,10 +385,10 @@ export const ADMIN_SCRIPT_MEMORIES = String.raw`    async reloadAll() {
     async deleteRaw(message, mode) {
       const withdraw = mode === 'withdraw';
       const confirmation = withdraw
-        ? this.L('撤回这句及其已知衍生记忆？原话会删除；引用或抄录它的整理记忆、候选和长尾会隐藏，相关日记用剩下的原话重写。助手亲笔写的记忆、只是同一批读过它的旧记忆会保留。之前的导出和备份不在范围内。',
-            'Withdraw this line and its known derived memories? The line is deleted; memories, candidates and long-tail entries that cite or copy it are hidden, and affected diaries are rewritten from the remaining lines. Memories the assistant wrote itself, and older memories that only shared a batch with it, stay. Earlier exports and backups are out of reach.')
-        : this.L('删除这句？原话和它的搜索索引会删除，不能恢复。已经整理出的记忆不受影响；要一并撤回，请用「撤回这句及其已知衍生记忆」。',
-            'Delete this line? The line and its search entry are removed for good. Memories already made from it stay; to remove those too, use "Withdraw this line and its known derived memories".');
+        ? this.L('连同整理出的记忆一起撤回？这句原话会删除，引用或抄下了它的记忆和待审会隐藏，相关日记用剩下的原话重写。助手亲笔写的记忆不动；只是和它同一批整理、没有引用它的旧记忆也会保留。之前导出的文件和备份管不到。',
+            'Delete this line with its memories? The line is deleted, memories and reviews that cite or copy it are hidden, and affected diaries are rewritten from the remaining lines. Memories the assistant wrote itself stay, and so do older memories that were only made in the same batch without citing it. Earlier exports and backups are out of reach.')
+        : this.L('只删这句？原话和它的搜索索引会删除，不能恢复。由它整理出的记忆会保留；要一起撤回，请选「连同整理出的记忆一起撤回」。',
+            'Delete this line? The line and its search entry are removed for good. Memories made from it stay; to remove those too, choose "Delete with its memories".');
       if (!window.confirm(confirmation)) return;
       try {
         const result = await this.request(this.withNamespace('/v1/raw/' + encodeURIComponent(message.id) + (withdraw ? '?mode=withdraw' : '')), { method: 'DELETE' });
@@ -397,8 +397,8 @@ export const ADMIN_SCRIPT_MEMORIES = String.raw`    async reloadAll() {
         const hidden = ((result && result.data && result.data.withdrawn_memories) || []).length;
         const kept = ((result && result.data && result.data.unverified_memories) || []).length;
         this.notify(withdraw
-          ? this.L('已撤回，隐藏 ' + hidden + ' 条衍生记忆' + (kept ? '；' + kept + ' 条旧记忆来源不明，已保留' : ''),
-              'Withdrawn; ' + hidden + ' derived memories hidden' + (kept ? '; ' + kept + ' older memories with unclear sources kept' : ''))
+          ? this.L('已撤回，隐藏了 ' + hidden + ' 条相关记忆' + (kept ? '；' + kept + ' 条旧记忆分不清是不是来自这句，已保留' : ''),
+              'Deleted; ' + hidden + ' related memories hidden' + (kept ? '; ' + kept + ' older memories that may not come from it were kept' : ''))
           : this.L('删除了', 'Deleted'));
       } catch (error) {
         this.notify(error.message);
@@ -558,7 +558,7 @@ export const ADMIN_SCRIPT_MEMORIES = String.raw`    async reloadAll() {
       }
     },
     async deleteMemory(memory) {
-      if (!window.confirm(this.L('移除这条记忆？引用它的已知衍生记忆也会撤回。', 'Remove this memory and withdraw known memories derived from it?'))) return;
+      if (!window.confirm(this.L('移除这条记忆？从它整理出来、引用了它的其他记忆也会一起撤回。', 'Remove this memory? Other memories made from it that cite it are withdrawn too.'))) return;
       try {
         const {data} = await this.request(this.withNamespace('/v1/memory/' + encodeURIComponent(memory.id)), { method: 'DELETE' });
         await Promise.all([this.loadMemories(), this.loadBoot()]);

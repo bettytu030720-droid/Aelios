@@ -7,7 +7,7 @@ export const ADMIN_STYLES = `<style>
     --neb1: rgba(244, 160, 124, .42); --neb2: rgba(139, 124, 246, .32); --neb3: rgba(103, 232, 249, .18); --band: rgba(255, 255, 255, 0);
     --s1: rgba(124, 108, 220, .6); --s2: rgba(244, 160, 124, .65); --s3: rgba(103, 180, 249, .55); --halo: rgba(139, 124, 246, .16);
     --so: .7; --shoot: 0;
-    --side: rgba(255, 255, 255, .32); --panel: rgba(255, 255, 255, .56); --solid: rgba(255, 255, 255, .9);
+    --side: rgba(255, 255, 255, .32); --panel: rgba(255, 255, 255, .56); --solid: rgba(255, 255, 255, .9); --menu: rgba(255, 255, 255, .96);
     --line: rgba(109, 92, 210, .2); --div: rgba(109, 92, 210, .11);
     --glow: 0 1px 0 rgba(255, 255, 255, .75) inset, 0 10px 28px rgba(88, 76, 160, .14);
     --t1: #232437; --t2: #3C3E5C; --t3: #5A5D86; --soft: rgba(124, 108, 220, .08);
@@ -30,7 +30,7 @@ export const ADMIN_STYLES = `<style>
     --neb1: rgba(124, 93, 250, .34); --neb2: rgba(56, 189, 248, .2); --neb3: rgba(236, 72, 153, .13); --band: rgba(165, 155, 255, .12);
     --s1: rgba(255, 255, 255, .98); --s2: rgba(205, 214, 255, .9); --s3: rgba(255, 196, 168, .85); --halo: rgba(170, 160, 255, .38);
     --so: 1; --shoot: 1;
-    --side: rgba(8, 11, 30, .32); --panel: rgba(20, 26, 58, .48); --solid: rgba(23, 29, 62, .9);
+    --side: rgba(8, 11, 30, .32); --panel: rgba(20, 26, 58, .48); --solid: rgba(23, 29, 62, .9); --menu: rgba(23, 29, 62, .96);
     --line: rgba(148, 163, 255, .18); --div: rgba(148, 163, 255, .1);
     --glow: 0 1px 0 rgba(180, 190, 255, .08) inset, 0 10px 30px rgba(2, 5, 18, .5);
     --t1: #EEF0FF; --t2: #C9CDEA; --t3: #9EA4CC; --soft: rgba(148, 163, 255, .08);
@@ -214,9 +214,11 @@ export const ADMIN_STYLES = `<style>
   .cand-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-left: auto; }
   .was-now { margin-top: 10px; display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; font-size: 14px; line-height: 1.7; }
   .line-through-soft { color: var(--t3); text-decoration: line-through; text-decoration-color: var(--line); white-space: pre-wrap; }
-  .menu { position: absolute; right: 0; top: calc(100% + 6px); z-index: 20; min-width: 180px; padding: 6px; border-radius: 12px; border: 1px solid var(--line); background: var(--solid); box-shadow: var(--glow); display: grid; }
+  .menu { position: absolute; right: 0; top: calc(100% + 6px); z-index: 20; min-width: 180px; padding: 6px; border-radius: 14px; border: 1px solid var(--line); background: var(--menu); box-shadow: var(--glow); display: grid; backdrop-filter: blur(24px) saturate(180%); -webkit-backdrop-filter: blur(24px) saturate(180%); }
   .menu button { text-align: left; padding: 9px 12px; border-radius: 8px; border: 0; background: transparent; color: var(--t1); font-size: 13px; }
   .menu button:hover { background: var(--soft); }
+  .delete-menu { min-width: 232px; gap: 2px; }
+  .delete-menu button { line-height: 1.45; }
   .chev { display: inline-grid; place-items: center; flex: none; color: var(--t3); transition: transform .15s ease; }
   .chev.is-open { transform: rotate(180deg); }
   .icon-btn { display: inline-grid; place-items: center; flex-shrink: 0; width: 2rem; height: 2rem; border-radius: 999px; color: var(--t3); border: 0; background: transparent; transition: color .15s ease, background-color .15s ease; }

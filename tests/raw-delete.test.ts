@@ -75,7 +75,8 @@ test("only DELETE, only with a key that may write", async () => {
 });
 
 test("the home page's chats have a delete button that asks first, then drops the line from the list", async () => {
-  assert.match(ADMIN_HTML, /@click="deleteRaw\(message\)"/);
+  assert.match(ADMIN_HTML, /deleteRaw\(message\)"/);
+  assert.match(ADMIN_HTML, /deleteRaw\(message, 'withdraw'\)"/);
   const script = (ADMIN_HTML.match(/<script>\s*(function memoryAdmin\(\)[\s\S]*?)<\/script>/) as RegExpMatchArray)[1];
   let answer = false;
   const app = runInNewContext(`${script}\nmemoryAdmin()`, {
@@ -310,6 +311,7 @@ test("R02: rows written before provenance are withdrawn only when they cite the 
 });
 
 test("the delete actions are named for their scope", () => {
-  assert.match(ADMIN_HTML, /L\('删除这句', 'Delete this line'\)/);
-  assert.match(ADMIN_HTML, /撤回这句及其已知衍生记忆/);
+  assert.match(ADMIN_HTML, /L\('只删这句', 'Delete this line'\)/);
+  assert.match(ADMIN_HTML, /L\('连同整理出的记忆一起撤回', 'Delete with its memories'\)/);
+  assert.doesNotMatch(ADMIN_HTML, /已知衍生/);
 });
