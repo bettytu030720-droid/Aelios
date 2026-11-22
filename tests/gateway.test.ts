@@ -13,6 +13,7 @@ import { OutputCollector, observeResponse, persistExchange, prepareExchange, dis
 import { getOrCreateConversation } from "../src/db/conversations";
 import { saveUserMessages } from "../src/db/messages";
 import { backfillFts } from "../src/memory/fts";
+import { formatDateLabel } from "../src/utils/time";
 
 import { lexicalOverlapScore, shapeRecallQuery } from "../src/memory/queryShape";
 import { codingClient, codingSpeech, isSpeechTool, stripCodeBlocks } from "../src/gateway/coding";
@@ -1913,4 +1914,28 @@ test("coding filter: a longer closing fence ends the block, and earlier code sta
     { role: "user", content: "看这个\n```\n量子猫咪\n```" }, { role: "assistant", content: "嗯" }, { role: "user", content: "好了吗" }] },
   { "user-agent": "claude-cli/2.1.0 (external, cli)" });
   assert.doesNotMatch(JSON.stringify(calls.at(-1).query.messages.at(-1)), /量子猫咪是暗号/);
+});
+
+test("on a milestone day the assistant hears it in the day's first few messages, and not in coding sessions", async () => {
+  const today = formatDateLabel(new Date(), "Asia/Singapore");
+  const daysAgo = (days: number) => new Date(Date.parse(today) - days * 86_400_000).toISOString().slice(0, 10);
+  const ask = async (content: string, headers?: Record<string, string>) => {
+    const { response } = await run("/v1/chat/completions", { model: "partner", messages: [{ role: "user", content }] }, headers);
+    return { memory: response.headers.get("x-aelios-memory"), sent: JSON.stringify(calls.at(-1).query.messages) };
+  };
+  const metFor = (days: number) => { const partner = { ...identity(), metOn: daysAgo(days) }; return config([partner]); };
+  setConfig(metFor(600));
+  const first = await ask("早安");
+  assert.equal(first.memory, "injected");
+  assert.match(first.sent, /\[Aelios 纪念日\][^"]*认识满 600 天/);
+  assert.doesNotMatch((await ask("早安", { "user-agent": "claude-cli/2.1.0 (external, cli)" })).sent, /Aelios 纪念日/);
+
+  for (const id of ["a", "b", "c"]) {
+    sqlite.prepare(`INSERT INTO messages (id, conversation_id, namespace, role, content, source, created_at)
+      VALUES (?, 'c', 'partner-a', 'user', '在', 'gateway', ?)`).run(`earlier-${id}`, new Date().toISOString());
+  }
+  assert.doesNotMatch((await ask("还在吗")).sent, /Aelios 纪念日/);
+  sqlite.exec("DELETE FROM messages");
+  setConfig(metFor(601));
+  assert.doesNotMatch((await ask("晚安")).sent, /Aelios 纪念日/);
 });

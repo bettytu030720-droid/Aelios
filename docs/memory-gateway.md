@@ -20,7 +20,7 @@ Aelios 负责身份识别、单轮记忆召回与对话记录，客户端工具�
 全部运行时配置集中在 `/admin` 的「设置」页，分为三层。
 
 1. **连接与上游** 填写 32 位 Cloudflare 账号 ID、完整 AI Gateway 地址或自定义 OpenAI 兼容地址。Cloudflare 令牌存放在 Worker Secret `CLOUDFLARE_API_TOKEN` 中。
-2. **助手（Identities）** 每位助手配置路径名 `slug`（URL 第一段）、主模型规则 `models` 与允许使用的密钥列表 `keys`。写入空间 `namespace` 默认与 `slug` 相同，另可配置 `readNamespaces`、说话人称呼（`userName` / `assistantName`）、`codingFilter`、`thinkingPolicy` 与 `maxMemoryChars`。可选的初识日期 `metOn` 使用 `YYYY-MM-DD` 格式，由管理页在浏览器中计算相识天数。
+2. **助手（Identities）** 每位助手配置路径名 `slug`（URL 第一段）、主模型规则 `models` 与允许使用的密钥列表 `keys`。写入空间 `namespace` 默认与 `slug` 相同，另可配置 `readNamespaces`、说话人称呼（`userName` / `assistantName`）、`codingFilter`、`thinkingPolicy` 与 `maxMemoryChars`。可选的初识日期 `metOn` 使用 `YYYY-MM-DD` 格式，由管理页在浏览器中计算相识天数。逢 520 天、整百天或日历周年时，网关在该空间当天（按 `DREAM_TIME_ZONE`）的前三条用户消息里附上一段「[Aelios 纪念日]」，编程会话不附加；其余日子不查库。
 3. **环境设置** `/admin` 设置白名单内的运行参数覆盖部署默认值。开关切换即时保存，文本项失焦保存（`PATCH /api/gateway/config` 按项合并），留空即恢复字段旁显示的部署值或内置默认值。
 
 配置优先级为 D1 中保存的面板配置高于 Worker 环境变量 `GATEWAY_CONFIG`，两者皆空时回退为空配置。管理面板顶部的空间选择器仅切换当前浏览和管理的记忆空间，不影响客户端路由或助手配置。

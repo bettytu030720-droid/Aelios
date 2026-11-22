@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { runInNewContext } from "node:vm";
 import { MEETING_CARD, MEETING_CARD_ASSETS } from "../src/api/admin/ui/components/meetingCard";
+import { meetingMilestone } from "../src/memory/meetingDay";
 
 function page(reducedMotion = false, at = new Date(2026, 10, 22, 23, 59).getTime()) {
   let now = at;
@@ -105,4 +106,17 @@ test("someone who met on Feb 29 gets the anniversary on Feb 28 in other years", 
   const firstDay = page(false, new Date(2024, 1, 29, 9).getTime()).mount();
   firstDay.init();
   assert.equal(firstDay.isMeetingAnniversary("2024-02-29"), false);
+});
+
+test("Home's stars and the gateway's anniversary note agree on every day", () => {
+  const clock = page().mount();
+  clock.init();
+  for (const metOn of ["2024-02-29", "2025-04-01", "2023-11-22"]) {
+    for (let time = Date.parse(metOn); time <= Date.parse("2029-03-31"); time += 86_400_000) {
+      clock.meetingToday = time;
+      clock.celebrateMeetingDay({ slug: metOn, metOn });
+      const today = new Date(time).toISOString().slice(0, 10);
+      assert.equal(clock.meetingStars.length > 0, meetingMilestone(metOn, today) !== null, `${metOn} on ${today}`);
+    }
+  }
 });

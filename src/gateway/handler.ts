@@ -1,6 +1,8 @@
 import { authenticate } from "../auth/apiKey";
 import { markMemoriesInjected, listPrecious } from "../db/v2";
+import { readDreamTimeZone } from "../memory/dreamEnv";
 import { recallInjectionBudget } from "../memory/filter";
+import { meetingDayNote } from "../memory/meetingDay";
 import { isEvidenceQuery, isPreciousRelevant, isTemporalQuery, selectRelevantPrecious, shapeRecallQuery } from "../memory/queryShape";
 import { orderCurrentStateSurface } from "../memory/currentState/surface";
 import { selectRecall } from "../memory/recallSelector";
@@ -258,8 +260,26 @@ export async function rememberAndRecall(env: Env, ctx: ExecutionContext, identit
       memory = "unavailable";
       console.error("gateway recall unavailable", { identity: identity.slug, error });
     }
+    // A coding session is not where an anniversary belongs.
+    const note = coding ? "" : await meetingNote(env, identity, exchange?.userId);
+    if (note) {
+      patch = patch ? `${note}\n${patch}` : note;
+      if (memory === "empty") memory = "injected";
+    }
   }
   return { memory, patch, remember };
+}
+
+async function meetingNote(env: Env, identity: Identity, currentMessageId?: string): Promise<string> {
+  if (!identity.metOn) return "";
+  try {
+    return await meetingDayNote(env.DB, {
+      namespace: identityNamespace(identity), metOn: identity.metOn, timeZone: readDreamTimeZone(env), currentMessageId
+    });
+  } catch (error) {
+    console.error("gateway meeting note unavailable", { identity: identity.slug, error });
+    return "";
+  }
 }
 
 /** What the reply said and how it ended, onto the exchange, as the gateway records it. */
