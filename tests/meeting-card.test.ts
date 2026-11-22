@@ -120,3 +120,10 @@ test("Home's stars and the gateway's anniversary note agree on every day", () =>
     }
   }
 });
+
+test("the first-met date reads naturally in each language without shifting a day", () => {
+  const clock = page().mount();
+  assert.equal(clock.meetingDateLabel("2023-07-26", "zh-CN"), "2023年7月26日");
+  assert.equal(clock.meetingDateLabel("2023-07-26", "en-US"), "Jul 26, 2023");
+  assert.match(MEETING_CARD, /L\('你和' \+ gwIdentityTitle\(currentIdentity\(\)\), 'You & '/);
+});
