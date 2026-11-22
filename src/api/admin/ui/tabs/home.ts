@@ -1,4 +1,5 @@
 import { I, HEART_FILLED, t } from "../helpers";
+import { MEETING_CARD } from "../components/meetingCard";
 
 export const ADMIN_TAB_HOME = `      <!-- ===== 首页 ===== -->
       <section x-show="savedApiKey.trim() && page === 'today'" class="page">
@@ -9,6 +10,8 @@ export const ADMIN_TAB_HOME = `      <!-- ===== 首页 ===== -->
           </div>
           <button type="button" @click="reloadAll()" class="btn btn-icon hidden md:inline-flex" :aria-label="L('刷新', 'Refresh')" :title="L('刷新', 'Refresh')">${I.refresh}</button>
         </header>
+
+        ${MEETING_CARD}
 
         <div class="stats">
           <div class="panel dream-stat stat">

@@ -74,6 +74,13 @@ export const ADMIN_TAB_SETTINGS = `      <!-- ===== 设置 ===== -->
                         </label>
                       </div>
                       <p class="-mt-1 text-xs muted">${t("夜间整理、日记、审核写记忆时只用这两个名字，不写「用户 / 助手」。助手名留空用路径名。", "The nightly run, journal and review use these names instead of “user” and “assistant”. A blank assistant name uses the path.")}</p>
+                      <div class="flex flex-wrap items-end gap-2">
+                        <label class="block w-56 max-w-full"><span class="label">${t("初识日期（可选）", "First met (optional)")}</span>
+                          <input type="date" x-model="idn.metOn" class="field">
+                        </label>
+                        <button type="button" x-show="idn.metOn" @click="idn.metOn = ''" class="btn" x-text="L('清除日期', 'Clear date')"></button>
+                      </div>
+                      <p class="-mt-1 text-xs muted">${t("保存后，首页会显示你们认识了几天。", "Save this date to see how long you’ve known each other on Home.")}</p>
                       <label class="block"><span class="label">${t("带记忆的模型（逗号分隔，支持 * 通配）", "Models with memory (comma-separated, * wildcards)")}</span>
                         <input x-model="idn.modelsText" class="field mono" placeholder="anthropic/claude-opus-5, *fable*">
                       </label>

@@ -1,4 +1,5 @@
 import type { AuthResult, Env } from "../types";
+import { isCalendarDate } from "../utils/time";
 import { validateSettings } from "./settings";
 
 export const PROTOCOLS = ["chat", "messages", "responses"] as const;
@@ -46,6 +47,8 @@ export interface Identity {
   userName?: string;
   /** 助手显示名。Dream / 日记 / 周月卷 / 审核写事实时用这个名字，不要写 assistant/助手。空则回退到 slug。 */
   assistantName?: string;
+  /** First meeting as a calendar date for the admin Home card. */
+  metOn?: string;
 }
 export interface GatewayConfig {
   version: 3;
@@ -130,6 +133,7 @@ export function validateConfig(value: unknown): GatewayConfig {
       `${where}: userName must be text (max 32 characters)`);
     check(identity.assistantName === undefined || text(identity.assistantName) && identity.assistantName.trim().length <= 32 && !/[\r\n]/.test(identity.assistantName),
       `${where}: assistantName must be text (max 32 characters)`);
+    check(identity.metOn === undefined || isCalendarDate(identity.metOn), `${where}: metOn must be a calendar date in YYYY-MM-DD format`);
     // 主模型自己审候选这条路拆了 (只剩 clef 和 MCP)，旧配置里的这两项下次保存时顺手清掉。
     delete identity.judgeModel;
     delete identity.judgeWithMainModel;

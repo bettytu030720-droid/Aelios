@@ -13,6 +13,7 @@ import { OutputCollector, observeResponse, persistExchange, prepareExchange, dis
 import { getOrCreateConversation } from "../src/db/conversations";
 import { saveUserMessages } from "../src/db/messages";
 import { backfillFts } from "../src/memory/fts";
+import { formatDateLabel } from "../src/utils/time";
 
 import { lexicalOverlapScore, shapeRecallQuery } from "../src/memory/queryShape";
 import { codingClient, codingSpeech, isSpeechTool, stripCodeBlocks } from "../src/gateway/coding";
@@ -1272,6 +1273,22 @@ test("identity speaker names are optional, bounded, and used by the matching wri
   assert.deepEqual(JSON.parse((await run("/api/gateway/config")).text).identities[0].userName, "小南");
 });
 
+test("first meeting dates round-trip independently for assistants in a shared space", async () => {
+  for (const metOn of ["", "2025-02-29", "2026-04-31", "2026-1-01", "0000-01-01", "2026-01-01T00:00:00Z", null]) {
+    assert.throws(() => validateConfig({ ...config(), identities: [{ ...identity(), metOn }] }), /metOn/);
+  }
+  const first = identity();
+  const second = { ...first, slug: "other" };
+  const identities = [{ ...first, metOn: "2024-02-29" }, { ...second, metOn: "2025-04-01" }];
+  assert.equal((await worker.fetch(request("/api/gateway/config", { ...config(), identities }, {}, "PUT"), env, ctx)).status, 200);
+  let saved = JSON.parse((await run("/api/gateway/config")).text).identities;
+  assert.deepEqual(saved.map((item: { metOn?: string }) => item.metOn), ["2024-02-29", "2025-04-01"]);
+  assert.equal((await worker.fetch(request("/api/gateway/config", { identities: [first, identities[1]] }, {}, "PATCH"), env, ctx)).status, 200);
+  saved = JSON.parse((await run("/api/gateway/config")).text).identities;
+  assert.equal(Object.hasOwn(saved[0], "metOn"), false);
+  assert.equal(saved[1].metOn, "2025-04-01");
+});
+
 test("cross-space recall shares one budget, deduplicates and records provenance while writes stay in the new space", async () => {
   const updated = { ...config(), settings: { MEMORY_FILTER_MAX_OUTPUT: "3" }, identities: [{ ...identity(), namespace: "new", readNamespaces: ["old", "shared"] }] };
   setConfig(updated);
@@ -1897,4 +1914,28 @@ test("coding filter: a longer closing fence ends the block, and earlier code sta
     { role: "user", content: "看这个\n```\n量子猫咪\n```" }, { role: "assistant", content: "嗯" }, { role: "user", content: "好了吗" }] },
   { "user-agent": "claude-cli/2.1.0 (external, cli)" });
   assert.doesNotMatch(JSON.stringify(calls.at(-1).query.messages.at(-1)), /量子猫咪是暗号/);
+});
+
+test("on a milestone day the assistant hears it in the day's first few messages, and not in coding sessions", async () => {
+  const today = formatDateLabel(new Date(), "Asia/Singapore");
+  const daysAgo = (days: number) => new Date(Date.parse(today) - days * 86_400_000).toISOString().slice(0, 10);
+  const ask = async (content: string, headers?: Record<string, string>) => {
+    const { response } = await run("/v1/chat/completions", { model: "partner", messages: [{ role: "user", content }] }, headers);
+    return { memory: response.headers.get("x-aelios-memory"), sent: JSON.stringify(calls.at(-1).query.messages) };
+  };
+  const metFor = (days: number) => { const partner = { ...identity(), metOn: daysAgo(days) }; return config([partner]); };
+  setConfig(metFor(600));
+  const first = await ask("早安");
+  assert.equal(first.memory, "injected");
+  assert.match(first.sent, /\[Aelios 纪念日\][^"]*认识满 600 天/);
+  assert.doesNotMatch((await ask("早安", { "user-agent": "claude-cli/2.1.0 (external, cli)" })).sent, /Aelios 纪念日/);
+
+  for (const id of ["a", "b", "c"]) {
+    sqlite.prepare(`INSERT INTO messages (id, conversation_id, namespace, role, content, source, created_at)
+      VALUES (?, 'c', 'partner-a', 'user', '在', 'gateway', ?)`).run(`earlier-${id}`, new Date().toISOString());
+  }
+  assert.doesNotMatch((await ask("还在吗")).sent, /Aelios 纪念日/);
+  sqlite.exec("DELETE FROM messages");
+  setConfig(metFor(601));
+  assert.doesNotMatch((await ask("晚安")).sent, /Aelios 纪念日/);
 });

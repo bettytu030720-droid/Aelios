@@ -407,13 +407,18 @@ test('assistant edits raise the save bar until saved or discarded', async () => 
   assert.equal(app.gwIdentities[0].modelsText, '*opus*');
   assert.equal(app.gwDirty(), false);
   app.gwAddress = 'https://new.test/v1';
+  app.gwIdentities[0].metOn = '2025-04-01';
   assert.equal(app.gwDirty(), true);
   await app.gwSave();
   assert.equal(sent.length, 1);
   assert.equal(sent[0].upstream.address, 'https://new.test/v1');
   assert.equal(sent[0].identities[0].slug, 'danjiu');
+  assert.equal(sent[0].identities[0].metOn, '2025-04-01');
   assert.equal(sent[0].settings, undefined);
   assert.equal(app.gwDirty(), false);
+  app.gwIdentities[0].metOn = '';
+  assert.equal(Object.hasOwn(app.gwPayload().identities[0], 'metOn'), false);
+  assert.match(ADMIN_HTML, /type="date" x-model="idn.metOn"/);
 });
 
 test('a new assistant shares the default space unless told otherwise, and an empty space points at the memories', async () => {

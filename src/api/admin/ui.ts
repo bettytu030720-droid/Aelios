@@ -1,4 +1,5 @@
 // Admin UI assembled from modular template and script slices under ./ui/.
+import { MEETING_CARD_ASSETS } from "./ui/components/meetingCard";
 import { ADMIN_SCRIPT_DREAM } from "./ui/scripts/dream";
 import { ADMIN_SCRIPT_MEMORIES } from "./ui/scripts/memories";
 import { ADMIN_SCRIPT_ROLLING } from "./ui/scripts/rolling";
@@ -17,6 +18,7 @@ import { ADMIN_TAB_TRANSFER } from "./ui/tabs/transfer";
 
 export const ADMIN_HTML = [
   ADMIN_HEAD,
+  MEETING_CARD_ASSETS,
   ADMIN_STYLES,
   ADMIN_BODY_START,
   ADMIN_TAB_HOME,
