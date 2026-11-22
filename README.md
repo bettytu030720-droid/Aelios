@@ -134,6 +134,8 @@ Open `/admin` to inspect and manage every memory space. The sidebar switches bet
 | **Import & export** | Backup export (`md` or `jsonl`), structured entry import, chat log extraction, and zero-LLM chat archiving |
 | **Settings** | Common settings, assistants, models & upstream (including ChatGPT plan and model list), all settings, keys, and troubleshooting (recall logs and vector maintenance) |
 
+Set **First met** under **Settings → Assistants** to see how many days you’ve known the selected assistant on **Home**. The card uses your browser’s calendar date. A brief shower of ✨ marks day 520, each 100-day milestone, and each multiple of 365 days.
+
 ### Running Dream by hand
 
 To catch up a missed night or run a specific date right away, follow these steps.

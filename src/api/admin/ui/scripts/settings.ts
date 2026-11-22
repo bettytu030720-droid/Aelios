@@ -424,6 +424,7 @@ export const ADMIN_SCRIPT_SETTINGS = String.raw`    async init() {
             slug: idn.slug || '',
             userName: idn.userName || '',
             assistantName: idn.assistantName || '',
+            metOn: idn.metOn || '',
             modelsText: (idn.models || []).join(', '),
             namespace: idn.namespace || '',
             readNamespacesText: idn.readNamespaces ? (idn.readNamespaces.length ? idn.readNamespaces.join(', ') : '[]') : '',
@@ -457,7 +458,7 @@ export const ADMIN_SCRIPT_SETTINGS = String.raw`    async init() {
     gwAdd() {
       // 第一个助手默认跟 MCP、Claude Code 钩子用同一个 default 空间，不然先用过 MCP 的人记忆会分成两份。
       const namespace = this.gwIdentities.length ? '' : 'default';
-      this.gwIdentities.push({ slug: '', userName: '', assistantName: '', modelsText: '', namespace: namespace, readNamespacesText: '', keys: ['CHATBOX_API_KEY'], anthropicThinking: 'auto', maxMemoryChars: '', codingFilter: true, _open: true });
+      this.gwIdentities.push({ slug: '', userName: '', assistantName: '', metOn: '', modelsText: '', namespace: namespace, readNamespacesText: '', keys: ['CHATBOX_API_KEY'], anthropicThinking: 'auto', maxMemoryChars: '', codingFilter: true, _open: true });
     },
     // 助手和上游要一起改好再存，所以跟线上比一比，有没存的就在底部浮出保存条。
     gwMark() { this.gwSnapshot = JSON.stringify(this.gwPayload()); },
@@ -475,6 +476,7 @@ export const ADMIN_SCRIPT_SETTINGS = String.raw`    async init() {
         };
         if ((idn.userName || '').trim()) out.userName = idn.userName.trim();
         if ((idn.assistantName || '').trim()) out.assistantName = idn.assistantName.trim();
+        if (idn.metOn) out.metOn = idn.metOn;
         if ((idn.namespace || '').trim()) out.namespace = idn.namespace.trim();
         const reads = (idn.readNamespacesText || '').trim();
         if (reads) out.readNamespaces = reads === '[]' ? [] : reads.split(/[,，\n]/).map(function(s) { return s.trim(); }).filter(Boolean);

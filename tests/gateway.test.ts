@@ -1272,6 +1272,22 @@ test("identity speaker names are optional, bounded, and used by the matching wri
   assert.deepEqual(JSON.parse((await run("/api/gateway/config")).text).identities[0].userName, "小南");
 });
 
+test("first meeting dates round-trip independently for assistants in a shared space", async () => {
+  for (const metOn of ["", "2025-02-29", "2026-04-31", "2026-1-01", "0000-01-01", "2026-01-01T00:00:00Z", null]) {
+    assert.throws(() => validateConfig({ ...config(), identities: [{ ...identity(), metOn }] }), /metOn/);
+  }
+  const first = identity();
+  const second = { ...first, slug: "other" };
+  const identities = [{ ...first, metOn: "2024-02-29" }, { ...second, metOn: "2025-04-01" }];
+  assert.equal((await worker.fetch(request("/api/gateway/config", { ...config(), identities }, {}, "PUT"), env, ctx)).status, 200);
+  let saved = JSON.parse((await run("/api/gateway/config")).text).identities;
+  assert.deepEqual(saved.map((item: { metOn?: string }) => item.metOn), ["2024-02-29", "2025-04-01"]);
+  assert.equal((await worker.fetch(request("/api/gateway/config", { identities: [first, identities[1]] }, {}, "PATCH"), env, ctx)).status, 200);
+  saved = JSON.parse((await run("/api/gateway/config")).text).identities;
+  assert.equal(Object.hasOwn(saved[0], "metOn"), false);
+  assert.equal(saved[1].metOn, "2025-04-01");
+});
+
 test("cross-space recall shares one budget, deduplicates and records provenance while writes stay in the new space", async () => {
   const updated = { ...config(), settings: { MEMORY_FILTER_MAX_OUTPUT: "3" }, identities: [{ ...identity(), namespace: "new", readNamespaces: ["old", "shared"] }] };
   setConfig(updated);
