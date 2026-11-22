@@ -132,7 +132,7 @@ Open `/admin` to inspect and manage every memory space. The sidebar switches bet
 | **Star map** | Interactive 3D memory graph opened in its own page (`/admin/starmap`) |
 | **Nightly** | Daytime Dream progress, retries, failure reasons, and counts for review candidates and saved memories. Also shows nightly run history, what each night produced, and manual Dream runs |
 | **Import & export** | Backup export (`md` or `jsonl`), structured entry import, chat log extraction, and zero-LLM chat archiving |
-| **Settings** | Common settings, assistants, models & upstream (including ChatGPT plan and model list), all settings, keys, and troubleshooting (recall logs and vector maintenance) |
+| **Settings** | Common settings, assistants, models & upstream (including ChatGPT plan and model list), all settings, keys, and troubleshooting (recall excerpts with original messages and vector maintenance) |
 
 ### Running Dream by hand
 

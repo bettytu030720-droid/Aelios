@@ -322,7 +322,7 @@ export const ADMIN_TAB_SETTINGS = `      <!-- ===== 设置 ===== -->
                   <div class="row">
                     <div class="min-w-0 flex-1">
                       <div class="font-semibold">${t("为什么想起了这件事", "Why was this recalled?")}</div>
-                      <div class="mt-0.5 text-[13px] muted">${t("所选助手最近 20 次召回的打分，调召回时看。", "Scores from the selected assistant’s last 20 recalls, for tuning.")}</div>
+                      <div class="mt-0.5 text-[13px] muted">${t("查看所选助手最近 20 次召回的片段、出处与打分。", "See the excerpts, sources, and scores from the selected assistant’s last 20 recalls.")}</div>
                     </div>
                     <button type="button" @click="gwToggle('召回'); if (gwIsOpen('召回')) loadRecallHistory()" class="btn btn-sm" x-text="gwIsOpen('召回') ? L('收起', 'Close') : L('打开', 'Open')"></button>
                   </div>
@@ -342,6 +342,31 @@ export const ADMIN_TAB_SETTINGS = `      <!-- ===== 设置 ===== -->
                         <p class="mt-2 text-xs muted" x-text="fmt(record.created_at) + ' · ' + recallStatusLabel(record.selection && record.selection.status) + ' · ' + L('带上 ' + (record.injected || 0) + ' 条', (record.injected || 0) + ' brought in')"></p>
                         <p class="mt-1 text-xs muted" x-text="recallReasonLabel(record.selection && record.selection.reason)"></p>
                         <p class="mt-1 text-xs muted" x-show="record.selection && record.selection.threshold != null" x-text="record.selection ? L('分数下限 ', 'Score floor ') + record.selection.threshold + (record.selection.elapsed_ms != null ? L(' · 重排与筛选 ', ' · rerank and filter ') + record.selection.elapsed_ms + ' ms' : '') + L(' · 分数不是正确率', ' · scores are not accuracy') : ''"></p>
+                        <div x-show="record.items && record.items.length" class="mt-3">
+                          <p class="text-xs font-semibold" x-text="L('本轮带给助手的记忆', 'Memories included in the prompt')"></p>
+                          <template x-for="(item, index) in (record.items || [])" :key="index">
+                            <div class="mt-2 rounded-[8px] p-2" style="border: 1px solid var(--div)">
+                              <p class="text-xs muted break-all" x-text="item.namespace || ''"></p>
+                              <p class="mt-1 whitespace-pre-wrap break-words text-sm" x-text="item.excerpt || L('这条记录没有保存注入片段。', 'This record has no saved prompt excerpt.')"></p>
+                              <p class="mt-2 text-xs muted" x-show="!item.source_ids || !item.source_ids.length" x-text="L('没有关联的原始消息。', 'No original messages were linked.')"></p>
+                              <button type="button" x-show="item.source_ids && item.source_ids.length && !item.sources" :disabled="item.sourcesLoading" @click="loadRecallSources(record, item, index)" class="btn btn-sm mt-2" x-text="item.sourcesLoading ? L('读取中…', 'Loading…') : L('查看原始消息', 'View original messages')"></button>
+                              <p x-show="item.sourcesError" class="mt-2 text-xs" style="color: var(--err)" role="alert" x-text="item.sourcesError"></p>
+                              <template x-if="item.sources">
+                                <div class="mt-2">
+                                  <p class="text-xs font-semibold" x-text="L('原始消息', 'Original messages')"></p>
+                                  <template x-for="message in item.sources.messages" :key="message.id">
+                                    <div class="mt-2 pl-2" style="border-left: 1px solid var(--div)">
+                                      <p class="text-xs muted" x-text="(message.role === 'user' ? L('用户', 'User') : message.role === 'assistant' ? L('助手', 'Assistant') : message.role) + ' · ' + fmt(message.created_at)"></p>
+                                      <p class="mt-0.5 whitespace-pre-wrap break-words text-sm" x-text="message.content"></p>
+                                    </div>
+                                  </template>
+                                  <p class="mt-1 text-xs muted" x-show="item.sources.missing" x-text="L(item.sources.missing + ' 条原始消息已不可用。', item.sources.missing + ' original messages unavailable.')"></p>
+                                  <p class="mt-1 text-xs muted" x-show="item.sources.omitted" x-text="L('只读取前 90 个出处。', 'Showing the first 90 sources.')"></p>
+                                </div>
+                              </template>
+                            </div>
+                          </template>
+                        </div>
                         <template x-for="(decision, i) in (record.decisions || [])" :key="i">
                           <div class="mt-2 pt-2" style="border-top: 1px solid var(--div)">
                             <p class="text-xs" :style="decision.injected ? 'color: var(--ct)' : 'color: var(--t3)'" x-text="(decision.injected ? L('已选 · ', 'Chosen · ') : L('未选 · ', 'Skipped · ')) + recallReasonLabel(decision.reason)"></p>

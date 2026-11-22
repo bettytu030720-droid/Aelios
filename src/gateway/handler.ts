@@ -194,11 +194,15 @@ export async function recallPatch(
     budget: { maxItems: budget.maxItems, maxChars: budget.maxChars }
   };
   console.log("gateway recall decision", explain);
+  // Keep the text that actually fit in the prompt in the owner's history.
+  const stored = { ...explain, items: explain.items.map((item, i) => ({
+    ...item, excerpt: assembled.entries[i].content
+  })) };
   ctx.waitUntil(
     env.DB.prepare(
       `INSERT INTO memory_events (id, namespace, event_type, memory_id, payload_json, created_at)
        VALUES (?, ?, 'recall_explain', NULL, ?, ?)`
-    ).bind(recallId, namespace, JSON.stringify(explain), nowIso())
+    ).bind(recallId, namespace, JSON.stringify(stored), nowIso())
       .run()
       .catch(() => console.error("gateway recall explain persist failed"))
   );

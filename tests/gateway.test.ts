@@ -1403,6 +1403,9 @@ test("reranked recall is wired across sources and stays out of conversation stor
   const records=JSON.parse(history.text).items;
   const trace=records.find((r:any)=>r.selection?.status==="reranked");
   assert.ok(trace.decisions.some((d:any)=>d.injected&&d.excerpt.includes("热豆浆")));
+  assert.equal(trace.items.length, 1);
+  assert.ok(prompt.includes(trace.items[0].excerpt));
+  assert.match(trace.items[0].excerpt, /热豆浆/);
 });
 
 test("reranker failure continues the chat with a lexical fallback", async () => {
@@ -1415,6 +1418,37 @@ test("reranker failure continues the chat with a lexical fallback", async () => 
   assert.equal(rows[0].selection.status,"lexical");assert.equal(rows[0].selection.reason,"reranker_failed");
   assert.equal((await run("/api/gateway/recalls?identity=partner",undefined,{authorization:"Bearer im-key"})).response.status,401);
   assert.equal((await run("/api/gateway/recalls?identity=missing")).response.status,400);
+});
+
+test("recall sources resolve live and imported originals from the recalled item only", async () => {
+  const primary = { ...identity(), readNamespaces: ["partner-a", "shared"] };
+  setConfig(config([primary, { ...primary, slug: "other" }]));
+  sqlite.prepare(`INSERT INTO messages (id, conversation_id, namespace, role, content, created_at)
+    VALUES ('msg-shared', 'chat', 'shared', 'user', 'The complete source message.', '2026-08-02'),
+           ('msg-private', 'chat', 'private', 'user', 'Private source.', '2026-08-02')`).run();
+  sqlite.prepare(`INSERT INTO imported_messages (id, namespace, import_id, role, content, created_at)
+    VALUES ('imsg_old', 'shared', 'import', 'assistant', 'An imported original.', '2025-03-01')`).run();
+  const items = [{ namespace: "shared", excerpt: "The excerpt in the prompt.",
+    source_ids: ["msg-shared", "imsg_old", "expired", "msg-private", "msg-shared"] }];
+  sqlite.prepare(`INSERT INTO memory_events (id, namespace, event_type, payload_json, created_at)
+    VALUES ('recall1', 'partner-a', 'recall_explain', ?, '2026-09-06')`)
+    .run(JSON.stringify({ identity: "partner", items, decisions: [{ namespace: "private", source_ids: ["msg-private"] }] }));
+
+  const url = "/api/gateway/recalls?identity=partner&recall=recall1&item=0";
+  const { response, text } = await run(url + "&namespace=private&ids=msg-private");
+  assert.equal(response.status, 200, text);
+  assert.equal(response.headers.get("cache-control"), "no-store");
+  const sources = JSON.parse(text);
+  assert.deepEqual(sources.messages.map((message: { content: string }) => message.content),
+    ["The complete source message.", "An imported original."]);
+  assert.equal(sources.missing, 2);
+  assert.equal((await run(url, undefined, { authorization: "Bearer im-key" })).response.status, 401);
+  assert.equal((await run(url.replace("identity=partner", "identity=other"))).response.status, 404);
+  assert.equal((await run(url.replace("item=0", "item=1"))).response.status, 404);
+  assert.equal((await run(url.replace("item=0", "item="))).response.status, 400);
+  setConfig({ ...config(), identities: [{ ...primary, readNamespaces: ["partner-a"] }] });
+  invalidateSettingsCache();
+  assert.equal((await run(url)).response.status, 404);
 });
 
 test("recall history filters identities sharing the same write space", async () => {

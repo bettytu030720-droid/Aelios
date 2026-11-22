@@ -11,7 +11,7 @@ function panel(preferences: Record<string, string> = {}) {
   const app = runInNewContext(`${script}\nmemoryAdmin()`, {
     localStorage: { getItem: (key: string) => storage.get(key) ?? null,
       setItem: (key: string, value: string) => storage.set(key, value) },
-    location: { origin: 'https://aelios.test' },
+    location: { origin: 'https://aelios.test' }, URLSearchParams,
     document: { documentElement: { dataset: {} } },
     window: { setTimeout() {} }
   });
@@ -238,6 +238,34 @@ test('late recall results and failures cannot cross an A-B-A identity switch', a
     assert.equal(app.recallHistoryError, '');
     assert.equal(app.recallHistoryLoading, false);
   }
+});
+
+test('original messages are loaded on demand and late results are dropped after a switch', async () => {
+  const { app } = panel();
+  await app.init();
+  const item = { source_ids: ['message'], sources: undefined };
+  const record = { id: 'recall-a', items: [item] };
+  app.recallHistory = [record];
+  let resolve: (data: unknown) => void = () => {};
+  const sources = { messages: [{ id: 'message', content: 'The full original.' }], missing: 0 };
+  app.request = (path: string) => {
+    assert.equal(path, '/api/gateway/recalls?identity=danjiu&recall=recall-a&item=0');
+    return new Promise(ok => { resolve = ok; });
+  };
+  const load = app.loadRecallSources(record, item, 0);
+  app.request = async () => ({ data: [] });
+  await app.selectIdentity('ningjiao');
+  await app.selectIdentity('danjiu');
+  resolve(sources);
+  await load;
+  assert.equal(item.sources, undefined);
+  const fresh = { source_ids: ['message'] };
+  const freshRecord = { id: 'recall-b', items: [fresh] };
+  app.recallHistory = [freshRecord];
+  app.request = async () => sources;
+  await app.loadRecallSources(freshRecord, fresh, 0);
+  assert.equal(app.recallHistory[0].items[0].sources, sources);
+  assert.match(ADMIN_HTML, /x-text="message\.content"/);
 });
 
 function settingsPanel(fail = () => false) {
