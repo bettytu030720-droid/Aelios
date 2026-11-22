@@ -29,7 +29,7 @@ interface CurrentWindowRow {
   progress: string;
 }
 
-export async function getRollingDreamStatus(env: Env, namespace: string, { includeBacklog = true } = {}) {
+export async function getRollingDreamStatus(env: Env, namespace: string, { includeBacklog = true, includeHistory = true } = {}) {
   const on = isDaytimeDreamOn(env);
   const db = env.DB;
   const [backlog, current, recent, failures] = await Promise.all([
@@ -39,11 +39,11 @@ export async function getRollingDreamStatus(env: Env, namespace: string, { inclu
       WHERE namespace=? AND done_at IS NULL AND window_key GLOB 'rolling_*' ORDER BY seq LIMIT 1`)
       .bind(namespace).first<CurrentWindowRow>(),
     db.prepare(`SELECT payload_json,created_at FROM memory_events WHERE namespace=? AND event_type='rolling_window'
-      ORDER BY created_at DESC,id DESC LIMIT 8`).bind(namespace).all<{ payload_json: string; created_at: string }>(),
-    db.prepare(`SELECT payload_json,created_at FROM memory_events INDEXED BY idx_rolling_window_failures
+      ORDER BY created_at DESC,id DESC LIMIT ?`).bind(namespace, includeHistory ? 8 : 1).all<{ payload_json: string; created_at: string }>(),
+    includeHistory ? db.prepare(`SELECT payload_json,created_at FROM memory_events INDEXED BY idx_rolling_window_failures
       WHERE namespace=? AND event_type='rolling_window'
       AND json_extract(payload_json,'$.status')='failed' ORDER BY created_at DESC,id DESC LIMIT 8`)
-      .bind(namespace).all<{ payload_json: string; created_at: string }>()
+      .bind(namespace).all<{ payload_json: string; created_at: string }>() : null
   ]);
   const summarize = (rows: typeof recent.results) => rows.map(row => ({
     ...JSON.parse(row.payload_json) as RollingWindowStats, finished_at: row.created_at
@@ -73,6 +73,6 @@ export async function getRollingDreamStatus(env: Env, namespace: string, { inclu
       last_failure: progress.lastFailure
     } : null,
     recent_windows: summarize(recent.results),
-    failed_windows: summarize(failures.results)
+    failed_windows: summarize(failures?.results ?? [])
   };
 }

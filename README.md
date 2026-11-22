@@ -113,7 +113,7 @@ Switching from a button-created copy to a fork keeps all existing Cloudflare dat
 
 - **Per-turn recall** On every human turn to a primary model, Aelios searches Vectorize (`memo-kb`) and D1 full-text indexes, scores passages in one batch with Workers AI reranker (`@cf/baai/bge-reranker-base`), and appends the relevant clean originals to that turn. No generative LLM runs on the recall hot path.
 - **Daytime Dream** Enabled by default (`ROLLING_DREAM`). As new chats accumulate (10 messages or 8,000 characters by default), `@cf/cloudflare/clef-flash` checks whether the stretch contains anything worth keeping, and `DREAM_MODEL` (default `workers-ai/@cf/zai-org/glm-4.7-flash`) queues review candidates. Repeated explicit decisions on the same subject share one candidate for the day. Nightly review sees the last confirmation after the day's extraction is complete.
-- **Nightly Dream and Clef review** A daily cron (`10 20 * * *` UTC) processes any remaining messages from the previous day (with a 3-day backfill window), lets Cloudflare's `@cf/cloudflare/clef` decision model auto-review pending candidates (`CLEF_AUTO_REVIEW`, on by default and undoable per item), writes daily, weekly, and monthly journal entries, and enforces retention rules.
+- **Nightly Dream and Clef review** A daily cron (`10 20 * * *` UTC) processes the previous day's remaining chats, reviews pending candidates with `@cf/cloudflare/clef` (`CLEF_AUTO_REVIEW`, on by default and undoable per item), and writes the daily journal. It uses the remaining time to catch up older dates within a three-day window. The cron also handles weekly and monthly journals and retention.
 - **Multi-space reading** Each assistant writes to one `namespace` and can read up to 8 spaces via `readNamespaces` (for example reading an archived space or shared documentation alongside its own space).
 - **Provenance and cleanup** Raw chat lines live for 7 days by default (`MESSAGES_RETENTION_DAYS`). Unused memories expire after 180 days (pinned, identity, and persona memories never expire) and are hard-deleted 30 days later. The trash button on each line in `/admin` offers **Delete this line**, which keeps memories made from it, or **Delete with its memories**, which also removes memories that explicitly cited that line.
 
@@ -125,12 +125,12 @@ Open `/admin` to inspect and manage every memory space. The sidebar switches bet
 
 | Page | Purpose |
 | --- | --- |
-| **Home** | Today's conversations, with controls to keep or remove individual lines. Also shows pending items, recent Daytime Dream results and failures, last night's summary, and the latest journal entry |
+| **Home** | Today's conversations and the latest Daytime Dream result. Last night’s card shows chat processing, candidate review, and journal writing for the same dialogue date |
 | **Review** | Pending memory candidates. Clef classifies unfamiliar Daytime Dream operations during its nightly evidence review. Proposals it cannot resolve stay visible with a reason. Memory changes appear under **Auto-handled this week** with one-click undo. When Clef is off, candidates wait for manual or MCP review; an unclassified proposal can be kept as a new memory or discarded. Imported candidates always wait under **Imported** |
 | **Journal** | Daily, weekly, and monthly entries (weeks older than ~5 weeks fold into the monthly entry), with **Rewrite from the originals** for days still within transcript retention |
 | **Memories** | Browse, search, edit, merge, and inspect version history across **Core**, **Keepsakes**, **Our words**, **Notebook**, **Handoff**, and **World facts** |
 | **Star map** | Interactive 3D memory graph opened in its own page (`/admin/starmap`) |
-| **Nightly** | Daytime Dream progress, retries, failure reasons, and counts for review candidates and saved memories. Also shows nightly run history, what each night produced, and manual Dream runs |
+| **Dream activity** | Daytime retries, nightly batch history, and actual memory changes by date. Open technical details for model names and run IDs. Continue a date from its saved progress |
 | **Import & export** | Backup export (`md` or `jsonl`), structured entry import, chat log extraction, and zero-LLM chat archiving |
 | **Settings** | Common settings, assistants, models & upstream (including ChatGPT plan and model list), all settings, keys, and troubleshooting (recall excerpts with original messages and vector maintenance) |
 
@@ -140,12 +140,12 @@ Set **First met** under **Settings → Assistants** to see how many days you’v
 
 To catch up a missed night or run a specific date right away, follow these steps.
 
-1. Open **Nightly** and verify the selected memory space under **Viewing** in the top left.
-2. Under **Run a night by hand**, choose the date (or click **Re-run this night** on a failed run) and untick **Preview only** to perform a real write.
-3. Click **Start**. Non-preview runs queue on `MEMORY_QUEUE` and continue in the background even after you close the page.
-4. Each run processes one batch (`DREAM_MAX_MESSAGES`, default `40`). Run again if more batches remain for that date. The final batch automatically generates that day's journal entry.
+1. Open **Dream activity** and check the memory space under **Viewing**.
+2. Choose a chat date under **Continue by date**. **Continue processing** on Home fills in the date and turns off preview for you.
+3. Turn off **Preview only** if it is selected, then click **Continue**. The background task picks up from saved progress. You can close the page once it is queued.
+4. Each run handles one batch (`DREAM_MAX_MESSAGES`, default `40`). Repeat if more chats remain. If the date's extraction is already complete, continuing can run review and write a missing journal without extracting those chats again.
 
-If a task remains unconfirmed for more than 20 minutes, inspect the Worker logs and click **Mark as interrupted** before queuing a new run.
+If a task remains unconfirmed for 20 minutes and you have confirmed it stopped, click **Mark as stopped** to continue from its saved progress.
 
 ### Export, import, and chat archive
 
@@ -220,7 +220,6 @@ Add the `GUIDE_DOG_API_KEY` Worker Secret and point image-description requests t
 - **Model naming** Include the provider prefix (`anthropic/claude-opus-4-5`, `deepseek/deepseek-chat`), and list only primary chat models under an assistant so utility models stay out of memory.
 - **Assistant slugs** Use lowercase URL-safe English names with no spaces.
 - **Vectorize index** Keep `memo-kb` (1024-dim cosine) intact.
-- **Manual Dream preview** Untick **Preview only** on the Nightly page when running a real catch-up batch.
 
 ## Documentation map
 

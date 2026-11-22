@@ -139,6 +139,8 @@ export type DailyDigestRunOptions = {
   trigger?: DreamRunTrigger;
   /** Internal durable-job identity; never accepted directly from an API request. */
   runId?: string;
+  /** Absolute wall-clock deadline for model calls in a background invocation. */
+  deadlineAt?: number;
 };
 
 export interface DigestModelCallResult {

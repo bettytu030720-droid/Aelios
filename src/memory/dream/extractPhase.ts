@@ -284,6 +284,7 @@ export async function runExtractPhase(
     existingMemories: MemoryApiRecord[];
     hasMore: boolean;
     extractMessageIds?: ReadonlySet<string>;
+    deadlineAt?: number;
   }
 ): Promise<{
   messages: MessageRecord[];
@@ -298,7 +299,7 @@ export async function runExtractPhase(
   let messages = input.messages;
   let hasMore = input.hasMore;
   let reductions = 0;
-  const deadlineAt = Date.now() + EXTRACT_PHASE_BUDGET_MS;
+  const deadlineAt = Math.min(Date.now() + EXTRACT_PHASE_BUDGET_MS, input.deadlineAt ?? Infinity);
   const speakers = speakersForNamespace(await loadConfig(env), input.namespace);
   const owned = input.extractMessageIds;
   const project = isCurrentStateEnabled(env);

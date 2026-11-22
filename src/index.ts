@@ -37,14 +37,12 @@ import { handleImportApi } from "./api/transfer";
 import { pruneChatArchive } from "./db/chatArchive";
 import { handleModelCatalog, handleModelTest, handleModels } from "./api/models";
 import { handleRelationsGraph } from "./api/relations";
-import { runCandidateJudge } from "./memory/candidateJudge";
-import { runDailyMemoryDigest, runDreamBackfill } from "./memory/dailyDigest";
-import { readCursor, writeCursor } from "./db/retention";
-import { writeDiaryAfterDream } from "./memory/diaryWriter";
+import { getTargetDigestDateLabel } from "./memory/dreamDates";
+import { readDreamTimeZone } from "./memory/dreamEnv";
+import { DREAM_BACKGROUND_BUDGET_MS, runNightlyCatchup, runNightlyDream } from "./memory/dream/nightly";
 import { backfillFts } from "./memory/fts";
 import { runVectorBackfill } from "./memory/vectorBackfill";
 import {
-  runDiaryTrigger,
   runGithubDailyTrigger,
   runMonthlyRollupTrigger,
   runWeeklyRollupTrigger
@@ -55,6 +53,7 @@ import type { Env, QueueMessage } from "./types";
 import { openAiError } from "./utils/json";
 
 const DAILY_MAINTENANCE_CRON = "10 20 * * *";
+const MAINTENANCE_RESERVE_MS = 2 * 60_000;
 
 const GATEWAY_ENDPOINTS: Record<string, Protocol> = {
   "chat/completions": "chat",
@@ -72,42 +71,6 @@ export function gatewayRoute(pathname: string): { slug: string | null; endpoint:
 
 function getDailyDigestNamespace(env: Env): string {
   return env.DREAM_NAMESPACE?.trim() || "default";
-}
-
-function getDailyDigestMaxRuns(env: Env): number {
-  const parsed = Number(env.DREAM_MAX_RUNS || env.DAILY_DIGEST_MAX_RUNS || 10);
-  if (!Number.isFinite(parsed)) return 10;
-  return Math.min(Math.max(Math.floor(parsed), 1), 10);
-}
-
-async function runDailyMemoryDigestBatches(env: Env, namespace: string): Promise<unknown[]> {
-  const results: unknown[] = [];
-  const maxRuns = getDailyDigestMaxRuns(env);
-
-  for (let i = 0; i < maxRuns; i += 1) {
-    const result = await runDailyMemoryDigest(env, namespace, { trigger: "cron" });
-    results.push({ type: "primary", result });
-    if (!result.ran || !result.stats?.hasMore) break;
-  }
-
-  const backfill = await runDreamBackfill(env, namespace, { maxDates: 2, lookback: 3 });
-  for (const item of backfill) {
-    results.push({ type: "backfill", date_label: item.dateLabel, result: item.result });
-    // The nightly diary only visits yesterday, so an older date finished here would keep its dream draft as its diary.
-    if (item.result.ran) {
-      results.push({ type: "backfill_diary", date_label: item.dateLabel, result: await writeDiaryAfterDream(env, namespace, item.dateLabel) });
-    }
-  }
-
-  const rebuildCursor = `diary_rebuild:${namespace}`;
-  const afterDate = await readCursor(env.DB, rebuildCursor);
-  const rebuild = await env.DB.prepare(`SELECT date FROM daily_log d WHERE namespace=? AND needs_rebuild=1
-    ORDER BY (date <= ?) ASC, date LIMIT 3`).bind(namespace, afterDate ?? '').all<{date:string}>();
-  for (const {date} of rebuild.results) {
-    results.push({type:"backfill_diary", date_label:date, result:await writeDiaryAfterDream(env, namespace, date)});
-    await writeCursor(env.DB, rebuildCursor, date);
-  }
-  return results;
 }
 
 export default {
@@ -306,6 +269,7 @@ export default {
   },
 
   async scheduled(controller: ScheduledController, deployed: Env, ctx: ExecutionContext): Promise<void> {
+    const startedAt = Date.now();
     const env = applySettings(deployed, await loadSettings(deployed));
     const cron = controller.cron;
     const shouldRunDailyMaintenance = !cron || cron === DAILY_MAINTENANCE_CRON;
@@ -327,34 +291,27 @@ export default {
         const config = await loadConfig(env);
         const namespaces = [...new Set([getDailyDigestNamespace(env),
           ...config.identities.filter(i => i.models.length).map(i => identityNamespace(i))])];
+        const dateLabel = getTargetDigestDateLabel(readDreamTimeZone(env), new Date(startedAt));
+        const deadlineAt = startedAt + DREAM_BACKGROUND_BUDGET_MS;
+        for (const namespace of namespaces) {
+          try {
+            const results = await runNightlyDream(env, namespace, dateLabel, deadlineAt);
+            console.log("scheduled nightly dream", { namespace, dateLabel, results });
+          } catch (error) {
+            console.error("scheduled nightly dream failed", { namespace, dateLabel, error });
+          }
+        }
+
         for (const namespace of namespaces) {
           try {
             const results: unknown[] = [];
 
-            const dreamResults = await runDailyMemoryDigestBatches(env, namespace);
-            results.push({ type: "dream_batches", results: dreamResults });
-
             try {
-              results.push({ type: "candidate_judge", result: await runCandidateJudge(env, namespace) });
+              const catchup = await runNightlyCatchup(env, namespace, dateLabel, deadlineAt - MAINTENANCE_RESERVE_MS);
+              if (catchup.length) results.push({ type: "dream_catchup", results: catchup });
             } catch (error) {
-              console.error("scheduled candidate judge failed", {
-                namespace,
-                error: error instanceof Error ? error.message : String(error)
-              });
-              results.push({ type: "candidate_judge", result: { ran: false, error: String(error) } });
+              console.error("scheduled dream catch-up failed", { namespace, dateLabel, error });
             }
-
-            // Rollup phase triggers (diary → github∥retention → weekly → monthly). Order preserved.
-            let diaryWriter: Awaited<ReturnType<typeof runDiaryTrigger>> | undefined;
-            try {
-              diaryWriter = await runDiaryTrigger(env, namespace);
-            } catch (error) {
-              console.error("scheduled diary writer failed", {
-                namespace,
-                error: error instanceof Error ? error.message : String(error)
-              });
-            }
-            results.push({ type: "diary_writer", result: diaryWriter ?? { ok: false } });
 
             const [retentionResult, githubResult] = await Promise.all([
               runMemoryRetention(env, namespace).then(

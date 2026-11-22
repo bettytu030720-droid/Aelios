@@ -48,27 +48,27 @@ export const ADMIN_SCRIPT_MEMORIES = String.raw`    async reloadAll() {
       if (!this.apiKey.trim()) return;
       const [diaries, dream] = await Promise.allSettled([
         this.request(this.withNamespace('/admin/diary?limit=1')),
-        this.request(this.withNamespace('/v1/dream/status'))
+        this.request(this.withNamespace('/v1/dream/status?view=home'))
       ]);
       if (revision !== this.spaceRevision) return;
       if (diaries.status === 'fulfilled') {
         const dailies = (diaries.value.data && diaries.value.data.dailies) || [];
         this.home.diary = dailies[0] || null;
       }
+      this.home.diaryLoaded = diaries.status === 'fulfilled';
       this.home.dreamStatusError = dream.status === 'rejected';
-      if (dream.status === 'rejected') return;
-      const status = dream.value.data || {};
-      const runs = status.dream_runs || [];
-      const run = status.active_run && status.active_run.stale ? status.active_run
-        : runs.find(function(item) { return item.status !== 'queued' && item.status !== 'running'; }) || runs[0] || null;
-      this.home.run = run;
-      this.home.rolling = status.rolling || null;
+      if (dream.status === 'rejected') {
+        this.home.harvest = null;
+        return;
+      }
+      this.home.status = dream.value.data || {};
+      this.home.harvest = null;
       try {
-        const date = (run && run.date_label) || status.anchor_date_label || this.yesterdayLabel();
+        const date = this.home.status.anchor_date_label || this.yesterdayLabel();
         const harvest = await this.request(this.withNamespace('/admin/dream/harvest?date=' + encodeURIComponent(date)));
         if (revision !== this.spaceRevision) return;
         this.home.harvest = harvest.data || null;
-      } catch (error) { /* 首页这几块是锦上添花，读不到就空着 */ }
+      } catch { /* A missing harvest is rendered independently of Dream progress. */ }
     },
     homeMessages() {
       const list = this.homeAll ? this.homeFiltered() : this.homeFiltered().slice(0, 8);
@@ -88,24 +88,6 @@ export const ADMIN_SCRIPT_MEMORIES = String.raw`    async reloadAll() {
     },
     homeHarvestCreated() {
       return (this.home.harvest && this.home.harvest.created) || [];
-    },
-    runColor(run) {
-      if (!run) return 'var(--t3)';
-      if (run.stale || run.status === 'queued' || run.status === 'running') return 'var(--warn)';
-      return { ok: 'var(--ok)', error: 'var(--err)' }[run.status] || 'var(--t3)';
-    },
-    homeRunColor() {
-      return this.runColor(this.home.run);
-    },
-    homeRunSub() {
-      const run = this.home.run;
-      if (!run) return this.L('近 7 天没有记录', 'No runs in the last 7 days');
-      const created = this.homeHarvestCreated().length;
-      return this.dayLabel(run.date_label, true) + ' · ' + this.clock(run.finished_at || run.started_at) + (created ? this.L(' · 新记住 ' + created + ' 条', ' · ' + created + ' new memories') : '');
-    },
-    homeRunBroken() {
-      const run = this.home.run;
-      return Boolean(run && (run.status === 'error' || run.stale));
     },
     isPinned(message) {
       const list = this.jsonList;

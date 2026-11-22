@@ -4,6 +4,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, test } from "node:test";
 import { handleDreamResolve, handleDreamRun, handleDreamStatus } from "../src/api/dream";
+import { readDreamFollowup, recordDreamFollowup } from "../src/db/dreamFollowup";
 import {
   claimQueuedDreamRun,
   describeDreamRun,
@@ -12,7 +13,9 @@ import {
   insertQueuedDreamRun,
   type DreamRunRow
 } from "../src/db/dreamRuns";
+import { upsertDailyLog } from "../src/db/v2/logs";
 import { runDreamJob } from "../src/memory/dream/jobs";
+import { addDaysToDateLabel, getTargetDigestDateLabel } from "../src/memory/dreamDates";
 import { handleQueueMessage } from "../src/queue/consumer";
 import type { DreamRunQueueMessage, Env } from "../src/types";
 
@@ -308,6 +311,36 @@ test("stale threshold is 20 minutes and never marks terminal jobs stale", async 
   assert.equal(describeDreamRun({ ...run, status: "ok" }, start + DREAM_RUN_STALE_MS).stale, false);
 });
 
+test("home status reads the anchor date and latest daytime result without querying the full history", async () => {
+  const date = getTargetDigestDateLabel("UTC");
+  const older = addDaysToDateLabel(date, -2, "UTC");
+  sqlite.prepare(`INSERT INTO dream_runs(id,namespace,date_label,started_at,status,trigger)
+    VALUES ('older','test-space',?,?,'error','cron'),('latest','test-space',?,?,'ok','cron')`)
+    .run(older, new Date().toISOString(), date, new Date(Date.now() - 60_000).toISOString());
+  await recordDreamFollowup(env.DB, "test-space", date, "review", { status: "done", approved: 3, failed: 0 });
+  await recordDreamFollowup(env.DB, "other-space", date, "diary", { status: "written" });
+  await recordDreamFollowup(env.DB, "test-space", older, "diary", { status: "failed", reason: "model_timeout" });
+  const prepare = env.DB.prepare.bind(env.DB);
+  let queries = 0;
+  env.DB.prepare = (sql) => { queries += 1; return prepare(sql); };
+  async function status(view = "") {
+    return (await handleDreamStatus(new Request(`https://synthetic.test/v1/dream/status?namespace=test-space${view}`, {
+      headers: { authorization: "Bearer synthetic-owner" }
+    }), env)).json() as Promise<{ data: any }>;
+  }
+  const home = (await status("&view=home")).data;
+  assert.equal(queries, 8);
+  assert.deepEqual(home.dream_runs.map((item: DreamRunRow) => item.id), ["latest"]);
+  assert.deepEqual(home.followups, { [date]: { review: { status: "done", approved: 3, failed: 0 } } });
+  assert.equal(home.anchor_date_label, date);
+  assert.equal(home.rolling.backlog, undefined);
+  queries = 0;
+  const history = (await status()).data;
+  assert.equal(queries, 16);
+  assert.deepEqual(history.dream_runs.map((item: DreamRunRow) => item.id), ["older", "latest"]);
+  assert.equal(history.followups[older].diary.reason, "model_timeout");
+});
+
 function resolveRequest(body: Record<string, unknown>, authorized = true) {
   return new Request("https://synthetic.test/v1/dream/resolve", {
     method: "POST",
@@ -360,24 +393,39 @@ test("closing is refused for a task that may still be running, a finished one, a
   assert.equal((await handleDreamResolve(resolveRequest({ run_id: job.runId }, false), env)).status, 401);
 });
 
-test("the last batch of a date writes its diary after the dream, and a failing diary does not undo the dream", async () => {
+test("a failed diary can resume after extraction has finished, without rewriting a completed diary", async () => {
   const job = await queued();
   const calls: Array<[string, string]> = [];
   const finished: Parameters<typeof runDreamJob>[2] = async () => {
     await finishDreamRun(env.DB, { id: job.runId, status: "ok", processedMessages: 3 });
-    return { ran: true } as never;
+    return { ran: true, stats: {
+      date: job.dateLabel, mode: "dream", processedMessages: 3, addedMemories: 0, updatedMemories: 0,
+      deletedMemories: 0, queuedCandidates: 0, cleanedEmptyMemories: 0, cursorAdvanced: true, hasMore: false
+    } };
   };
-  await runDreamJob(env, job, finished, (async (_env: Env, namespace: string, date: string) => {
+  await runDreamJob(env, job, finished, async (_env, namespace, date) => {
     calls.push([namespace, date]);
-    throw new Error("synthetic diary failure");
-  }) as never);
+    return { enabled: true, date, ran: false, reason: "model_timeout" };
+  });
   assert.deepEqual(calls, [["test-space", "2026-01-10"]]);
   assert.equal(row(job.runId).status, "ok");
+  const status = () => readDreamFollowup(env.DB, job.namespace, job.dateLabel);
+  assert.deepEqual((await status())?.diary, { status: "failed", reason: "model_timeout" });
 
-  const skipped = await queued();
-  await runDreamJob(env, skipped, async () => {
-    await finishDreamRun(env.DB, { id: skipped.runId, status: "skipped", reason: "already_done" });
+  const alreadyDone: Parameters<typeof runDreamJob>[2] = async (_env, _ns, options) => {
+    assert.ok(options?.runId);
+    await finishDreamRun(env.DB, { id: options.runId, status: "skipped", reason: "already_done" });
     return { ran: false, mode: "dream", reason: "already_done" };
-  }, (async () => { calls.push(["unexpected", "call"]); }) as never);
-  assert.equal(calls.length, 1);
+  };
+  await runDreamJob(env, await queued(), alreadyDone, async (_env, namespace, date) => {
+    calls.push([namespace, date]);
+    await upsertDailyLog(env.DB, { namespace, date, title: "Synthetic journal", summary: "Synthetic content" });
+    return { enabled: true, date, ran: true };
+  });
+  assert.equal(calls.length, 2);
+  const savedStatus = await status();
+  assert.equal(savedStatus?.review?.status, "done");
+  assert.deepEqual(savedStatus?.diary, { status: "written" });
+  await runDreamJob(env, await queued(), alreadyDone, async () => assert.fail("the diary is already written"));
+  assert.deepEqual(await status(), savedStatus);
 });

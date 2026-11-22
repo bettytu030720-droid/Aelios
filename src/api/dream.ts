@@ -1,4 +1,5 @@
 import { authenticate } from "../auth/apiKey";
+import { listDreamFollowups } from "../db/dreamFollowup";
 import {
   describeDreamRun,
   failActiveDreamRun,
@@ -14,8 +15,10 @@ import {
   listMemoriesCreatedInRange,
   listMemoriesGoneDormantInRange
 } from "../db/v2";
-import { runCandidateJudge } from "../memory/candidateJudge";
-import { writeDiaryAfterDream } from "../memory/diaryWriter";
+import { diaryAction, runDreamFollowups } from "../memory/dream/followups";
+import { isClefReviewOn } from "../memory/clefJudge";
+import { isDiaryWriterEnabled } from "../memory/diaryWriter";
+import { isDreamEnabled } from "../memory/dreamEnv";
 import { getRollingDreamStatus } from "../memory/rolling/stats";
 import {
   countRawMessagesForDateLabel,
@@ -53,9 +56,11 @@ export async function handleDreamStatus(request: Request, env: Env): Promise<Res
 
   const url = new URL(request.url);
   const namespace = readString(url.searchParams.get("namespace")) || auth.profile.namespace;
-  const canReadRolling = resolveNamespace(auth.profile, namespace) === namespace;
-  if (url.searchParams.get("view") === "rolling") {
-    if (!canReadRolling) return openAiError("This key cannot access that memory space", 403);
+  const canReadSpace = resolveNamespace(auth.profile, namespace) === namespace;
+  const view = url.searchParams.get("view");
+  const home = view === "home";
+  if (!canReadSpace && (home || view === "rolling")) return openAiError("This key cannot access that memory space", 403);
+  if (view === "rolling") {
     try {
       return json({ data: { namespace, rolling: await getRollingDreamStatus(env, namespace, { includeBacklog: false }) } });
     } catch (error) {
@@ -64,12 +69,12 @@ export async function handleDreamStatus(request: Request, env: Env): Promise<Res
   }
   const timeZone = readDreamTimeZoneFromEnv(env);
   const anchorDateLabel = getTargetDigestDateLabel(timeZone);
-  const cursorDateLabels = getDateLabelsLookback(anchorDateLabel, DREAM_CURSOR_DATE_LABELS, timeZone);
+  const cursorDateLabels = getDateLabelsLookback(anchorDateLabel, home ? 1 : DREAM_CURSOR_DATE_LABELS, timeZone);
   const sinceIso = new Date(Date.now() - DREAM_STATUS_LOOKBACK_DAYS * 24 * 60 * 60 * 1000).toISOString();
 
   try {
-    const [runs, activeRun, cursors, rawMessageCounts, rolling] = await Promise.all([
-      listDreamRunsForNamespace(env.DB, { namespace, sinceIso }),
+    const [runs, activeRun, cursors, rawMessageCounts, rolling, followups] = await Promise.all([
+      listDreamRunsForNamespace(env.DB, { namespace, sinceIso, ...(home ? { dateLabel: anchorDateLabel, limit: 12 } : {}) }),
       findActiveDreamRun(env.DB, namespace),
       Promise.all(
         cursorDateLabels.map(async (dateLabel) => ({
@@ -83,7 +88,11 @@ export async function handleDreamStatus(request: Request, env: Env): Promise<Res
           raw_messages: await countRawMessagesForDateLabel(env.DB, { namespace, dateLabel, timeZone })
         }))
       ),
-      canReadRolling ? getRollingDreamStatus(env, namespace) : undefined
+      canReadSpace ? getRollingDreamStatus(env, namespace, { includeBacklog: !home, includeHistory: !home }) : undefined,
+      canReadSpace ? listDreamFollowups(env.DB, namespace, cursorDateLabels).catch((error) => {
+        console.warn("dream: follow-up status could not be read", { namespace, error });
+        return {};
+      }) : undefined
     ]);
 
     return json({
@@ -96,6 +105,10 @@ export async function handleDreamStatus(request: Request, env: Env): Promise<Res
         active_run: activeRun ? describeDreamRun(activeRun) : null,
         cursors,
         raw_message_counts: rawMessageCounts,
+        nightly_enabled: isDreamEnabled(env),
+        diary_enabled: isDiaryWriterEnabled(env),
+        review_enabled: isClefReviewOn(env),
+        followups,
         rolling
       }
     });
@@ -193,8 +206,9 @@ export async function handleDreamRun(request: Request, env: Env): Promise<Respon
       } }, { status: 202 });
     }
 
+    const effectiveDate = dateLabel ?? getTargetDigestDateLabel(readDreamTimeZoneFromEnv(env));
     const result = await runDailyMemoryDigest(env, namespace, {
-      dateLabel: dateLabel ?? undefined,
+      dateLabel: effectiveDate,
       force,
       dryRun,
       trigger: "manual"
@@ -202,23 +216,14 @@ export async function handleDreamRun(request: Request, env: Env): Promise<Respon
 
     const response: Record<string, unknown> = {
       namespace,
-      date: dateLabel ?? getTargetDigestDateLabel(readDreamTimeZoneFromEnv(env)),
+      date: effectiveDate,
       force,
       dry_run: dryRun,
       result
     };
 
     if (!dryRun) {
-      try {
-        response.candidate_judge = await runCandidateJudge(env, namespace);
-      } catch (error) {
-        response.candidate_judge = {
-          ran: false,
-          error: error instanceof Error ? error.message : String(error)
-        };
-      }
-      // Same as the background job: the nightly cron only writes yesterday's diary.
-      if (result.ran) response.diary_writer = await writeDiaryAfterDream(env, namespace, result.stats.date);
+      Object.assign(response, await runDreamFollowups(env, namespace, effectiveDate, diaryAction(result)));
     }
 
     if (dryRun && result.ran) {

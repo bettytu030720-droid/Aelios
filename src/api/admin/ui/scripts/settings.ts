@@ -276,7 +276,7 @@ export const ADMIN_SCRIPT_SETTINGS = String.raw`    async init() {
       this.recallHistory = []; this.recallHistoryError = ''; this.recallHistoryLoading = false;
       this.boot = {}; this.stats = {};
       this.todayMessages = []; this.candidates = []; this.judgeDecisions = []; this.memories = [];
-      this.home = { diary: null, run: null, harvest: null, rolling: null, dreamStatusError: false }; this.homeAll = false;
+      this.home = { diary: null, diaryLoaded: false, status: null, harvest: null, dreamStatusError: false }; this.homeAll = false;
       this.reviewSelected = {};
       this.precious = []; this.glossary = [];
       this.notebookPages = []; this.notebookDraft = null; this.notebookLoaded = false;
@@ -293,7 +293,7 @@ export const ADMIN_SCRIPT_SETTINGS = String.raw`    async init() {
       this.glossaryDraft = { term: '', definition: '', aliasesText: '' };
       this.stopDreamPolling();
       this.dreamStatus = null; this.dreamRuns = []; this.dreamActiveRun = null; this.dreamHarvest = null;
-      this.dreamExpanded = {}; this.dreamRunResult = null;
+      this.dreamRunResult = null;
       this.dreamDate = ''; this.dreamHarvestDate = '';
       this.dreamLoading = false; this.dreamHarvestLoading = false;
       this.dreamTriggering = false; this.dreamResolving = false; this.dreamStatusError = '';

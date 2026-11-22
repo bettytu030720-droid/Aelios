@@ -15,6 +15,7 @@ import { groundedSourceIds } from "./impression";
 import { diarySpeakerRules, loadSpeakersForNamespace, speakerLabel, type DreamSpeakers } from "./speakers";
 import { CHAT_MATERIAL_RULES, formatChatMaterial } from "./chatMaterial";
 import { readPositiveInt } from "./dreamUtils";
+import { DREAM_MODEL_TIMEOUT_MS, DreamModelTimeoutError, withDreamModelDeadline } from "./dream/modelCall";
 
 const MAX_MESSAGES = 200;
 const HALF_MESSAGES = 100;
@@ -62,7 +63,7 @@ export interface DiarySegmentNote {
 
 interface DiaryModelCallResult<T> {
   result: T | null;
-  reason?: "model_error" | "model_invalid_json";
+  reason?: "model_error" | "model_invalid_json" | "model_timeout";
   model: string;
   status?: number;
   error?: string;
@@ -72,7 +73,7 @@ type DiaryDraftOutcome =
   | { ok: true; result: NonNullable<DiaryWriterModelResult>; model: string; fallbackSourceIds: string[] }
   | { ok: false; reason: string; model: string; error?: string; failedSegment?: number };
 
-function isDiaryWriterEnabled(env: Env): boolean {
+export function isDiaryWriterEnabled(env: Env): boolean {
   const flag = readString(env.ENABLE_DIARY_WRITER);
   if (flag) return flag !== "false";
   return true;
@@ -367,7 +368,7 @@ async function fetchDiaryMessages(
 async function callDiaryModel<T>(
   env: Env,
   prompt: string,
-  meta: { dateLabel: string; messageCount: number; step: string },
+  meta: { dateLabel: string; messageCount: number; step: string; deadlineAt?: number },
   normalize: (value: unknown) => T | null
 ): Promise<DiaryModelCallResult<T>> {
   const model = readDiaryModel(env);
@@ -375,16 +376,18 @@ async function callDiaryModel<T>(
 
   let text: string;
   try {
-    text = await callModelWithRetry(env, {
+    const timeoutMs = meta.deadlineAt === undefined ? DREAM_MODEL_TIMEOUT_MS : Math.min(DREAM_MODEL_TIMEOUT_MS, meta.deadlineAt - Date.now());
+    text = await withDreamModelDeadline((signal) => callModelWithRetry(env, {
       model,
       prompt,
       logPrefix: "diary_writer",
-      logMeta: { date: meta.dateLabel, step: meta.step, messageCount: meta.messageCount }
-    });
+      logMeta: { date: meta.dateLabel, step: meta.step, messageCount: meta.messageCount },
+      signal
+    }), timeoutMs);
   } catch (error) {
     return {
       result: null,
-      reason: "model_error",
+      reason: error instanceof DreamModelTimeoutError ? "model_timeout" : "model_error",
       model,
       status: error instanceof ModelCallError ? error.status : undefined,
       error: error instanceof Error ? error.message : String(error)
@@ -420,13 +423,14 @@ async function writeDiaryInOneCall(
     messages: MessageRecord[];
     existingDraft: { title: string; summary: string } | null;
     speakers: DreamSpeakers | null;
+    deadlineAt?: number;
   }
 ): Promise<DiaryDraftOutcome> {
   const prompt = buildDiaryWriterPrompt(input);
   const call = await callDiaryModel(
     env,
     prompt,
-    { dateLabel: input.dateLabel, messageCount: input.messages.length, step: "whole_day" },
+    { dateLabel: input.dateLabel, messageCount: input.messages.length, step: "whole_day", deadlineAt: input.deadlineAt },
     normalizeDiaryWriterResult
   );
   if (!call.result) {
@@ -442,6 +446,7 @@ async function writeDiaryInSegments(
     segments: MessageRecord[][];
     existingDraft: { title: string; summary: string } | null;
     speakers: DreamSpeakers | null;
+    deadlineAt?: number;
   }
 ): Promise<DiaryDraftOutcome> {
   const total = input.segments.length;
@@ -461,7 +466,7 @@ async function writeDiaryInSegments(
         messages,
         speakers: input.speakers
       }),
-      { dateLabel: input.dateLabel, messageCount: messages.length, step: `segment_${index}_of_${total}` },
+      { dateLabel: input.dateLabel, messageCount: messages.length, step: `segment_${index}_of_${total}`, deadlineAt: input.deadlineAt },
       normalizeDiarySegmentResult
     );
     model = call.model;
@@ -507,7 +512,8 @@ async function writeDiaryInSegments(
     {
       dateLabel: input.dateLabel,
       messageCount: input.segments.reduce((sum, segment) => sum + segment.length, 0),
-      step: "merge"
+      step: "merge",
+      deadlineAt: input.deadlineAt
     },
     normalizeDiaryWriterResult
   );
@@ -527,7 +533,8 @@ async function writeDiaryInSegments(
 export async function runDiaryWriter(
   env: Env,
   namespace: string,
-  dateLabel: string
+  dateLabel: string,
+  options: { deadlineAt?: number } = {}
 ): Promise<DiaryWriterStats> {
   const enabled = isDiaryWriterEnabled(env);
   if (!enabled) {
@@ -563,8 +570,8 @@ export async function runDiaryWriter(
 
   const outcome =
     segments.length > 1
-      ? await writeDiaryInSegments(env, { dateLabel, segments, existingDraft, speakers })
-      : await writeDiaryInOneCall(env, { dateLabel, messages, existingDraft, speakers });
+      ? await writeDiaryInSegments(env, { dateLabel, segments, existingDraft, speakers, deadlineAt: options.deadlineAt })
+      : await writeDiaryInOneCall(env, { dateLabel, messages, existingDraft, speakers, deadlineAt: options.deadlineAt });
 
   if (!outcome.ok) {
     return {
@@ -629,7 +636,9 @@ export async function runDiaryWriter(
  * same daily-log row, and the diary replaces it). The nightly cron only ever visits yesterday, so anything that finishes
  * an older date later (a manual run, a backfill) has to call this itself.
  */
-export async function runDiaryWriterForDate(env: Env, namespace: string, dateLabel: string): Promise<DiaryWriterStats> {
+export async function runDiaryWriterForDate(
+  env: Env, namespace: string, dateLabel: string, options?: { deadlineAt?: number }
+): Promise<DiaryWriterStats> {
   if (!isDiaryWriterEnabled(env)) {
     return { enabled: false, date: dateLabel, ran: false, reason: "disabled" };
   }
@@ -642,7 +651,7 @@ export async function runDiaryWriterForDate(env: Env, namespace: string, dateLab
     return { enabled: true, date: dateLabel, ran: false, reason: "dream_not_done" };
   }
 
-  return runDiaryWriter(env, namespace, dateLabel);
+  return runDiaryWriter(env, namespace, dateLabel, options);
 }
 
 export async function runDiaryWriterNightly(env: Env, namespace: string): Promise<DiaryWriterStats> {
@@ -651,9 +660,11 @@ export async function runDiaryWriterNightly(env: Env, namespace: string): Promis
 }
 
 /** For callers that just ran a dream batch: never throws, and does nothing until the date's last batch is done. */
-export async function writeDiaryAfterDream(env: Env, namespace: string, dateLabel: string): Promise<DiaryWriterStats> {
+export async function writeDiaryAfterDream(
+  env: Env, namespace: string, dateLabel: string, options?: { deadlineAt?: number }
+): Promise<DiaryWriterStats> {
   try {
-    return await runDiaryWriterForDate(env, namespace, dateLabel);
+    return await runDiaryWriterForDate(env, namespace, dateLabel, options);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     console.error("diary writer after dream failed", { namespace, date: dateLabel, error: message });

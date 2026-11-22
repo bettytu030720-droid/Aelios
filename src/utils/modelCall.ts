@@ -21,6 +21,7 @@ export interface ModelCallRequest {
   systemPrompt?: string; // default JSON-generator system prompt
   logPrefix?: string; // default "model_call"
   logMeta?: Record<string, unknown>;
+  signal?: AbortSignal;
 }
 
 export class ModelCallError extends Error {
@@ -112,6 +113,7 @@ export async function callModelWithRetry(env: Env, req: ModelCallRequest): Promi
   });
 
   for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    req.signal?.throwIfAborted();
     if (attempt > 0) {
       const waitMs = backoffMs[attempt - 1] ?? backoffMs.at(-1) ?? 8000;
       console.warn(`${logPrefix}: retrying model call after non-ok response`, {
@@ -122,10 +124,11 @@ export async function callModelWithRetry(env: Env, req: ModelCallRequest): Promi
         backoffMs: waitMs
       });
       await delay(waitMs);
+      req.signal?.throwIfAborted();
     }
 
     try {
-      const response = await callOpenAICompat(env, request);
+      const response = await callOpenAICompat(env, request, undefined, req.signal);
       const elapsedMs = Date.now() - startedAt;
       if (!response.ok) {
         const retriable = isRetriableModelStatus(response.status);
@@ -152,7 +155,7 @@ export async function callModelWithRetry(env: Env, req: ModelCallRequest): Promi
       const reasoning = typeof message?.reasoning_content === "string" ? message.reasoning_content.trim() : "";
       return content || reasoning;
     } catch (error) {
-      if (error instanceof ModelCallError) throw error;
+      if (error instanceof ModelCallError || req.signal?.aborted) throw error;
       const elapsedMs = Date.now() - startedAt;
       const message = error instanceof Error && error.message ? error.message : String(error);
       console.error(`${logPrefix} model failed`, {

@@ -60,7 +60,7 @@ export const ADMIN_BODY_START = `<body>
       </div>
       <div class="flex flex-col gap-0.5">
         <div class="nav-title">${t("后台", "System")}</div>
-        ${navLink("dream", I.moon, "夜间整理", "Nightly")}
+        ${navLink("dream", I.moon, "整理记录", "Dream activity")}
         ${navLink("transfer", I.swap, "导入导出", "Import &amp; export")}
         ${navLink("settings", I.sliders, "设置", "Settings")}
       </div>

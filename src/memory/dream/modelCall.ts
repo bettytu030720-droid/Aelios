@@ -2,7 +2,7 @@ import { callOpenAICompat } from "../../proxy/openaiAdapter";
 import type { Env, OpenAIChatRequest, OpenAIChatResponse } from "../../types";
 
 // Includes waiting for headers AND reading the response body. A timeout is not automatically retried.
-const DREAM_MODEL_TIMEOUT_MS = 120_000;
+export const DREAM_MODEL_TIMEOUT_MS = 120_000;
 
 export class DreamModelTimeoutError extends Error {
   constructor() {
