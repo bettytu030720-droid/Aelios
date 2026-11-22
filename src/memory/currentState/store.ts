@@ -217,12 +217,11 @@ export async function findOutdatedByDecision(
   if (!memoryIds.length) return result;
   const rows = await db
     .prepare(
-      `WITH hits(id) AS (SELECT value FROM json_each(?2))
-       SELECT d.id, lc.valid_as_of, old.id AS outdated_id
+      `SELECT d.id, lc.valid_as_of, old.id AS outdated_id
        FROM memories d
        JOIN memory_lifecycle lc ON lc.memory_id = d.id AND lc.namespace = d.namespace
-       JOIN memories old ON old.namespace = d.namespace
-       JOIN hits ON hits.id = old.id
+       CROSS JOIN json_each(?2) hits
+       CROSS JOIN memories old ON old.id = hits.value AND old.namespace = d.namespace
        WHERE d.namespace = ?1
          AND d.status = 'active'
          AND d.type = 'decision'

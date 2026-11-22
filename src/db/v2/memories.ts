@@ -34,21 +34,60 @@ export interface MemoryTypeCount {
   count: number;
 }
 
+function isMissingTypeCountsError(error: unknown): boolean {
+  const message = error instanceof Error ? error.message : String(error);
+  return /no such table:\s*memory_type_counts/i.test(message);
+}
+
 export async function countActiveMemoriesByType(
   db: D1Database,
   namespace: string
 ): Promise<MemoryTypeCount[]> {
-  const result = await db
-    .prepare(
-      `SELECT type, COUNT(*) AS count
-       FROM memories
-       WHERE namespace = ? AND status = 'active'
-       GROUP BY type
-       ORDER BY type`
-    )
-    .bind(namespace)
-    .all<MemoryTypeCount>();
-  return result.results ?? [];
+  try {
+    const result = await db
+      .prepare(
+        `SELECT type, active_count AS count
+         FROM memory_type_counts
+         WHERE namespace = ? AND active_count > 0
+         ORDER BY type`
+      )
+      .bind(namespace)
+      .all<MemoryTypeCount>();
+    return result.results ?? [];
+  } catch (error) {
+    if (!isMissingTypeCountsError(error)) throw error;
+    const fallback = await db
+      .prepare(
+        `SELECT type, COUNT(*) AS count
+         FROM memories
+         WHERE namespace = ? AND status = 'active'
+         GROUP BY type
+         ORDER BY type`
+      )
+      .bind(namespace)
+      .all<MemoryTypeCount>();
+    return fallback.results ?? [];
+  }
+}
+
+export async function countActiveMemoriesTotal(
+  db: D1Database,
+  namespace: string
+): Promise<number> {
+  try {
+    const row = await db
+      .prepare("SELECT COALESCE(SUM(active_count), 0) AS count FROM memory_type_counts WHERE namespace = ?")
+      .bind(namespace)
+      .first<{ count: number }>();
+    return Number(row?.count ?? 0);
+  } catch (error) {
+    if (!isMissingTypeCountsError(error)) throw error;
+    const fallback = await db
+      .prepare("SELECT COUNT(*) AS count FROM memories WHERE namespace = ? AND status = 'active'")
+      .bind(namespace)
+      .first<{ count: number }>();
+    return Number(fallback?.count ?? 0);
+  }
 }
 
 // L4 每区硬上限用：单个 type 当前 active 条数。
@@ -56,11 +95,20 @@ export async function countActiveMemoriesOfType(
   db: D1Database,
   input: { namespace: string; type: string }
 ): Promise<number> {
-  const row = await db
-    .prepare("SELECT COUNT(*) AS count FROM memories WHERE namespace = ? AND status = 'active' AND type = ?")
-    .bind(input.namespace, input.type)
-    .first<{ count: number }>();
-  return row?.count ?? 0;
+  try {
+    const row = await db
+      .prepare("SELECT active_count AS count FROM memory_type_counts WHERE namespace = ? AND type = ?")
+      .bind(input.namespace, input.type)
+      .first<{ count: number }>();
+    return Number(row?.count ?? 0);
+  } catch (error) {
+    if (!isMissingTypeCountsError(error)) throw error;
+    const fallback = await db
+      .prepare("SELECT COUNT(*) AS count FROM memories WHERE namespace = ? AND status = 'active' AND type = ?")
+      .bind(input.namespace, input.type)
+      .first<{ count: number }>();
+    return Number(fallback?.count ?? 0);
+  }
 }
 
 // 抽取器判重用：库里已有的 fact_key 列表，防止同一件事被重复造 key。
