@@ -24,6 +24,8 @@ function instrumentD1(base: D1Database) {
   let rowsWritten = 0;
   const statements: string[] = [];
 
+  // batch() must hand the real statements to D1; remember what each wrapper stands for.
+  const unwrap = new WeakMap<object, { stmt: D1PreparedStatement; sql: string }>();
   const wrapPrepared = (stmt: D1PreparedStatement, sql: string): D1PreparedStatement => {
     const wrapped = {
       bind(...values: unknown[]) {
@@ -58,6 +60,7 @@ function instrumentD1(base: D1Database) {
         return stmt.raw<T>(options as never);
       }
     };
+    unwrap.set(wrapped, { stmt, sql });
     return wrapped as unknown as D1PreparedStatement;
   };
 
@@ -66,7 +69,12 @@ function instrumentD1(base: D1Database) {
       return wrapPrepared(base.prepare(sql), sql);
     },
     async batch<T = unknown>(stmts: D1PreparedStatement[]) {
-      const results = await base.batch<T>(stmts);
+      const inner = stmts.map((stmt) => {
+        const entry = unwrap.get(stmt);
+        if (entry) statements.push(entry.sql);
+        return entry?.stmt ?? stmt;
+      });
+      const results = await base.batch<T>(inner);
       for (const r of results) {
         rowsRead += Number(r.meta?.rows_read ?? 0);
         rowsWritten += Number(r.meta?.rows_written ?? 0);
@@ -357,4 +365,25 @@ test("D1 rows_read stays bounded on no-change and LIMIT 1 maintenance as history
     .prepare("SELECT COUNT(*) AS n FROM fts_entry_map WHERE kind = 'message' AND entity_id = 'perf-msg-05000'")
     .first<{ n: number }>();
   assert.equal(remaining?.n, 0);
+});
+
+test("an FTS row and its map entry commit together, so no row is left unmapped", async (t) => {
+  const { sqlite, db } = sqliteFixture(t);
+  sqlite.exec(`CREATE TRIGGER fail_map_write BEFORE INSERT ON fts_entry_map WHEN NEW.entity_id = 'boom'
+    BEGIN SELECT RAISE(ABORT, 'map write failed'); END`);
+  const ftsRows = (id: string) => sqlite.prepare("SELECT rowid FROM message_fts WHERE message_id = ?").all(id);
+  const mapped = (id: string) => sqlite.prepare("SELECT fts_rowid FROM fts_entry_map WHERE kind = 'message' AND entity_id = ?").get(id);
+
+  assert.equal(await insertMessageFts(db, { namespace: "ns", messageId: "ok-1", content: "晚安 早点睡" }), true);
+  assert.equal(await insertMessageFts(db, { namespace: "ns", messageId: "ok-2", content: "明天见 晚安" }), true);
+  for (const id of ["ok-1", "ok-2"]) assert.equal(Number(mapped(id)?.fts_rowid), Number(ftsRows(id)[0]?.rowid), id);
+
+  // A failed map write rolls the FTS row back with it instead of leaving a row no delete can find.
+  assert.equal(await insertMessageFts(db, { namespace: "ns", messageId: "boom", content: "撤回这句 也删得掉" }), false);
+  assert.deepEqual(ftsRows("boom"), []);
+  assert.equal(mapped("boom"), undefined);
+
+  await deleteFtsRow(db, "message_fts", "message_id", "ok-1");
+  assert.deepEqual(ftsRows("ok-1"), []);
+  assert.equal(ftsRows("ok-2").length, 1, "the point delete removed only its own row");
 });

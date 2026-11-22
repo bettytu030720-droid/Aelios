@@ -1,4 +1,5 @@
 import { cleanMessageText } from "../utils/sanitize";
+import { nowIso } from "../utils/time";
 import { tokenizeForIndex } from "./queryShape";
 import {
   deleteMappedFtsEntries,
@@ -11,8 +12,7 @@ import {
   getMappedFtsEntry,
   isFtsMapSynced,
   isMissingFtsError,
-  recordMappedFtsEntry,
-  resolveInsertedRowId,
+  isMissingFtsStateError,
   specForTable
 } from "./ftsState";
 
@@ -181,23 +181,25 @@ export async function writeFtsRowWithOutcome(
     if (replace) {
       await deleteFtsRow(db, spec.table, spec.idColumn, input.entityId);
     }
-    const inserted = await withRetry(
-      () =>
-        db
-          .prepare(`INSERT INTO ${spec.table} (fts_body, namespace, ${spec.idColumn}) VALUES (?, ?, ?)`)
-          .bind(body, input.namespace, input.entityId)
-          .run(),
-      `${kind} fts index failed`,
-      { id: input.entityId }
-    );
-    const ftsRowId = await resolveInsertedRowId(db, inserted);
-    if (ftsRowId !== null) {
-      await recordMappedFtsEntry(db, {
-        kind,
-        entityId: input.entityId,
-        namespace: input.namespace,
-        ftsRowId
-      });
+    const insert = () => db
+      .prepare(`INSERT INTO ${spec.table} (fts_body, namespace, ${spec.idColumn}) VALUES (?, ?, ?)`)
+      .bind(body, input.namespace, input.entityId);
+    // The row and its map entry commit together, and last_insert_rowid() is read inside the same
+    // transaction, so a concurrent insert can never be mapped by mistake and no row is left unmapped.
+    const mapEntry = () => db
+      .prepare(
+        `INSERT INTO fts_entry_map (kind, entity_id, namespace, fts_rowid, updated_at)
+         VALUES (?, ?, ?, last_insert_rowid(), ?)
+         ON CONFLICT(kind, entity_id) DO UPDATE SET
+           namespace = excluded.namespace, fts_rowid = excluded.fts_rowid, updated_at = excluded.updated_at`
+      )
+      .bind(kind, input.entityId, input.namespace, nowIso());
+    try {
+      await withRetry(async () => db.batch([insert(), mapEntry()]), `${kind} fts index failed`, { id: input.entityId });
+    } catch (error) {
+      // Before migration 0031 there is no map to keep in step; index the row on its own.
+      if (!isMissingFtsStateError(error)) throw error;
+      await withRetry(async () => insert().run(), `${kind} fts index failed`, { id: input.entityId });
     }
     return "indexed";
   } catch (error) {

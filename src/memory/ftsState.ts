@@ -35,22 +35,6 @@ export function isMissingFtsStateError(error: unknown): boolean {
   return /no such table:\s*(fts_entry_map|fts_maintenance_state)/i.test(message);
 }
 
-export async function resolveInsertedRowId(db: D1Database, result: D1Result | undefined): Promise<number | null> {
-  const meta = result?.meta as { last_row_id?: number; lastInsertRowid?: number | bigint } | undefined;
-  const raw = meta?.last_row_id ?? meta?.lastInsertRowid;
-  if (typeof raw === "number" && Number.isFinite(raw) && raw > 0) return raw;
-  if (typeof raw === "bigint" && raw > 0n) return Number(raw);
-  try {
-    const row = await db.prepare("SELECT last_insert_rowid() AS id").first<{ id: number | bigint }>();
-    const fallback = row?.id;
-    if (typeof fallback === "number" && Number.isFinite(fallback) && fallback > 0) return fallback;
-    if (typeof fallback === "bigint" && fallback > 0n) return Number(fallback);
-  } catch {
-    // Ignore when the DB adapter does not expose last_insert_rowid().
-  }
-  return null;
-}
-
 export interface MappedFtsEntry {
   entity_id: string;
   fts_rowid: number;

@@ -587,6 +587,19 @@ function wrapSqlite(sqlite: DatabaseSync) {
         async run() { return { meta: { changes: statement.run(...args).changes } }; }
       };
       return api;
+    },
+    // Like D1: the statements run in order inside one transaction.
+    async batch(statements: Array<{ run(): Promise<unknown> }>) {
+      sqlite.exec("BEGIN");
+      try {
+        const results = [];
+        for (const statement of statements) results.push(await statement.run());
+        sqlite.exec("COMMIT");
+        return results;
+      } catch (error) {
+        sqlite.exec("ROLLBACK");
+        throw error;
+      }
     }
   };
 }
