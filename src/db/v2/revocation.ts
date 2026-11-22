@@ -1,3 +1,4 @@
+import { deleteFtsRow, deleteFtsRowsByIds } from "../../memory/fts";
 import type { Env } from "../../types";
 import { affectedMemories, closureStatements } from "./revocation/closure";
 import { detachStatements, rawRowStatements } from "./revocation/detach";
@@ -57,6 +58,13 @@ export async function invalidateKnownInputs(
     ...closureStatements(db, namespace, ref, seeds),
     ...(kind === "message" ? [...rawRowStatements(db, namespace, id), ...detachStatements(db, namespace, id)] : []),
   ]);
+  if (kind === "message") {
+    await deleteFtsRow(db, "message_fts", "message_id", id);
+  }
+  const withdrawnMemoryIds = kind === "memory" ? [id, ...withdrawn] : withdrawn;
+  if (withdrawnMemoryIds.length > 0) {
+    await deleteFtsRowsByIds(db, "memory_fts", "memory_id", withdrawnMemoryIds);
+  }
   await finishExternalCleanup(env, namespace, ref);
   return { withdrawn, unverified: legacy.unverified };
 }
@@ -64,7 +72,11 @@ export async function invalidateKnownInputs(
 /** Clean one raw line (the released DELETE route). A later withdrawal still follows provenance inputs. */
 export async function cleanRawMessage(db: D1Database, namespace: string, id: string): Promise<boolean> {
   const [message, archive] = await db.batch([...rawRowStatements(db, namespace, id), ...detachStatements(db, namespace, id)]);
-  return Boolean(message.meta.changes || archive.meta.changes);
+  const removed = Boolean(message.meta.changes || archive.meta.changes);
+  if (removed) {
+    await deleteFtsRow(db, "message_fts", "message_id", id);
+  }
+  return removed;
 }
 
 export async function revokedMemoryIds(db: D1Database, namespace: string, ids: string[]): Promise<Set<string>> {

@@ -8,7 +8,7 @@ import {
   handleWeeklyApproveAdmin
 } from "./api/admin";
 import { handleHealth } from "./api/health";
-import { handleVectorBackfill, handleVectorDoctor, handleVectorHealth, handleVectorReindex } from "./api/debug";
+import { handleFtsReconcile, handleVectorBackfill, handleVectorDoctor, handleVectorHealth, handleVectorReindex } from "./api/debug";
 import { handleDreamHarvest, handleDreamResolve, handleDreamRun, handleDreamStatus } from "./api/dream";
 import { handleGateway } from "./gateway/handler";
 import { handleHookIdentities, handleHookRecall, handleHookRecord } from "./gateway/hook";
@@ -234,6 +234,10 @@ export default {
 
     if (request.method === "POST" && url.pathname === "/v1/vector-backfill") {
       return handleVectorBackfill(request, env);
+    }
+
+    if (request.method === "POST" && url.pathname === "/v1/fts-reconcile") {
+      return handleFtsReconcile(request, env);
     }
 
     if (request.method === "GET" && url.pathname === "/admin/dream/harvest") {

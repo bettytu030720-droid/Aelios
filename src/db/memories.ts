@@ -1,6 +1,6 @@
 import type { MemoryProvenance } from "../memory/provenance";
 import type { MemoryLifecycleRow, MemoryRecord } from "../types";
-import { deleteFtsRow, searchFtsIds, upsertMemoryFts } from "../memory/fts";
+import { deleteFtsRow, insertMemoryFts, searchFtsIds, upsertMemoryFts } from "../memory/fts";
 import { lexicalHitScore } from "../memory/queryShape";
 import { saveMemoryRevision } from "./v2/revisions";
 import { newId } from "../utils/ids";
@@ -105,7 +105,7 @@ export async function createMemory(db: D1Database, input: CreateMemoryInput): Pr
     )
     .run();
 
-  await upsertMemoryFts(db, { namespace: record.namespace, memoryId: record.id, content: record.content });
+  await insertMemoryFts(db, { namespace: record.namespace, memoryId: record.id, content: record.content });
   return record;
 }
 

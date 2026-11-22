@@ -10,11 +10,12 @@ import {
   updateVectorMemory,
   vectorMetadataToMemoryRecord
 } from "../memory/vectorStore";
+import { reconcileFts, type FtsKind, type FtsReconcileMode } from "../memory/fts";
 import { runVectorBackfill } from "../memory/vectorBackfill";
 import { runVectorDoctor } from "../memory/vectorDoctor";
 import { json, openAiError } from "../utils/json";
 import type { Env, KeyProfile, MemoryApiRecord } from "../types";
-import { readBoolean, readJsonObject, readPositiveInt, readString } from "../utils/request";
+import { readBoolean, readJsonObject, readOptionalString, readPositiveInt, readString, resolveNamespace } from "../utils/request";
 
 interface CacheHealthRow {
   created_at: string;
@@ -406,6 +407,54 @@ export async function handleVectorBackfill(request: Request, env: Env): Promise<
     const report = await runVectorBackfill(env, { namespace, dryRun, limit });
     const failed = report.repair?.failed_count ?? 0;
     return json({ ok: failed === 0 && report.errors.length === 0, data: report });
+  } catch (error) {
+    return json({ ok: false, error: error instanceof Error ? error.message : String(error) }, { status: 500 });
+  }
+}
+
+const VALID_FTS_MODES: readonly FtsReconcileMode[] = ["sync_map", "backfill_missing", "purge_orphans"];
+const VALID_FTS_KINDS: readonly FtsKind[] = ["message", "memory"];
+
+// Manual bounded reconciliation for legacy FTS indexes:
+// - sync_map: walks FTS by rowid, populates fts_entry_map, prunes orphans & duplicates
+// - purge_orphans: walks FTS by rowid and prunes orphans & duplicates
+// - backfill_missing: walks messages/memories by cursor and indexes rows missing from fts_entry_map
+export async function handleFtsReconcile(request: Request, env: Env): Promise<Response> {
+  const auth = await authenticate(request, env);
+  if (!auth.ok) return openAiError("Unauthorized", 401, "authentication_error");
+  const scopeError = requireScope(auth.profile, "memory:write");
+  if (scopeError) return scopeError;
+
+  const body = await readJsonObject(request);
+  if (!body) return openAiError("Request body must be a JSON object", 400);
+
+  const rawMode = readString(body.mode) ?? "sync_map";
+  if (!(VALID_FTS_MODES as readonly string[]).includes(rawMode)) {
+    return openAiError(`Invalid mode: ${rawMode}`, 400);
+  }
+  const rawKind = readString(body.kind) ?? "message";
+  if (!(VALID_FTS_KINDS as readonly string[]).includes(rawKind)) {
+    return openAiError(`Invalid kind: ${rawKind}`, 400);
+  }
+
+  const requestedNs = readString(body.namespace);
+  const namespace = requestedNs === "*" && auth.profile.chooseNamespace
+    ? undefined
+    : resolveNamespace(auth.profile, requestedNs);
+  const limit = readPositiveInt(body.limit, 200, 500);
+  const dryRun = readBoolean(body.dry_run, true);
+  const cursor = readOptionalString(body.cursor) ?? null;
+
+  try {
+    const report = await reconcileFts(env.DB, {
+      mode: rawMode as FtsReconcileMode,
+      kind: rawKind as FtsKind,
+      namespace,
+      cursor,
+      limit,
+      dryRun
+    });
+    return json({ ok: report.failed === 0, data: report });
   } catch (error) {
     return json({ ok: false, error: error instanceof Error ? error.message : String(error) }, { status: 500 });
   }

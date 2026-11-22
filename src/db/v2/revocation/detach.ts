@@ -3,12 +3,11 @@
 /** Tables whose rows list the raw messages they were made from. */
 const CITING_TABLES = ["memories", "memory_candidates", "memory_revisions", "longtail", "daily_log"] as const;
 
-/** Delete the raw row from the capture store, the opt-in archive and the keyword index. */
+/** Delete the raw row from the capture store and opt-in archive; FTS is removed via rowid map by the caller. */
 export function rawRowStatements(db: D1Database, namespace: string, id: string): D1PreparedStatement[] {
   return [
     db.prepare("DELETE FROM messages WHERE namespace=? AND id=?").bind(namespace, id),
     db.prepare("DELETE FROM chat_archive WHERE namespace=? AND id=?").bind(namespace, id),
-    db.prepare("DELETE FROM message_fts WHERE namespace=? AND message_id=?").bind(namespace, id),
     db.prepare(`UPDATE memory_events SET payload_json=json_set(payload_json,
       '$.grounded.events', json((SELECT json_group_array(json(e.value)) FROM json_each(payload_json,'$.grounded.events') e
         WHERE ?2 NOT IN (SELECT value FROM json_each(e.value,'$.source_message_ids')))),
