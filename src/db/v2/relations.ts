@@ -3,6 +3,7 @@ import type {
   MemoryRelationRow
 } from "../../types";
 import { nowIso } from "../../utils/time";
+import { countActiveMemoriesTotal } from "./memories";
 import { SQLITE_BIND_BATCH_SIZE, uniqueStrings } from "./shared";
 
 export const MEMORY_REL_TYPES: readonly MemoryRelType[] = [
@@ -107,7 +108,8 @@ export async function listRelationsForIds(
 
 // =====================================================================
 // 记忆星图：GET /api/relations/graph 数据层
-// 选取：有边端点优先入选，再按 importance desc + created_at desc 补齐到 limit。
+// 按 idx_memories_graph_order 直接取有界的 top-limit active 节点，再只查这些节点之间的边，
+// 避免在截断前扫全表或拉取整库关系边。
 // =====================================================================
 
 export interface RelationGraphNode {
@@ -155,38 +157,38 @@ function graphNodeLabel(row: { summary: string | null; content: string }): strin
   return content.length > 60 ? content.slice(0, 60) : content;
 }
 
-function compareGraphImportance(a: GraphMemoryRow, b: GraphMemoryRow): number {
-  if (b.importance !== a.importance) return b.importance - a.importance;
-  return b.created_at < a.created_at ? -1 : b.created_at > a.created_at ? 1 : 0;
-}
-
-// namespace 占 1 个 bind，id 批大小 ≤ 90 以遵守 D1 100 绑定上限。
+// D1 100 绑定上限：每批按 src_id IN (...) 查 <= 90 个节点发出的边。
 const GRAPH_ID_BIND_BATCH_SIZE = SQLITE_BIND_BATCH_SIZE;
 
-async function fetchActiveGraphMemoriesByIds(
+async function fetchEdgesWithinNodeSet(
   db: D1Database,
-  namespace: string,
-  memoryIds: string[]
-): Promise<GraphMemoryRow[]> {
-  const ids = uniqueStrings(memoryIds);
+  selectedIds: Set<string>
+): Promise<RelationGraphEdge[]> {
+  const ids = [...selectedIds];
   if (ids.length === 0) return [];
-  const rows: GraphMemoryRow[] = [];
+  const edges: RelationGraphEdge[] = [];
   for (let index = 0; index < ids.length; index += GRAPH_ID_BIND_BATCH_SIZE) {
     const batch = ids.slice(index, index + GRAPH_ID_BIND_BATCH_SIZE);
     const placeholders = batch.map(() => "?").join(", ");
     const result = await db
       .prepare(
-        `SELECT id, type, content, summary, importance, pinned, version_status, created_at
-         FROM memories
-         WHERE namespace = ?
-           AND status = 'active'
-           AND id IN (${placeholders})`
+        `SELECT src_id, dst_id, rel_type, weight
+         FROM memory_relations
+         WHERE src_id IN (${placeholders})`
       )
-      .bind(namespace, ...batch)
-      .all<GraphMemoryRow>();
-    rows.push(...(result.results ?? []));
+      .bind(...batch)
+      .all<{ src_id: string; dst_id: string; rel_type: string; weight: number }>();
+    for (const row of result.results ?? []) {
+      if (!selectedIds.has(row.dst_id)) continue;
+      edges.push({
+        src: row.src_id,
+        dst: row.dst_id,
+        rel_type: row.rel_type,
+        weight: row.weight
+      });
+    }
   }
-  return rows;
+  return edges;
 }
 
 export async function getRelationsGraph(
@@ -196,33 +198,8 @@ export async function getRelationsGraph(
   const limit = Math.min(Math.max(Math.floor(input.limit ?? 400), 1), 800);
   const namespace = input.namespace;
 
-  const totalRow = await db
-    .prepare(`SELECT COUNT(*) AS count FROM memories WHERE namespace = ? AND status = 'active'`)
-    .bind(namespace)
-    .first<{ count: number }>();
-  const totalNodes = Number(totalRow?.count ?? 0);
-
-  // 两端都在本 namespace active 记忆上的边（边表本身无 namespace 列）
-  const edgeResult = await db
-    .prepare(
-      `SELECT r.src_id AS src_id, r.dst_id AS dst_id, r.rel_type AS rel_type, r.weight AS weight
-       FROM memory_relations r
-       INNER JOIN memories s ON s.id = r.src_id AND s.namespace = ? AND s.status = 'active'
-       INNER JOIN memories d ON d.id = r.dst_id AND d.namespace = ? AND d.status = 'active'`
-    )
-    .bind(namespace, namespace)
-    .all<{ src_id: string; dst_id: string; rel_type: string; weight: number }>();
-  const allEdges = edgeResult.results ?? [];
-  const totalEdges = allEdges.length;
-
-  const connectedIds = new Set<string>();
-  for (const edge of allEdges) {
-    connectedIds.add(edge.src_id);
-    connectedIds.add(edge.dst_id);
-  }
-
-  const [connectedRows, topRows] = await Promise.all([
-    fetchActiveGraphMemoriesByIds(db, namespace, [...connectedIds]),
+  const [totalNodes, selected] = await Promise.all([
+    countActiveMemoriesTotal(db, namespace),
     db
       .prepare(
         `SELECT id, type, content, summary, importance, pinned, version_status, created_at
@@ -236,23 +213,8 @@ export async function getRelationsGraph(
       .then((r) => r.results ?? [])
   ]);
 
-  const connectedSorted = [...connectedRows].sort(compareGraphImportance);
-  const selected: GraphMemoryRow[] = [];
-  const selectedIds = new Set<string>();
-
-  // 1) 有边连着的记忆优先入选（按 importance 截断到 limit）
-  for (const row of connectedSorted) {
-    if (selected.length >= limit) break;
-    selected.push(row);
-    selectedIds.add(row.id);
-  }
-  // 2) 再补高 importance 的 active 记忆
-  for (const row of topRows) {
-    if (selected.length >= limit) break;
-    if (selectedIds.has(row.id)) continue;
-    selected.push(row);
-    selectedIds.add(row.id);
-  }
+  const selectedIds = new Set(selected.map((row) => row.id));
+  const edges = await fetchEdgesWithinNodeSet(db, selectedIds);
 
   const nodes: RelationGraphNode[] = selected.map((row) => ({
     id: row.id,
@@ -264,21 +226,12 @@ export async function getRelationsGraph(
     created_at: row.created_at
   }));
 
-  const edges: RelationGraphEdge[] = allEdges
-    .filter((edge) => selectedIds.has(edge.src_id) && selectedIds.has(edge.dst_id))
-    .map((edge) => ({
-      src: edge.src_id,
-      dst: edge.dst_id,
-      rel_type: edge.rel_type,
-      weight: edge.weight
-    }));
-
   return {
     nodes,
     edges,
     meta: {
       total_nodes: totalNodes,
-      total_edges: totalEdges,
+      total_edges: edges.length,
       truncated: nodes.length < totalNodes
     }
   };
