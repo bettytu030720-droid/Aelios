@@ -1,3 +1,4 @@
+import { deleteFtsRowsByIds } from "../memory/fts";
 import { nowIso } from "../utils/time";
 
 // ---------------------------------------------------------------------------
@@ -19,24 +20,35 @@ export async function deleteOldMessages(
   namespace: string,
   cutoff: string
 ): Promise<number> {
-  try {
-    await db
+  let deletedTotal = 0;
+  for (;;) {
+    const batch = await db
       .prepare(
-        `DELETE FROM message_fts
-         WHERE message_id IN (
-           SELECT id FROM messages WHERE namespace = ? AND created_at < ?
-         )`
+        `SELECT id FROM messages
+         WHERE namespace = ? AND created_at < ?
+         LIMIT ?`
       )
-      .bind(namespace, cutoff)
+      .bind(namespace, cutoff, RETENTION_BATCH_SIZE)
+      .all<{ id: string }>();
+    const ids = (batch.results ?? []).map((row) => row.id);
+    if (ids.length === 0) break;
+
+    try {
+      await deleteFtsRowsByIds(db, "message_fts", "message_id", ids);
+    } catch (error) {
+      console.error("retention: message fts cleanup failed", error);
+    }
+
+    const placeholders = ids.map(() => "?").join(", ");
+    const result = await db
+      .prepare(`DELETE FROM messages WHERE namespace = ? AND id IN (${placeholders})`)
+      .bind(namespace, ...ids)
       .run();
-  } catch (error) {
-    console.error("retention: message fts cleanup failed", error);
+    const deleted = result.meta.changes ?? 0;
+    deletedTotal += deleted;
+    if (ids.length < RETENTION_BATCH_SIZE || deleted === 0) break;
   }
-  const result = await db
-    .prepare("DELETE FROM messages WHERE namespace = ? AND created_at < ?")
-    .bind(namespace, cutoff)
-    .run();
-  return result.meta.changes ?? 0;
+  return deletedTotal;
 }
 
 // ---------------------------------------------------------------------------
@@ -192,10 +204,7 @@ async function hardDeleteMemoriesBatch(
   if (ids.length === 0) return 0;
   const placeholders = ids.map(() => "?").join(", ");
   try {
-    await db
-      .prepare(`DELETE FROM memory_fts WHERE memory_id IN (${placeholders})`)
-      .bind(...ids)
-      .run();
+    await deleteFtsRowsByIds(db, "memory_fts", "memory_id", ids);
   } catch (error) {
     console.error("retention: memory fts hard-delete cleanup failed", error);
   }

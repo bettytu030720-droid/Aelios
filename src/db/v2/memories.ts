@@ -1,7 +1,7 @@
 import { invalidateKnownInputs } from "./revocation";
 import type { MemoryProvenance } from "../../memory/provenance";
 import { upsertMemoryEmbedding } from "../../memory/embedding";
-import { deleteFtsRow, upsertMemoryFts } from "../../memory/fts";
+import { deleteFtsRow, insertMemoryFts, upsertMemoryFts } from "../../memory/fts";
 import { storedMemoryType, WORLD_FACT_TYPE } from "../../memory/canonicalTypes";
 import type {
   Env,
@@ -309,7 +309,7 @@ export async function upsertMemoryByFactKey(
     .run();
 
   await syncMemoryVector(env, { namespace: input.namespace, id });
-  await upsertMemoryFts(env.DB, { namespace: input.namespace, memoryId: id, content: input.content });
+  await insertMemoryFts(env.DB, { namespace: input.namespace, memoryId: id, content: input.content });
   return { id, created: true };
 }
 
@@ -515,8 +515,9 @@ export async function supersedeMemory(
   await db.batch(statements);
   // 3. 同步向量：新条目 upsert，旧条目下架
   await syncMemoryVector(env, { namespace: input.namespace, id: nextId });
-  await upsertMemoryFts(env.DB, { namespace: input.namespace, memoryId: nextId, content: input.newContent });
+  await insertMemoryFts(env.DB, { namespace: input.namespace, memoryId: nextId, content: input.newContent });
   if (!old) return { oldStatus: "missing", newId: nextId };
+  await deleteFtsRow(db, "memory_fts", "memory_id", old.id);
   if (old.vector_id) {
     for (let attempt = 0; attempt < 2; attempt += 1) {
       try {
@@ -602,8 +603,7 @@ export async function archiveMemory(
   const changes = [
     ...(approval ? [approval.guard] : []),
     db.prepare("UPDATE memories SET status = 'archived', updated_at = ? WHERE namespace = ? AND id = ?")
-      .bind(now, input.namespace, input.id),
-    db.prepare("DELETE FROM memory_fts WHERE namespace=? AND memory_id=?").bind(input.namespace, input.id)
+      .bind(now, input.namespace, input.id)
   ];
   if (input.dismissCandidates) {
     changes.push(db.prepare(`UPDATE memory_candidates SET status='discarded', decision_note='target_archived', updated_at=?
@@ -611,6 +611,7 @@ export async function archiveMemory(
   }
   if (approval) changes.push(approval.complete(input.id));
   await db.batch(changes);
+  await deleteFtsRow(db, "memory_fts", "memory_id", input.id);
 
   if (existing.vector_id) {
     try {

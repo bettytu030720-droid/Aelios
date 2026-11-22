@@ -1,12 +1,35 @@
-import { tokenizeForIndex } from "./queryShape";
 import { cleanMessageText } from "../utils/sanitize";
+import { nowIso } from "../utils/time";
+import { tokenizeForIndex } from "./queryShape";
+import {
+  deleteMappedFtsEntries,
+  FTS_BATCH_SIZE,
+  FTS_SPECS,
+  type FtsIdColumn,
+  type FtsKind,
+  type FtsTable,
+  getMappedFtsEntries,
+  getMappedFtsEntry,
+  isFtsMapSynced,
+  isMissingFtsError,
+  isMissingFtsStateError,
+  specForTable
+} from "./ftsState";
+
+export type { FtsIdColumn, FtsKind, FtsTable } from "./ftsState";
+export {
+  backfillFts,
+  type FtsBackfillResult,
+  type FtsReconcileMode,
+  type FtsReconcileResult,
+  purgeOrphanFts,
+  rebuildFts,
+  reconcileFts
+} from "./ftsMaintenance";
 
 const FTS_WRITE_ATTEMPTS = 3;
 
-function isMissingFtsError(error: unknown): boolean {
-  const message = error instanceof Error ? error.message : String(error);
-  return /no such (table|module)|fts5/i.test(message);
-}
+export type WriteFtsOutcome = "indexed" | "empty" | "failed";
 
 export function toFtsBody(text: string): string {
   return tokenizeForIndex(text).join(" ");
@@ -39,11 +62,28 @@ async function withRetry<T>(fn: () => Promise<T>, label: string, meta: Record<st
 
 export async function deleteFtsRow(
   db: D1Database,
-  table: "message_fts" | "memory_fts",
-  idColumn: "message_id" | "memory_id",
+  table: FtsTable,
+  idColumn: FtsIdColumn,
   id: string
 ): Promise<void> {
+  const spec = specForTable(table);
   try {
+    const mapped = await getMappedFtsEntry(db, spec.kind, id);
+    if (mapped.available && mapped.entry) {
+      const ftsRowId = mapped.entry.fts_rowid;
+      await withRetry(
+        async () => {
+          await db.prepare(`DELETE FROM ${table} WHERE rowid = ?`).bind(ftsRowId).run();
+          await deleteMappedFtsEntries(db, spec.kind, [id]);
+        },
+        "fts delete by rowid failed",
+        { table, id, ftsRowId }
+      );
+      return;
+    }
+    if (mapped.available && await isFtsMapSynced(db, spec.kind)) {
+      return;
+    }
     await withRetry(
       () => db.prepare(`DELETE FROM ${table} WHERE ${idColumn} = ?`).bind(id).run(),
       "fts delete failed",
@@ -54,82 +94,156 @@ export async function deleteFtsRow(
   }
 }
 
-// message_id / memory_id are UNINDEXED in FTS5, so `DELETE ... WHERE message_id = ?` reads
-// every row of the FTS table (D1 bills each one). Upsert only when the row may already be
-// indexed; a row that was just inserted, or that backfill just found missing, uses the
-// insert-only variant and reads nothing.
-async function writeMessageFts(
+export async function deleteFtsRowsByIds(
   db: D1Database,
-  input: { namespace: string; messageId: string; content: string },
-  replace: boolean
-): Promise<boolean> {
-  const body = toFtsBody(cleanMessageText(input.content));
-  if (!body) return false;
+  table: FtsTable,
+  idColumn: FtsIdColumn,
+  ids: string[]
+): Promise<void> {
+  const unique = [...new Set(ids.filter(Boolean))];
+  if (unique.length === 0) return;
+  const spec = specForTable(table);
   try {
-    await withRetry(async () => {
-      if (replace) await db.prepare("DELETE FROM message_fts WHERE message_id = ?").bind(input.messageId).run();
-      await db
-        .prepare("INSERT INTO message_fts (fts_body, namespace, message_id) VALUES (?, ?, ?)")
-        .bind(body, input.namespace, input.messageId)
-        .run();
-    }, "message fts index failed", { id: input.messageId });
-    return true;
+    const mapped = await getMappedFtsEntries(db, spec.kind, unique);
+    if (mapped.available) {
+      const mappedIds: string[] = [];
+      const rowIds: number[] = [];
+      const unmappedIds: string[] = [];
+      for (const id of unique) {
+        const entry = mapped.entries.get(id);
+        if (entry) {
+          mappedIds.push(id);
+          rowIds.push(entry.fts_rowid);
+        } else {
+          unmappedIds.push(id);
+        }
+      }
+      for (let index = 0; index < rowIds.length; index += FTS_BATCH_SIZE) {
+        const batch = rowIds.slice(index, index + FTS_BATCH_SIZE);
+        const placeholders = batch.map(() => "?").join(", ");
+        await withRetry(
+          () => db.prepare(`DELETE FROM ${table} WHERE rowid IN (${placeholders})`).bind(...batch).run(),
+          "fts batch delete by rowid failed",
+          { table, count: batch.length }
+        );
+      }
+      if (mappedIds.length > 0) {
+        await deleteMappedFtsEntries(db, spec.kind, mappedIds);
+      }
+      if (unmappedIds.length === 0 || await isFtsMapSynced(db, spec.kind)) {
+        return;
+      }
+      for (let index = 0; index < unmappedIds.length; index += FTS_BATCH_SIZE) {
+        const batch = unmappedIds.slice(index, index + FTS_BATCH_SIZE);
+        const placeholders = batch.map(() => "?").join(", ");
+        await withRetry(
+          () => db.prepare(`DELETE FROM ${table} WHERE ${idColumn} IN (${placeholders})`).bind(...batch).run(),
+          "fts legacy batch delete failed",
+          { table, count: batch.length }
+        );
+      }
+      return;
+    }
+
+    for (let index = 0; index < unique.length; index += FTS_BATCH_SIZE) {
+      const batch = unique.slice(index, index + FTS_BATCH_SIZE);
+      const placeholders = batch.map(() => "?").join(", ");
+      await withRetry(
+        () => db.prepare(`DELETE FROM ${table} WHERE ${idColumn} IN (${placeholders})`).bind(...batch).run(),
+        "fts batch delete failed",
+        { table, count: batch.length }
+      );
+    }
   } catch (error) {
-    if (!isMissingFtsError(error)) console.error("message fts index failed", { id: input.messageId, error });
-    return false;
+    if (!isMissingFtsError(error)) {
+      console.error("fts batch delete failed", { table, count: unique.length, error });
+    }
   }
 }
 
-/** Re-index a message that may already have an FTS row. Scans the whole FTS table. */
-export function upsertMessageFts(
+// message_id / memory_id are UNINDEXED in FTS5, so `DELETE ... WHERE message_id = ?` reads
+// every row of the FTS table (D1 bills each one). We store `(kind, entity_id) -> fts_rowid`
+// in fts_entry_map so updates and deletes use O(log N) `WHERE rowid = ?` point deletes,
+// and insert-only paths skip deletion altogether.
+export async function writeFtsRowWithOutcome(
+  db: D1Database,
+  kind: FtsKind,
+  input: { namespace: string; entityId: string; rawText: string },
+  replace: boolean
+): Promise<WriteFtsOutcome> {
+  const spec = FTS_SPECS[kind];
+  const body = toFtsBody(kind === "message" ? cleanMessageText(input.rawText) : input.rawText);
+  if (!body) {
+    if (replace) await deleteFtsRow(db, spec.table, spec.idColumn, input.entityId);
+    return "empty";
+  }
+  try {
+    if (replace) {
+      await deleteFtsRow(db, spec.table, spec.idColumn, input.entityId);
+    }
+    const insert = () => db
+      .prepare(`INSERT INTO ${spec.table} (fts_body, namespace, ${spec.idColumn}) VALUES (?, ?, ?)`)
+      .bind(body, input.namespace, input.entityId);
+    // The row and its map entry commit together, and last_insert_rowid() is read inside the same
+    // transaction, so a concurrent insert can never be mapped by mistake and no row is left unmapped.
+    const mapEntry = () => db
+      .prepare(
+        `INSERT INTO fts_entry_map (kind, entity_id, namespace, fts_rowid, updated_at)
+         VALUES (?, ?, ?, last_insert_rowid(), ?)
+         ON CONFLICT(kind, entity_id) DO UPDATE SET
+           namespace = excluded.namespace, fts_rowid = excluded.fts_rowid, updated_at = excluded.updated_at`
+      )
+      .bind(kind, input.entityId, input.namespace, nowIso());
+    try {
+      await withRetry(async () => db.batch([insert(), mapEntry()]), `${kind} fts index failed`, { id: input.entityId });
+    } catch (error) {
+      // Before migration 0031 there is no map to keep in step; index the row on its own.
+      if (!isMissingFtsStateError(error)) throw error;
+      await withRetry(async () => insert().run(), `${kind} fts index failed`, { id: input.entityId });
+    }
+    return "indexed";
+  } catch (error) {
+    if (!isMissingFtsError(error)) console.error(`${kind} fts index failed`, { id: input.entityId, error });
+    return "failed";
+  }
+}
+
+/** Re-index a message that may already have an FTS row (point delete via fts_entry_map). */
+export async function upsertMessageFts(
   db: D1Database,
   input: { namespace: string; messageId: string; content: string }
 ): Promise<boolean> {
-  return writeMessageFts(db, input, true);
+  return (await writeFtsRowWithOutcome(db, "message", { namespace: input.namespace, entityId: input.messageId, rawText: input.content }, true)) === "indexed";
 }
 
 /** Index a message row that has no FTS row yet (just inserted, or found missing by backfill). */
-export function insertMessageFts(
+export async function insertMessageFts(
   db: D1Database,
   input: { namespace: string; messageId: string; content: string }
 ): Promise<boolean> {
-  return writeMessageFts(db, input, false);
+  return (await writeFtsRowWithOutcome(db, "message", { namespace: input.namespace, entityId: input.messageId, rawText: input.content }, false)) === "indexed";
 }
 
-async function writeMemoryFts(
-  db: D1Database,
-  input: { namespace: string; memoryId: string; content: string },
-  replace: boolean
-): Promise<boolean> {
-  const body = toFtsBody(input.content);
-  if (!body) return false;
-  try {
-    await withRetry(async () => {
-      if (replace) await db.prepare("DELETE FROM memory_fts WHERE memory_id = ?").bind(input.memoryId).run();
-      await db
-        .prepare("INSERT INTO memory_fts (fts_body, namespace, memory_id) VALUES (?, ?, ?)")
-        .bind(body, input.namespace, input.memoryId)
-        .run();
-    }, "memory fts index failed", { id: input.memoryId });
-    return true;
-  } catch (error) {
-    if (!isMissingFtsError(error)) console.error("memory fts index failed", { id: input.memoryId, error });
-    return false;
-  }
-}
-
-/** Re-index a memory that may already have an FTS row. Scans the whole FTS table. */
-export function upsertMemoryFts(
+/** Re-index a memory that may already have an FTS row (point delete via fts_entry_map). */
+export async function upsertMemoryFts(
   db: D1Database,
   input: { namespace: string; memoryId: string; content: string }
 ): Promise<boolean> {
-  return writeMemoryFts(db, input, true);
+  return (await writeFtsRowWithOutcome(db, "memory", { namespace: input.namespace, entityId: input.memoryId, rawText: input.content }, true)) === "indexed";
+}
+
+/** Index a newly created memory row that has no FTS row yet. */
+export async function insertMemoryFts(
+  db: D1Database,
+  input: { namespace: string; memoryId: string; content: string }
+): Promise<boolean> {
+  return (await writeFtsRowWithOutcome(db, "memory", { namespace: input.namespace, entityId: input.memoryId, rawText: input.content }, false)) === "indexed";
 }
 
 export async function searchFtsIds(
   db: D1Database,
-  table: "message_fts" | "memory_fts",
-  idColumn: "message_id" | "memory_id",
+  table: FtsTable,
+  idColumn: FtsIdColumn,
   input: { namespace: string; tokens: string[]; limit: number }
 ): Promise<string[]> {
   const match = toFtsMatch(input.tokens);
@@ -162,150 +276,4 @@ export async function searchFtsIds(
       return [];
     }
   }
-}
-
-export interface FtsBackfillResult {
-  messagesIndexed: number;
-  memoriesIndexed: number;
-  messageOrphansPurged: number;
-  memoryOrphansPurged: number;
-  failed: number;
-}
-
-async function indexMissingMessages(
-  db: D1Database,
-  input: { namespace?: string; limit: number }
-): Promise<{ indexed: number; failed: number }> {
-  const scoped = Boolean(input.namespace);
-  // NOT IN reads the FTS table once into a temporary index. The old LEFT JOIN probed the
-  // FTS table (no index on message_id) once per message: messages × FTS rows, every night.
-  const sql = scoped
-    ? `SELECT m.id, m.namespace, m.content
-       FROM messages m
-       WHERE m.namespace = ? AND m.role IN ('user', 'assistant')
-         AND m.id NOT IN (SELECT message_id FROM message_fts WHERE message_id IS NOT NULL)
-       LIMIT ?`
-    : `SELECT m.id, m.namespace, m.content
-       FROM messages m
-       WHERE m.role IN ('user', 'assistant')
-         AND m.id NOT IN (SELECT message_id FROM message_fts WHERE message_id IS NOT NULL)
-       LIMIT ?`;
-  const result = scoped
-    ? await db.prepare(sql).bind(input.namespace, input.limit).all<{ id: string; namespace: string; content: string }>()
-    : await db.prepare(sql).bind(input.limit).all<{ id: string; namespace: string; content: string }>();
-
-  let indexed = 0;
-  let failed = 0;
-  for (const row of result.results ?? []) {
-    const ok = await insertMessageFts(db, { namespace: row.namespace, messageId: row.id, content: row.content });
-    if (ok) indexed += 1;
-    else failed += 1;
-  }
-  return { indexed, failed };
-}
-
-async function indexMissingMemories(
-  db: D1Database,
-  input: { namespace?: string; limit: number }
-): Promise<{ indexed: number; failed: number }> {
-  const scoped = Boolean(input.namespace);
-  const sql = scoped
-    ? `SELECT m.id, m.namespace, m.content, m.summary
-       FROM memories m
-       WHERE m.namespace = ? AND m.status = 'active'
-         AND m.id NOT IN (SELECT memory_id FROM memory_fts WHERE memory_id IS NOT NULL)
-       LIMIT ?`
-    : `SELECT m.id, m.namespace, m.content, m.summary
-       FROM memories m
-       WHERE m.status = 'active'
-         AND m.id NOT IN (SELECT memory_id FROM memory_fts WHERE memory_id IS NOT NULL)
-       LIMIT ?`;
-  const result = scoped
-    ? await db.prepare(sql).bind(input.namespace, input.limit).all<{ id: string; namespace: string; content: string; summary: string | null }>()
-    : await db.prepare(sql).bind(input.limit).all<{ id: string; namespace: string; content: string; summary: string | null }>();
-
-  let indexed = 0;
-  let failed = 0;
-  for (const row of result.results ?? []) {
-    const ok = await writeMemoryFts(db, {
-      namespace: row.namespace,
-      memoryId: row.id,
-      content: `${row.content}\n${row.summary ?? ""}`
-    }, false);
-    if (ok) indexed += 1;
-    else failed += 1;
-  }
-  return { indexed, failed };
-}
-
-export async function purgeOrphanFts(db: D1Database): Promise<{ messages: number; memories: number }> {
-  let messages = 0;
-  let memories = 0;
-  try {
-    const msg = await db.prepare(
-      "DELETE FROM message_fts WHERE message_id NOT IN (SELECT id FROM messages)"
-    ).run();
-    messages = msg.meta.changes ?? 0;
-  } catch (error) {
-    console.error("message fts orphan purge failed", error);
-  }
-  try {
-    const mem = await db.prepare(
-      `DELETE FROM memory_fts WHERE memory_id NOT IN (SELECT id FROM memories WHERE status = 'active')`
-    ).run();
-    memories = mem.meta.changes ?? 0;
-  } catch (error) {
-    console.error("memory fts orphan purge failed", error);
-  }
-  return { messages, memories };
-}
-
-export async function backfillFts(
-  db: D1Database,
-  input: { namespace?: string; limit?: number } = {}
-): Promise<FtsBackfillResult> {
-  const limit = Math.min(Math.max(input.limit ?? 200, 1), 1000);
-  let messagesIndexed = 0;
-  let memoriesIndexed = 0;
-  let failed = 0;
-  try {
-    const messages = await indexMissingMessages(db, { namespace: input.namespace, limit });
-    messagesIndexed = messages.indexed;
-    failed += messages.failed;
-  } catch (error) {
-    console.error("message fts backfill failed", error);
-  }
-  try {
-    const memories = await indexMissingMemories(db, { namespace: input.namespace, limit });
-    memoriesIndexed = memories.indexed;
-    failed += memories.failed;
-  } catch (error) {
-    console.error("memory fts backfill failed", error);
-  }
-  const purged = await purgeOrphanFts(db);
-  return {
-    messagesIndexed,
-    memoriesIndexed,
-    messageOrphansPurged: purged.messages,
-    memoryOrphansPurged: purged.memories,
-    failed
-  };
-}
-
-export async function rebuildFts(
-  db: D1Database,
-  input: { namespace?: string; limit?: number } = {}
-): Promise<FtsBackfillResult> {
-  try {
-    if (input.namespace) {
-      await db.prepare("DELETE FROM message_fts WHERE namespace = ?").bind(input.namespace).run();
-      await db.prepare("DELETE FROM memory_fts WHERE namespace = ?").bind(input.namespace).run();
-    } else {
-      await db.prepare("DELETE FROM message_fts").run();
-      await db.prepare("DELETE FROM memory_fts").run();
-    }
-  } catch (error) {
-    console.error("fts rebuild truncate failed", error);
-  }
-  return backfillFts(db, input);
 }

@@ -45,7 +45,16 @@ export function closureStatements(db: D1Database, namespace: string, root: strin
     db
       .prepare(`DELETE FROM memory_candidates WHERE namespace=?1 AND ${revoked("'candidate:' || memory_candidates.id")}`)
       .bind(namespace),
-    db.prepare(`DELETE FROM memory_fts WHERE namespace=?1 AND ${revoked("'memory:' || memory_fts.memory_id")}`).bind(namespace),
+    db
+      .prepare(`DELETE FROM memory_fts WHERE rowid IN (
+        SELECT f.fts_rowid FROM fts_entry_map f
+        JOIN memory_revocations r ON r.namespace=?1 AND r.applying=1 AND r.ref='memory:' || f.entity_id
+        WHERE f.kind='memory' AND f.namespace=?1)`)
+      .bind(namespace),
+    db
+      .prepare(`DELETE FROM fts_entry_map WHERE kind='memory' AND namespace=?1 AND EXISTS (
+        SELECT 1 FROM memory_revocations r WHERE r.namespace=?1 AND r.applying=1 AND r.ref='memory:' || fts_entry_map.entity_id)`)
+      .bind(namespace),
     db
       .prepare(`DELETE FROM memory_revisions WHERE namespace=?1 AND EXISTS (SELECT 1 FROM json_each(provenance,'$.inputs') i
       JOIN memory_revocations r ON r.namespace=?1 AND r.applying=1 AND r.ref=i.value)`)
