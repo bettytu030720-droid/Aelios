@@ -276,6 +276,7 @@ export const ADMIN_SCRIPT_SETTINGS = String.raw`    async init() {
       this.recallHistory = []; this.recallHistoryError = ''; this.recallHistoryLoading = false;
       this.boot = {}; this.stats = {};
       this.todayMessages = []; this.candidates = []; this.judgeDecisions = []; this.memories = [];
+      this.memoriesCursor = null; this.memoriesHasMore = false; this.memoriesLoadingMore = false; this.memoriesRevision += 1;
       this.home = { diary: null, diaryLoaded: false, status: null, harvest: null, dreamStatusError: false }; this.homeAll = false;
       this.reviewSelected = {};
       this.precious = []; this.glossary = [];

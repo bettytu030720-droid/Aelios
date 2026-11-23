@@ -71,7 +71,7 @@ export const ADMIN_TAB_MEMORIES = `      <!-- ===== 记忆库：重要 + 珍贵 
             </div>
             <div class="divide">
               <template x-if="filteredMemories().length === 0">
-                <div class="empty" x-text="memoryQuery.trim() ? L('没有找到相关的记忆。', 'No memories match.') : L('这一类还没有记忆。', 'Nothing in this category yet.')"></div>
+                <div class="empty" x-text="memoryQuery.trim() ? (memoriesHasMore ? L('已加载的 ' + memories.length + ' 条里没有找到，可以点下方「加载更多」继续找。', 'No match in the ' + memories.length + ' loaded memories. Use &quot;Load more&quot; below to check older ones.') : L('没有找到相关的记忆。', 'No memories match.')) : L('这一类还没有记忆。', 'Nothing in this category yet.')"></div>
               </template>
               <template x-for="memory in filteredMemories()" :key="memory.id">
                 <div :style="memory.open ? 'background: var(--soft)' : ''">
@@ -167,7 +167,10 @@ export const ADMIN_TAB_MEMORIES = `      <!-- ===== 记忆库：重要 + 珍贵 
                 </div>
               </template>
             </div>
-            <div x-show="memories.length" class="px-[18px] py-3 text-xs muted" style="border-top: 1px solid var(--div)" x-text="memoryFooter()"></div>
+            <div x-show="memories.length" class="flex flex-wrap items-center justify-between gap-2 px-[18px] py-3 text-xs muted" style="border-top: 1px solid var(--div)">
+              <span x-text="memoryFooter()"></span>
+              <button type="button" x-show="memoriesHasMore" @click="loadMoreMemories()" :disabled="memoriesLoadingMore" class="btn btn-sm" x-text="memoriesLoadingMore ? L('正在加载…', 'Loading…') : L('加载更多', 'Load more')"></button>
+            </div>
           </section>
         </div>
 
