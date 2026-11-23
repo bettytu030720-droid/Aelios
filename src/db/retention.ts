@@ -1,3 +1,4 @@
+import { WORLD_FACT_TYPE } from "../memory/canonicalTypes";
 import { deleteFtsRowsByIds } from "../memory/fts";
 import { nowIso } from "../utils/time";
 
@@ -192,6 +193,37 @@ export async function listHardDeletableMemories(
 }
 
 // ---------------------------------------------------------------------------
+// memories: list stale active world_fact rows for direct hard delete —
+//           non-pinned world_fact memories whose latest activity
+//           (updated_at / last_injected_at / last_seen_at) is older than cutoff.
+// ---------------------------------------------------------------------------
+
+export async function listStaleWorldFacts(
+  db: D1Database,
+  namespace: string,
+  cutoff: string
+): Promise<HardDeletableMemory[]> {
+  const result = await db
+    .prepare(
+      `SELECT m.id, m.vector_id
+       FROM memories m
+       LEFT JOIN memory_lifecycle lc ON lc.memory_id = m.id
+       WHERE m.namespace = ?
+         AND m.status = 'active'
+         AND m.pinned = 0
+         AND m.type = ?
+         AND MAX(
+           m.updated_at,
+           COALESCE(lc.last_injected_at, m.updated_at),
+           COALESCE(lc.last_seen_at, m.updated_at)
+         ) < ?`
+    )
+    .bind(namespace, WORLD_FACT_TYPE, cutoff)
+    .all<HardDeletableMemory>();
+  return result.results ?? [];
+}
+
+// ---------------------------------------------------------------------------
 // memories: hard delete by ids (single batch).
 //           Caller is responsible for batching via hardDeleteMemoriesBatched.
 // ---------------------------------------------------------------------------
@@ -216,6 +248,14 @@ async function hardDeleteMemoriesBatch(
       .run();
   } catch (error) {
     console.error("retention: memory revisions hard-delete cleanup failed", error);
+  }
+  try {
+    await db
+      .prepare(`DELETE FROM memory_lifecycle WHERE memory_id IN (${placeholders})`)
+      .bind(...ids)
+      .run();
+  } catch (error) {
+    console.error("retention: memory lifecycle hard-delete cleanup failed", error);
   }
   const result = await db
     .prepare(
