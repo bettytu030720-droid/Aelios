@@ -21,6 +21,23 @@ const repoId = 634;
 const installationId = 745;
 const perms = { contents: "write", checks: "read", workflows: "write" };
 
+test("Workers Builds records the repository of a commit fetched without origin", async () => {
+  const sourceModule = "../scripts/workers-build-source.mjs";
+  const { workersBuildSource } = await import(sourceModule);
+  const worker = "companion";
+  const env = { WORKERS_CI: "1", WORKERS_CI_BRANCH: "refs/heads/main", WORKERS_CI_COMMIT_SHA: previous };
+  const source = `${previous}\t\t'${previous}' of https://x-access-token:example@github.com/owner/Aelios\n`;
+  const otherRevision = `${latest}\t\tbranch 'main' of https://github.com/elsewhere/Aelios\n`;
+  assert.deepEqual(workersBuildSource(env, "", worker, [], otherRevision + source), {
+    commit: previous, repo: "owner/Aelios", workerName: worker
+  });
+  assert.equal(workersBuildSource(env, "git@github.com:configured/Aelios.git", worker, [], source).repo, "configured/Aelios");
+  assert.equal(workersBuildSource(env, "", worker, [], otherRevision).repo, "");
+  const ambiguous = `${source}${previous}\t\tbranch 'main' of https://github.com/elsewhere/Aelios\n`;
+  assert.equal(workersBuildSource(env, "", worker, [], ambiguous).repo, "");
+  assert.equal(workersBuildSource({ ...env, WORKERS_CI_BRANCH: "refs/heads/preview" }, "", worker, [previous], source).commit, "");
+});
+
 function setup(t: TestContext) {
   const sqlite = new DatabaseSync(":memory:");
   sqlite.exec(readFileSync("migrations/0034_admin_deployment_update.sql", "utf8"));
