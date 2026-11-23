@@ -14,7 +14,7 @@ export const ADMIN_TAB_SETTINGS = `      <!-- ===== 设置 ===== -->
         </header>
         <p x-show="gwError" class="banner banner-warn" x-text="gwError"></p>
 
-        <div class="grid gap-6 lg:grid-cols-[180px_minmax(0,1fr)] lg:items-start">
+        <div class="grid grid-cols-1 gap-6 lg:grid-cols-[180px_minmax(0,1fr)] lg:items-start">
           <nav class="subnav sticky top-6 hidden lg:block" :aria-label="L('设置分区', 'Settings sections')">
             <button type="button" @click="scrollToId('s-common')" x-text="L('常用', 'Essentials')"></button>
             <button type="button" @click="scrollToId('s-assistants')" x-text="L('助手', 'Assistants')"></button>

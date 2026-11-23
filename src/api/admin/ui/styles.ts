@@ -74,6 +74,7 @@ export const ADMIN_STYLES = `<style>
   svg.i { display: inline-block; flex: none; }
   code, .mono { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: .92em; }
   .muted { color: var(--t3); }
+  .wrap-anywhere { overflow-wrap: anywhere; }
 
   /* ===== 星空：渐变底 + 三层星点 + 两颗流星（白天流星不显示），只动 opacity / transform ===== */
   .sky { position: fixed; inset: 0; z-index: 0; pointer-events: none; overflow: hidden;
@@ -131,7 +132,7 @@ export const ADMIN_STYLES = `<style>
   .h1 { margin: 0; font-size: 28px; font-weight: 600; letter-spacing: -.01em; line-height: 1.25; }
   .h2 { margin: 0; font-size: 16px; font-weight: 600; }
   .sub { margin: 6px 0 0; font-size: 14px; color: var(--t3); }
-  .panel { background: var(--panel); border: 1px solid var(--line); border-radius: 14px; backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); box-shadow: var(--glow); }
+  .panel { min-width: 0; background: var(--panel); border: 1px solid var(--line); border-radius: 14px; backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); box-shadow: var(--glow); }
   .panel-pad { padding: 18px; }
   .panel-head { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px; padding: 16px 18px 0; }
   .divide > * + * { border-top: 1px solid var(--div); }
@@ -215,16 +216,16 @@ export const ADMIN_STYLES = `<style>
   .msg-actions .icon-btn, .msg-actions .heart { width: 32px; height: 32px; border-radius: 999px; }
   .msg-actions .heart > span { display: grid; place-items: center; }
   .msg-actions svg { width: 17px; height: 17px; }
-  .quotes { margin-top: 8px; display: grid; gap: 8px; }
-  .quotes blockquote { margin: 0; padding: 8px 12px; border-left: 3px solid var(--aurb); border-radius: 0 8px 8px 0; background: var(--soft); font-size: 13px; color: var(--t2); line-height: 1.7; }
+  .quotes { margin-top: 8px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 8px; }
+  .quotes blockquote { margin: 0; min-width: 0; padding: 8px 12px; border-left: 3px solid var(--aurb); border-radius: 0 8px 8px 0; background: var(--soft); font-size: 13px; color: var(--t2); line-height: 1.7; overflow-wrap: anywhere; }
   .cand { display: flex; flex-wrap: wrap; gap: 14px; padding: 16px 18px; align-items: flex-start; }
   .cand-check { margin-top: 4px; }
   .cand-body { flex: 1 1 280px; min-width: 0; }
-  .cand-text { margin: 10px 0 0; font-size: 15px; line-height: 1.7; white-space: pre-wrap; color: var(--t1); }
+  .cand-text { margin: 10px 0 0; font-size: 15px; line-height: 1.7; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--t1); }
   .cand-note { margin: 6px 0 0; font-size: 13px; color: var(--t3); }
   .cand-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-left: auto; }
-  .was-now { margin-top: 10px; display: grid; grid-template-columns: auto 1fr; gap: 6px 12px; font-size: 14px; line-height: 1.7; }
-  .line-through-soft { color: var(--t3); text-decoration: line-through; text-decoration-color: var(--line); white-space: pre-wrap; }
+  .was-now { margin-top: 10px; display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 6px 12px; font-size: 14px; line-height: 1.7; }
+  .line-through-soft { color: var(--t3); text-decoration: line-through; text-decoration-color: var(--line); white-space: pre-wrap; overflow-wrap: anywhere; }
   .menu { position: absolute; right: 0; top: calc(100% + 6px); z-index: 20; min-width: 180px; padding: 6px; border-radius: 14px; border: 1px solid var(--line); background: var(--menu); box-shadow: var(--glow); display: grid; backdrop-filter: blur(24px) saturate(180%); -webkit-backdrop-filter: blur(24px) saturate(180%); }
   .menu button { text-align: left; padding: 9px 12px; border-radius: 8px; border: 0; background: transparent; color: var(--t1); font-size: 13px; }
   .menu button:hover { background: var(--soft); }
@@ -245,7 +246,7 @@ export const ADMIN_STYLES = `<style>
   /* 记忆库的表格行 */
   .mem-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; width: 100%; padding: 14px 18px; border: 0; background: transparent; text-align: left; }
   .mem-head:hover { background: var(--soft); }
-  .mem-text { flex: 1 1 320px; min-width: 0; font-size: 14px; color: var(--t1); line-height: 1.6; }
+  .mem-text { flex: 1 1 320px; min-width: 0; font-size: 14px; color: var(--t1); line-height: 1.6; overflow-wrap: anywhere; }
   .mem-col { flex: 0 0 96px; font-size: 13px; color: var(--t3); }
   .mem-detail { padding: 4px 18px 18px; display: grid; gap: 14px; }
   .facts { display: flex; flex-wrap: wrap; gap: 10px 28px; font-size: 13px; }
@@ -277,21 +278,21 @@ export const ADMIN_STYLES = `<style>
   .savebar { position: sticky; bottom: 12px; z-index: 30; display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 16px; border-radius: 12px; border: 1px solid var(--coral); background: var(--solid); box-shadow: var(--glow); }
 
   /* 日记 */
-  .journal { display: grid; gap: 16px; }
+  .journal { display: grid; grid-template-columns: minmax(0, 1fr); gap: 16px; }
   .journal-back { display: none; }
   @media (max-width: 1023px) {
     .journal.is-reading .journal-list, .journal:not(.is-reading) .reading { display: none; }
     .journal-back { display: inline-flex; }
   }
   @media (min-width: 1024px) {
-    .journal { grid-template-columns: 320px 1fr; align-items: start; }
+    .journal { grid-template-columns: 320px minmax(0, 1fr); align-items: start; }
     .journal .reading { position: sticky; top: 24px; max-height: calc(100dvh - 48px); overflow-y: auto; }
   }
   .entry-btn { display: grid; gap: 2px; width: 100%; padding: 12px 16px; border: 0; background: transparent; text-align: left; }
   .entry-btn:hover { background: var(--soft); }
   .entry-btn.is-active { background: var(--aur); box-shadow: inset 3px 0 0 var(--vline); }
   .reading { padding: 24px clamp(18px, 3vw, 36px); }
-  .reading p { margin: 0 0 14px; font-size: 15px; line-height: 1.9; color: var(--t1); }
+  .reading p { margin: 0 0 14px; font-size: 15px; line-height: 1.9; color: var(--t1); overflow-wrap: anywhere; }
 
   /* 夜间整理 */
   .dream-rail { position: relative; }

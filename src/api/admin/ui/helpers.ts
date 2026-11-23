@@ -92,7 +92,7 @@ export const CANDIDATE_CARD = `<article class="panel cand">
                 <template x-if="candidate.existing_content">
                   <div class="was-now">
                     <span class="muted" x-text="L('原来', 'Was')"></span><span class="line-through-soft" x-text="candidate.existing_content"></span>
-                    <span class="muted" x-text="L('改成', 'Now')"></span><span x-text="candidate.content"></span>
+                    <span class="muted" x-text="L('改成', 'Now')"></span><span class="wrap-anywhere" x-text="candidate.content"></span>
                   </div>
                 </template>
                 <p x-show="!candidate.editing && !candidate.existing_content" class="cand-text" x-text="candidate.content"></p>

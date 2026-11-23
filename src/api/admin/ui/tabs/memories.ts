@@ -111,7 +111,7 @@ export const ADMIN_TAB_MEMORIES = `      <!-- ===== 记忆库：重要 + 珍贵 
                                 <span x-text="L('决定于 ', 'Decided ') + fmt(prev.valid_as_of || prev.created_at)"></span>
                                 <span class="mono" x-text="prev.id"></span>
                               </div>
-                              <p class="whitespace-pre-wrap" x-text="prev.content"></p>
+                              <p class="whitespace-pre-wrap wrap-anywhere" x-text="prev.content"></p>
                             </div>
                           </template>
                         </div>
@@ -124,7 +124,7 @@ export const ADMIN_TAB_MEMORIES = `      <!-- ===== 记忆库：重要 + 珍贵 
                             <span x-text="revisionReasonLabel(rev)"></span>
                             <button type="button" x-show="!isScopedDecision(memory)" @click="restoreMemoryRevision(memory, rev)" class="btn btn-sm ml-auto" x-text="L('恢复这版', 'Restore this')"></button>
                           </div>
-                          <p class="whitespace-pre-wrap" x-text="rev.content"></p>
+                          <p class="whitespace-pre-wrap wrap-anywhere" x-text="rev.content"></p>
                         </div>
                       </template>
                       <template x-if="isScopedDecision(memory) && memory.sources">
@@ -137,7 +137,7 @@ export const ADMIN_TAB_MEMORIES = `      <!-- ===== 记忆库：重要 + 珍贵 
                                 <span x-text="msg.role === 'user' ? L('用户', 'User') : L('助手', 'Assistant')"></span>
                                 <span x-text="fmt(msg.created_at)"></span>
                               </div>
-                              <p class="whitespace-pre-wrap" x-text="msg.content"></p>
+                              <p class="whitespace-pre-wrap wrap-anywhere" x-text="msg.content"></p>
                             </div>
                           </template>
                           <p x-show="memory.sources.missing > 0" class="text-xs muted" x-text="L('另有 ' + memory.sources.missing + ' 条原话已过期或被删除。', memory.sources.missing + ' additional source message(s) expired or removed.')"></p>
@@ -182,7 +182,7 @@ export const ADMIN_TAB_MEMORIES = `      <!-- ===== 记忆库：重要 + 珍贵 
               <div class="flex items-start gap-3 px-[18px] py-3.5">
                 <div class="min-w-0 flex-1">
                   <div class="mb-1 text-xs muted" x-text="fmt(item.created_at)"></div>
-                  <p class="whitespace-pre-wrap text-sm leading-7" x-text="item.content"></p>
+                  <p class="whitespace-pre-wrap wrap-anywhere text-sm leading-7" x-text="item.content"></p>
                 </div>
                 <button type="button" @click="unpinPrecious(item)" class="heart is-on" :aria-label="L('取消珍贵', 'Remove from keepsakes')" :title="L('取消珍贵', 'Remove from keepsakes')">${HEART_FILLED}</button>
               </div>
@@ -285,7 +285,7 @@ export const ADMIN_TAB_MEMORIES = `      <!-- ===== 记忆库：重要 + 珍贵 
                 <input type="checkbox" class="mt-1" :checked="isWorldSelected(item)" @change="toggleWorldItem(item)" :aria-label="L('选择这条', 'Select this one')">
                 <div class="min-w-0 flex-1">
                   <div class="mb-1 flex flex-wrap gap-2 text-xs muted"><span x-text="item.type || 'longtail'"></span><span x-text="item.source || ''"></span></div>
-                  <p class="whitespace-pre-wrap text-sm leading-7" x-text="item.content"></p>
+                  <p class="whitespace-pre-wrap wrap-anywhere text-sm leading-7" x-text="item.content"></p>
                 </div>
                 <button type="button" @click="deleteWorldMemory(item)" class="icon-btn" :aria-label="L('删除', 'Delete')" :title="L('删除', 'Delete')">${I.trash}</button>
               </div>

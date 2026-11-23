@@ -80,7 +80,7 @@ export const ADMIN_TAB_HOME = `      <!-- ===== 首页 ===== -->
           </div>
         </section>
 
-        <div class="grid gap-5 lg:grid-cols-[minmax(0,1fr)_340px] lg:items-start">
+        <div class="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_340px] lg:items-start">
           <section class="panel">
             <div class="panel-head pb-3">
               <div class="flex items-baseline gap-2">
@@ -102,7 +102,7 @@ export const ADMIN_TAB_HOME = `      <!-- ===== 首页 ===== -->
                   <span class="avatar" :class="message.role === 'user' ? 'avatar-user' : ''" aria-hidden="true" x-text="roleName(message.role).slice(0, 1)"></span>
                   <div class="min-w-0 flex-1">
                     <div class="flex items-baseline gap-2 text-xs muted"><span class="font-semibold" style="color: var(--t2)" x-text="roleName(message.role)"></span><span x-text="clock(message.created_at)"></span></div>
-                    <p class="mt-1 whitespace-pre-wrap text-sm leading-7" :class="more ? '' : 'line-clamp-6'" x-text="message.content"></p>
+                    <p class="mt-1 whitespace-pre-wrap wrap-anywhere text-sm leading-7" :class="more ? '' : 'line-clamp-6'" x-text="message.content"></p>
                     <button type="button" x-show="(message.content || '').length > 320" @click="more = !more" class="link-btn mt-1" x-text="more ? L('收起', 'Show less') : L('展开', 'Show more')"></button>
                   </div>
                   <div class="msg-actions">
@@ -131,7 +131,7 @@ export const ADMIN_TAB_HOME = `      <!-- ===== 首页 ===== -->
             </div>
           </section>
 
-          <div class="flex flex-col gap-5">
+          <div class="flex min-w-0 flex-col gap-5">
             <section class="panel" x-show="home.harvest">
               <div class="panel-head">
                 <h2 class="h2">${t("昨天新增的记忆", "Memories added yesterday")}</h2>
@@ -144,7 +144,7 @@ export const ADMIN_TAB_HOME = `      <!-- ===== 首页 ===== -->
                 <template x-for="item in homeHarvestCreated().slice(0, 5)" :key="item.id">
                   <div class="flex items-start gap-2.5">
                     <span class="chip" :class="typeChipClass(item.type)" x-text="typeLabel(item.type)"></span>
-                    <span class="min-w-0 flex-1 text-sm leading-6" x-text="item.content"></span>
+                    <span class="min-w-0 flex-1 wrap-anywhere text-sm leading-6" x-text="item.content"></span>
                   </div>
                 </template>
               </div>
@@ -160,8 +160,8 @@ export const ADMIN_TAB_HOME = `      <!-- ===== 首页 ===== -->
                 <template x-if="!home.diary"><p class="text-[13px] muted" x-text="home.diaryLoaded ? L('还没有日记。', 'No journal entries yet.') : L('日记状态待确认。', 'Journal status unconfirmed.')"></p></template>
                 <template x-if="home.diary">
                   <div>
-                    <div class="mb-1 font-semibold" x-text="home.diary.title"></div>
-                    <p class="line-clamp-5 text-sm leading-7" style="color: var(--t2)" x-text="home.diary.summary"></p>
+                    <div class="mb-1 font-semibold wrap-anywhere" x-text="home.diary.title"></div>
+                    <p class="line-clamp-5 wrap-anywhere text-sm leading-7" style="color: var(--t2)" x-text="home.diary.summary"></p>
                   </div>
                 </template>
               </div>
