@@ -233,8 +233,10 @@ export function prepareGatewayRequest(env: Env, config: GatewayConfig, identity:
   const normalized = normalizeRequest(body, protocol);
   const out = normalized.body;
   out.model = route.model;
+  const autoBinding = !refusedThinkingBinding.has(thinkingBindingKey(route)) &&
+    (nativeAnthropic(route) || /claude/i.test(route.model) || /claude/i.test(body.model));
   const thinkingFallback = !chatgpt && isMainModel(identity, body.model)
-    ? applyThinkingPolicy(out, identity, protocol, headers, nativeAnthropic(route) || /claude/i.test(body.model))
+    ? applyThinkingPolicy(out, identity, protocol, headers, autoBinding)
     : undefined;
   validateRequest(out, protocol, headers);
   sanitizeCacheControl(out, protocol);
@@ -245,6 +247,12 @@ export function prepareGatewayRequest(env: Env, config: GatewayConfig, identity:
     ...(chatgpt ? { chatgptScope: JSON.stringify([identityNamespace(identity), identity.slug]) } : {}),
     ...(thinkingFallback ? { thinkingFallback } : {}) };
 }
+// Isolate-scope learned refusal: a Claude line that does not take Anthropic's thinking-binding
+// controls (Vertex, some relays) answers 400 once; later requests on that route and model are sent
+// with the client's own thinking settings instead of failing first and retrying every time.
+export const refusedThinkingBinding = new Set<string>();
+const thinkingBindingKey = (route: UpstreamRoute) => `${route.url}\n${route.model}`;
+
 // Isolate-scope learned capability: Vertex-backed and relay lines answer 400
 // "unrecognizedProperty=<field>" to tool-definition fields they do not know
 // (cache_control, eager_input_streaming). Once per isolate per route, the refused
@@ -336,6 +344,7 @@ export async function callGatewayUpstream(env: Env, protocol: Protocol, original
     const { thinking, beta } = prepared.thinkingFallback;
     const detail = await response.clone().text().catch(() => "");
     const refusedBinding = /\b(?:block_binding|prefix_mismatch_behavior)\b/i.test(detail) || detail.includes(THINKING_BINDING_BETA);
+    if (refusedBinding) refusedThinkingBinding.add(thinkingBindingKey(route));
     if (refusedBinding || thinking === undefined && /thinking/i.test(detail)) {
       if (thinking === undefined) delete body.thinking;
       else body.thinking = thinking;

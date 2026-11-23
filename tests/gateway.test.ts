@@ -7,7 +7,7 @@ import worker from "../src/index";
 import { identityNamespace, identityReadNamespaces, invalidateSettingsCache, loadSettings, speakersForNamespace, validateConfig } from "../src/gateway/config";
 import { applySettings, describeSettings, validateSettings } from "../src/gateway/settings";
 import { appendMemory, classifyTurn, canonical } from "../src/gateway/protocol";
-import { anthropicClaude, catalogClaude, catalogUrl, forgetRestRefusals, nativeAnthropic, resolveUpstream, restRefused, routeFor, rejectedToolFields } from "../src/gateway/upstream";
+import { anthropicClaude, catalogClaude, catalogUrl, forgetRestRefusals, nativeAnthropic, refusedThinkingBinding, resolveUpstream, restRefused, routeFor, rejectedToolFields } from "../src/gateway/upstream";
 import { callOpenAICompat } from "../src/proxy/openaiAdapter";
 import { OutputCollector, observeResponse, persistExchange, prepareExchange, dispatchExchange } from "../src/gateway/record";
 import { getOrCreateConversation } from "../src/db/conversations";
@@ -55,6 +55,7 @@ beforeEach(() => {
   } };
   invalidateSettingsCache();
   forgetRestRefusals();
+  refusedThinkingBinding.clear();
   calls = []; queue = []; pending = [];
   ctx = { waitUntil(p: Promise<unknown>) { pending.push(p); } };
   env = { DB: db, CHATBOX_API_KEY: "owner-key", IM_API_KEY: "im-key", MEMORY_MCP_API_KEY: "mcp-key",
@@ -1171,6 +1172,7 @@ test("Claude upstreams that reject automatic binding get the client's thinking a
       ? Response.json({ error: { message: rejection } }, { status: 400 }) : response;
   };
   for (const message of [rejection, "Unsupported beta thinking-binding-controls-2026-08-01"]) {
+    refusedThinkingBinding.clear();
     rejection = message;
     const start = calls.length;
     const { response } = await run("/v1/messages", body, headers);
@@ -1180,7 +1182,14 @@ test("Claude upstreams that reject automatic binding get the client's thinking a
     assert.deepEqual(calls[start + 1].query.thinking, body.thinking);
     assert.deepEqual(calls[start + 1].query.messages, calls[start].query.messages);
     assert.equal(calls[start + 1].headers["anthropic-beta"], "client-beta");
+    // Learned for this route: the next request goes out once, as the client sent it.
+    const next = calls.length;
+    assert.equal((await run("/v1/messages", body, headers)).response.status, 200);
+    assert.equal(calls.length, next + 1);
+    assert.deepEqual(calls[next].query.thinking, body.thinking);
+    assert.equal(calls[next].headers["anthropic-beta"], "client-beta");
   }
+  refusedThinkingBinding.clear();
   rejection = "Invalid signature in thinking block";
   const start = calls.length;
   assert.equal((await run("/v1/messages", body, headers)).response.status, 400);
