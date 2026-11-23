@@ -4,7 +4,7 @@ import { isV2Enabled } from "../../memory/v2/recall";
 import { loadSpeakersForNamespace } from "../../memory/speakers";
 import { readDreamTimeZoneFromEnv } from "../../memory/dreamEnv";
 import { requireScope } from "../../auth/scopes";
-import { createMemory, getMemoryById, listMemoriesPage, softDeleteMemory, updateMemory } from "../../db/memories";
+import { createMemory, decodeMemoryCursor, getMemoryById, listMemoriesPage, softDeleteMemory, updateMemory } from "../../db/memories";
 import { retainedMessageIds } from "../../db/messages";
 import { exportMemories, exportMemoryDocument } from "../../memory/export";
 import { toMemoryApiRecord } from "../../memory/search";
@@ -111,20 +111,37 @@ export async function handleListMemories(request: Request, env: Env, profile: Ke
   const url = new URL(request.url);
   const namespace = resolveNamespace(profile, url.searchParams.get("namespace"));
   const limit = readPositiveInt(url.searchParams.get("limit"), 100, 1000);
-  const offset = readNonNegativeInt(url.searchParams.get("offset") ?? url.searchParams.get("cursor"), 0, 1000000);
+  const rawCursor = readString(url.searchParams.get("cursor"));
+  const rawOffset = readString(url.searchParams.get("offset"));
+
+  let cursor: string | null = null;
+  let offset = 0;
+  if (rawCursor) {
+    if (decodeMemoryCursor(rawCursor)) {
+      cursor = rawCursor;
+    } else if (/^\d+$/.test(rawCursor)) {
+      offset = readNonNegativeInt(rawCursor, 0, 1000000);
+    } else {
+      return openAiError("Invalid cursor", 400, "invalid_request_error");
+    }
+  } else if (rawOffset) {
+    offset = readNonNegativeInt(rawOffset, 0, 1000000);
+  }
+
   const page = await listMemoriesPage(env.DB, {
     namespace,
     status: readString(url.searchParams.get("status")) || "active",
     type: readString(url.searchParams.get("type")),
     limit,
-    offset
+    offset,
+    cursor
   });
 
   return json({
     data: await attachCurrentStateMeta(env.DB, namespace, page.records),
     paging: {
       limit,
-      cursor: page.nextOffset === null ? null : String(page.nextOffset),
+      cursor: page.nextCursor,
       has_more: page.hasMore,
       count: page.records.length
     }
