@@ -1,5 +1,6 @@
 export const ADMIN_SCRIPT_MEMORIES = String.raw`    async reloadAll() {
       this.savePrefs();
+      void this.loadDeploymentUpdate();
       var tasks = [this.loadBoot(), this.loadCandidates(), this.loadMemories(), this.loadSpaces()];
       if (this.page === 'today') tasks.push(this.loadHome());
       if (this.page === 'review') tasks.push(this.loadJudgeDecisions());

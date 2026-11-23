@@ -100,6 +100,10 @@ GitHub Fork 不会自动同步上游新提交。
 
 所有记忆、设置、助手配置和密钥都保存在你的 Cloudflare 账号中。日常参数都在 `/admin` 修改，Fork 仓库保持干净即可一键同步。
 
+### 在后台一键更新
+
+用 Workers Builds 把 Aelios 的直接 Fork 连到生产 `main` 分支，在 Worker 上配置[更新凭据](SECRETS.md#后台一键更新)，再用这条构建链路部署一次。之后用主钥匙登录 `/admin`，线上提交落后于上游时，右上角会出现「更新」。点一下会同步 Fork，由 Workers Builds 执行 `npm run deploy`。按钮会显示更新状态，等新 Worker 上线再消失。Fork 已同步时，可以通过生产分支的 Deploy Hook 重试部署。
+
 ### 用按钮装的怎么办
 
 把按钮创建的副本切换到 Fork 不会影响已有数据和设置。

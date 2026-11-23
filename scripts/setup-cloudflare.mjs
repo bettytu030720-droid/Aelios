@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { workersBuildSource } from "./workers-build-source.mjs";
 
 const root = resolve(import.meta.dirname, "..");
 const wranglerTomlPath = resolve(root, "wrangler.toml");
@@ -373,6 +374,17 @@ function ensurePlacement() {
 }
 
 ensureVisibleVars();
+const git = (...args) => spawnSync("git", args, { cwd: root, encoding: "utf8" }).stdout?.trim() ?? "";
+const workersBuild = process.env.WORKERS_CI === "1";
+const origin = workersBuild ? git("remote", "get-url", "origin") : "";
+// A build without push branch metadata must still match a main ref in the checkout.
+const mainRefs = workersBuild && !process.env.WORKERS_CI_BRANCH?.trim()
+  ? git("show-ref", "--hash", "refs/heads/main", "refs/remotes/origin/main").split("\n")
+  : [];
+const build = workersBuildSource(process.env, origin, wranglerToml.match(/^name\s*=\s*"([^"]+)"/m)?.[1] ?? "", mainRefs);
+upsertVarFromEnvironment("AELIOS_BUILD_COMMIT", build.commit);
+upsertVarFromEnvironment("AELIOS_BUILD_REPO", build.repo);
+upsertVarFromEnvironment("AELIOS_BUILD_WORKER", build.workerName);
 ensureAccountIdVar();
 ensureD1();
 ensurePlacement();

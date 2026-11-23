@@ -20,7 +20,19 @@
 | `AI_GATEWAY_BASE_URL` | Variable | 可选 | 自定义或完整 AI Gateway 地址，可在 `/admin` 上游设置中配置 |
 | 其他运行参数 | Variable | 可选 | 如 `DREAM_MODEL`、`DREAM_TIME_ZONE`、`MESSAGES_RETENTION_DAYS` 等，推荐在 `/admin` 设置中覆盖 |
 
-判断原则很简单，凡是名称包含 `KEY` 或 `TOKEN` 的全部配为 **Secret**，其余非敏感参数配为 **Variable** 或在 `/admin` 面板中配置。
+判断原则很简单，凡是名称包含 `KEY` 或 `TOKEN` 的全部配为 **Secret**。有授权作用的链接也配为 **Secret**，例如 Deploy Hook。其余非敏感参数可配为 **Variable** 或在 `/admin` 面板中配置。
+
+### 后台一键更新
+
+对于生产 `main` 连接到 Aelios 直接 Fork 的 Workers Builds，在 **Worker → Settings → Variables and Secrets** 配置：
+
+| 名称 | 类型 | 用途 |
+| --- | --- | --- |
+| `AELIOS_UPDATE_GITHUB_TOKEN` | **Secret** | 选择自己的 Fork 创建 fine-grained PAT，授予 **Contents: Read and write** 和 **Checks: Read**。用于同步 Fork 和读取该 Worker 的构建状态 |
+| `AELIOS_UPDATE_DEPLOY_HOOK` | **Secret** | 可选。在同一 Worker 的 **Settings → Builds → Deploy Hooks** 创建生产 `main` 的链接，用于 Fork 已同步时重新触发构建 |
+| `AELIOS_UPDATE_REPO` | Variable | 可选。当构建拿不到 Git remote 时填写 `owner/repo`，与 Workers Builds 连接的 Fork 一致 |
+
+构建会自动记录提交 SHA 和仓库，后台用主钥匙启用更新。令牌和 Hook 由 Worker 读取。同步涉及 `.github/workflows/` 的提交时，GitHub 可能要求 **Workflows: Read and write**，也可以先在 GitHub 同步这些提交。遇到分支冲突时，在 GitHub 处理后再重试。
 
 ## 2. 新部署配置流程
 

@@ -1,5 +1,6 @@
 // Admin UI assembled from modular template and script slices under ./ui/.
 import { MEETING_CARD_ASSETS } from "./ui/components/meetingCard";
+import { ADMIN_SCRIPT_DEPLOYMENT_UPDATE } from "./ui/scripts/deploymentUpdate";
 import { ADMIN_SCRIPT_DREAM } from "./ui/scripts/dream";
 import { ADMIN_SCRIPT_DREAM_PROGRESS } from "./ui/scripts/dreamProgress";
 import { ADMIN_SCRIPT_MEMORIES } from "./ui/scripts/memories";
@@ -31,6 +32,7 @@ export const ADMIN_HTML = [
   ADMIN_TAB_SETTINGS,
   ADMIN_OVERLAYS,
   ADMIN_SCRIPT_STATE,
+  ADMIN_SCRIPT_DEPLOYMENT_UPDATE,
   ADMIN_SCRIPT_SETTINGS,
   ADMIN_SCRIPT_MEMORIES,
   ADMIN_SCRIPT_DREAM,

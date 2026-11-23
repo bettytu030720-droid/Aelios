@@ -317,6 +317,7 @@ export const ADMIN_SCRIPT_SETTINGS = String.raw`    async init() {
       return (this.apiKey || '') === (this.savedApiKey || '');
     },
     async saveToken() {
+      this.resetDeploymentUpdate();
       this.spaceRevision += 1;
       this.clearSpaceData();
       this.memoryIdentities = [];

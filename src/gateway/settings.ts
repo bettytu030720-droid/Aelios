@@ -190,7 +190,9 @@ export const SECRET_SPECS: { name: string; label: string; labelEn: string }[] = 
   { name: "GUIDE_DOG_API_KEY", label: "导盲犬密钥", labelEn: "Guide-dog endpoint key" },
   { name: "CLOUDFLARE_API_TOKEN", label: "CF 令牌（网关上游就靠它，一把管所有）", labelEn: "Cloudflare API token (all upstream calls use this one token)" },
   { name: "CF_AIG_TOKEN", label: "AI Gateway 认证令牌（网关开了 authenticated gateway 才要）", labelEn: "AI Gateway auth token (only if the gateway has Authenticated Gateway on)" },
-  { name: "GITHUB_DAILY_TOKEN", label: "GitHub 日档只读 PAT", labelEn: "Read-only GitHub PAT for the archive" }
+  { name: "GITHUB_DAILY_TOKEN", label: "GitHub 日档只读 PAT", labelEn: "Read-only GitHub PAT for the archive" },
+  { name: "AELIOS_UPDATE_GITHUB_TOKEN", label: "一键更新的 GitHub Token", labelEn: "GitHub token for updates" },
+  { name: "AELIOS_UPDATE_DEPLOY_HOOK", label: "一键更新的重试链接", labelEn: "Deploy Hook for update retries" }
 ];
 
 export function validateSettings(value: unknown): Record<string, string> {
