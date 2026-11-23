@@ -191,7 +191,11 @@ export async function countMemoryCandidates(
   const status = input.status ?? "pending";
   const filter = sourceFilterSql(input);
   const row = await db
-    .prepare(`SELECT COUNT(*) AS count FROM memory_candidates WHERE namespace = ? AND status = ?${filter.sql}`)
+    .prepare(
+      `SELECT COALESCE(SUM(row_count), 0) AS count
+       FROM memory_candidate_counts
+       WHERE namespace = ? AND status = ?${filter.sql}`
+    )
     .bind(input.namespace, status, ...filter.binds)
     .first<{ count: number }>();
   return row?.count ?? 0;

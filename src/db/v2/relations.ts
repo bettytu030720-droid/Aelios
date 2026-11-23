@@ -157,38 +157,45 @@ function graphNodeLabel(row: { summary: string | null; content: string }): strin
   return content.length > 60 ? content.slice(0, 60) : content;
 }
 
-// D1 100 绑定上限：每批按 src_id IN (...) 查 <= 90 个节点发出的边。
-const GRAPH_ID_BIND_BATCH_SIZE = SQLITE_BIND_BATCH_SIZE;
-
 async function fetchEdgesWithinNodeSet(
   db: D1Database,
   selectedIds: Set<string>
 ): Promise<RelationGraphEdge[]> {
   const ids = [...selectedIds];
   if (ids.length === 0) return [];
-  const edges: RelationGraphEdge[] = [];
-  for (let index = 0; index < ids.length; index += GRAPH_ID_BIND_BATCH_SIZE) {
-    const batch = ids.slice(index, index + GRAPH_ID_BIND_BATCH_SIZE);
-    const placeholders = batch.map(() => "?").join(", ");
+
+  let rows: Array<{ src_id: string; dst_id: string; rel_type: string; weight: number }>;
+  if (ids.length <= SQLITE_DOUBLE_BIND_BATCH_SIZE) {
+    const placeholders = ids.map(() => "?").join(", ");
     const result = await db
       .prepare(
         `SELECT src_id, dst_id, rel_type, weight
          FROM memory_relations
-         WHERE src_id IN (${placeholders})`
+         WHERE src_id IN (${placeholders}) AND dst_id IN (${placeholders})`
       )
-      .bind(...batch)
+      .bind(...ids, ...ids)
       .all<{ src_id: string; dst_id: string; rel_type: string; weight: number }>();
-    for (const row of result.results ?? []) {
-      if (!selectedIds.has(row.dst_id)) continue;
-      edges.push({
-        src: row.src_id,
-        dst: row.dst_id,
-        rel_type: row.rel_type,
-        weight: row.weight
-      });
-    }
+    rows = result.results ?? [];
+  } else {
+    const encodedIds = JSON.stringify(ids);
+    const result = await db
+      .prepare(
+        `SELECT src_id, dst_id, rel_type, weight
+         FROM memory_relations
+         WHERE src_id IN (SELECT value FROM json_each(?))
+           AND dst_id IN (SELECT value FROM json_each(?))`
+      )
+      .bind(encodedIds, encodedIds)
+      .all<{ src_id: string; dst_id: string; rel_type: string; weight: number }>();
+    rows = result.results ?? [];
   }
-  return edges;
+
+  return rows.map((row) => ({
+    src: row.src_id,
+    dst: row.dst_id,
+    rel_type: row.rel_type,
+    weight: row.weight
+  }));
 }
 
 export async function getRelationsGraph(

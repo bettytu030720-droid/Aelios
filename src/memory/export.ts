@@ -219,7 +219,7 @@ async function listActiveMemoryRecords(
   input: { namespace: string; type?: string | null }
 ): Promise<MemoryRecord[]> {
   const records: MemoryRecord[] = [];
-  let offset = 0;
+  let cursor: string | null = null;
 
   for (;;) {
     const page = await listMemoriesPage(env.DB, {
@@ -227,12 +227,12 @@ async function listActiveMemoryRecords(
       type: input.type || undefined,
       status: "active",
       limit: EXPORT_PAGE_SIZE,
-      offset
+      cursor
     });
 
     records.push(...page.records);
-    if (!page.hasMore || page.nextOffset === null) break;
-    offset = page.nextOffset;
+    if (!page.hasMore || !page.nextCursor) break;
+    cursor = page.nextCursor;
   }
 
   return records;

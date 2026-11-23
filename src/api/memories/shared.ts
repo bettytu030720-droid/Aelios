@@ -79,7 +79,9 @@ export function toJudgeDecisionRecord(row: MemoryCandidateRow) {
   };
 }
 
-export async function countMessagesInRange(
+const UTC_ISO_TIMESTAMP_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z$/;
+
+async function countMessagesInRangeExact(
   db: D1Database,
   input: { namespace: string; startCreatedAt: string; endCreatedAt: string }
 ): Promise<number> {
@@ -95,6 +97,55 @@ export async function countMessagesInRange(
     .bind(input.namespace, input.startCreatedAt, input.endCreatedAt)
     .first<{ count: number }>();
   return row?.count ?? 0;
+}
+
+export async function countMessagesInRange(
+  db: D1Database,
+  input: { namespace: string; startCreatedAt: string; endCreatedAt: string }
+): Promise<number> {
+  if (input.startCreatedAt >= input.endCreatedAt) return 0;
+  if (!UTC_ISO_TIMESTAMP_RE.test(input.startCreatedAt) || !UTC_ISO_TIMESTAMP_RE.test(input.endCreatedAt)) {
+    return countMessagesInRangeExact(db, input);
+  }
+
+  const startBucket = input.startCreatedAt.slice(0, 13);
+  const startBucketFloor = `${startBucket}:00:00.000Z`;
+  const endBucket = input.endCreatedAt.slice(0, 13);
+  const endBucketFloor = `${endBucket}:00:00.000Z`;
+  const endBucketMs = Date.parse(endBucketFloor);
+  if (!Number.isFinite(endBucketMs)) {
+    return countMessagesInRangeExact(db, input);
+  }
+
+  const endOnHourBoundary = input.endCreatedAt === endBucketFloor;
+  const lastBucket = endOnHourBoundary
+    ? new Date(endBucketMs - 3_600_000).toISOString().slice(0, 13)
+    : endBucket;
+
+  const bucketRow = await db
+    .prepare(
+      `SELECT COALESCE(SUM(row_count), 0) AS count
+       FROM message_hour_counts
+       WHERE namespace = ? AND hour_bucket >= ? AND hour_bucket <= ?`
+    )
+    .bind(input.namespace, startBucket, lastBucket)
+    .first<{ count: number }>();
+  const totalBuckets = bucketRow?.count ?? 0;
+  if (totalBuckets === 0) return 0;
+
+  const startIsExact = input.startCreatedAt === startBucketFloor;
+  const endBucketNext = new Date(endBucketMs + 3_600_000).toISOString();
+
+  const [leftExcluded, rightExcluded] = await Promise.all([
+    startIsExact
+      ? Promise.resolve(0)
+      : countMessagesInRangeExact(db, { namespace: input.namespace, startCreatedAt: startBucketFloor, endCreatedAt: input.startCreatedAt }),
+    endOnHourBoundary
+      ? Promise.resolve(0)
+      : countMessagesInRangeExact(db, { namespace: input.namespace, startCreatedAt: input.endCreatedAt, endCreatedAt: endBucketNext })
+  ]);
+
+  return Math.max(0, totalBuckets - leftExcluded - rightExcluded);
 }
 
 

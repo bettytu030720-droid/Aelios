@@ -30,12 +30,65 @@ export interface ListMemoryFilters {
   status?: string;
   limit: number;
   offset?: number;
+  cursor?: string | null;
 }
 
 export interface ListMemoryPage {
   records: MemoryRecord[];
   hasMore: boolean;
   nextOffset: number | null;
+  nextCursor: string | null;
+}
+
+export interface MemoryListCursor {
+  pinned: number;
+  importance: number;
+  updated_at: string;
+  id: string;
+}
+
+const MEMORY_CURSOR_PREFIX = "k1:";
+
+function toBase64Url(text: string): string {
+  const bytes = new TextEncoder().encode(text);
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
+}
+
+function fromBase64Url(encoded: string): string | null {
+  if (!/^[A-Za-z0-9_-]+$/.test(encoded)) return null;
+  const padded = encoded.replace(/-/g, "+").replace(/_/g, "/") + "===".slice((encoded.length + 3) % 4);
+  try {
+    const binary = atob(padded);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index++) bytes[index] = binary.charCodeAt(index);
+    return new TextDecoder().decode(bytes);
+  } catch {
+    return null;
+  }
+}
+
+export function encodeMemoryCursor(record: Pick<MemoryRecord, "pinned" | "importance" | "updated_at" | "id">): string {
+  return `${MEMORY_CURSOR_PREFIX}${toBase64Url(JSON.stringify([record.pinned, record.importance, record.updated_at, record.id]))}`;
+}
+
+export function decodeMemoryCursor(raw: string | null | undefined): MemoryListCursor | null {
+  if (!raw?.startsWith(MEMORY_CURSOR_PREFIX)) return null;
+  const decoded = fromBase64Url(raw.slice(MEMORY_CURSOR_PREFIX.length));
+  if (!decoded) return null;
+  try {
+    const parsed = JSON.parse(decoded) as unknown;
+    if (!Array.isArray(parsed) || parsed.length !== 4) return null;
+    const [pinned, importance, updatedAt, id] = parsed;
+    if (typeof pinned !== "number" || !Number.isFinite(pinned)) return null;
+    if (typeof importance !== "number" || !Number.isFinite(importance)) return null;
+    if (typeof updatedAt !== "string" || !updatedAt) return null;
+    if (typeof id !== "string" || !id) return null;
+    return { pinned, importance, updated_at: updatedAt, id };
+  } catch {
+    return null;
+  }
 }
 
 export interface UpdateMemoryInput {
@@ -123,10 +176,19 @@ export async function listMemoriesPage(db: D1Database, filters: ListMemoryFilter
     binds.push(filters.status);
   }
 
+  const decodedCursor = filters.cursor ? decodeMemoryCursor(filters.cursor) : null;
   const offset = Math.max(Math.floor(filters.offset ?? 0), 0);
   const limit = Math.max(Math.floor(filters.limit), 1);
-  sql += " ORDER BY pinned DESC, importance DESC, updated_at DESC LIMIT ? OFFSET ?";
-  binds.push(limit + 1, offset);
+
+  if (decodedCursor) {
+    sql += " AND (pinned, importance, updated_at, id) < (?, ?, ?, ?)";
+    binds.push(decodedCursor.pinned, decodedCursor.importance, decodedCursor.updated_at, decodedCursor.id);
+    sql += " ORDER BY pinned DESC, importance DESC, updated_at DESC, id DESC LIMIT ?";
+    binds.push(limit + 1);
+  } else {
+    sql += " ORDER BY pinned DESC, importance DESC, updated_at DESC, id DESC LIMIT ? OFFSET ?";
+    binds.push(limit + 1, offset);
+  }
 
   const result = await db
     .prepare(sql)
@@ -135,11 +197,14 @@ export async function listMemoriesPage(db: D1Database, filters: ListMemoryFilter
 
   const rows = result.results ?? [];
   const records = rows.slice(0, limit);
+  const hasMore = rows.length > limit;
+  const lastRecord = records.length > 0 ? records[records.length - 1] : null;
 
   return {
     records,
-    hasMore: rows.length > limit,
-    nextOffset: rows.length > limit ? offset + records.length : null
+    hasMore,
+    nextOffset: !decodedCursor && hasMore ? offset + records.length : null,
+    nextCursor: hasMore && lastRecord ? encodeMemoryCursor(lastRecord) : null
   };
 }
 
