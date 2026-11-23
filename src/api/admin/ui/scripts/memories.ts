@@ -286,41 +286,75 @@ export const ADMIN_SCRIPT_MEMORIES = String.raw`    async reloadAll() {
         this.notify(error.message);
       }
     },
+    hydrateMemoryItem(item) {
+      item.open = false;
+      item.editing = false;
+      item.mergeOpen = false;
+      item.target_id = '';
+      item.draft = { content: item.content };
+      item.revOpen = false;
+      item.revisions = null;
+      item.decision_history = null;
+      item.sources = null;
+      return item;
+    },
     async loadMemories() {
       const revision = this.spaceRevision;
+      const listRevision = ++this.memoriesRevision;
+      this.memoriesLoadingMore = false;
       try {
         const typeParam = this.memoryType && this.memoryType !== 'all' ? '&type=' + encodeURIComponent(this.memoryType) : '';
         const path = '/v1/memory?status=active&limit=100' + typeParam;
         const data = await this.request(this.withNamespace(path));
-        if (revision !== this.spaceRevision) return;
-        this.memories = (data.data || []).map(function(item) {
-          item.open = false;
-          item.editing = false;
-          item.mergeOpen = false;
-          item.target_id = '';
-          item.draft = { content: item.content };
-          item.revOpen = false;
-          item.revisions = null;
-          item.decision_history = null;
-          item.sources = null;
-          return item;
-        });
+        if (revision !== this.spaceRevision || listRevision !== this.memoriesRevision) return;
+        this.memories = (data.data || []).map(this.hydrateMemoryItem);
+        const paging = data.paging || {};
+        this.memoriesHasMore = Boolean(paging.has_more && paging.cursor);
+        this.memoriesCursor = this.memoriesHasMore ? String(paging.cursor) : null;
       } catch (error) {
-        if (revision !== this.spaceRevision) return;
+        if (revision !== this.spaceRevision || listRevision !== this.memoriesRevision) return;
         this.notify(error.message);
+      }
+    },
+    async loadMoreMemories() {
+      if (!this.memoriesHasMore || !this.memoriesCursor || this.memoriesLoadingMore) return;
+      const revision = this.spaceRevision;
+      const listRevision = this.memoriesRevision;
+      this.memoriesLoadingMore = true;
+      try {
+        const typeParam = this.memoryType && this.memoryType !== 'all' ? '&type=' + encodeURIComponent(this.memoryType) : '';
+        const path = '/v1/memory?status=active&limit=100' + typeParam + '&cursor=' + encodeURIComponent(this.memoriesCursor);
+        const data = await this.request(this.withNamespace(path));
+        if (revision !== this.spaceRevision || listRevision !== this.memoriesRevision) return;
+        const seen = new Set(this.memories.map(function(item) { return item.id; }));
+        const next = (data.data || [])
+          .filter(function(item) { return !seen.has(item.id); })
+          .map(this.hydrateMemoryItem);
+        this.memories = this.memories.concat(next);
+        const paging = data.paging || {};
+        this.memoriesHasMore = Boolean(paging.has_more && paging.cursor);
+        this.memoriesCursor = this.memoriesHasMore ? String(paging.cursor) : null;
+      } catch (error) {
+        if (revision !== this.spaceRevision || listRevision !== this.memoriesRevision) return;
+        this.notify(error.message);
+      } finally {
+        if (revision === this.spaceRevision && listRevision === this.memoriesRevision) {
+          this.memoriesLoadingMore = false;
+        }
       }
     },
     filteredMemories() {
       const q = this.memoryQuery.trim().toLowerCase();
       if (!q) return this.memories;
       return this.memories.filter(function(item) {
-        return [item.content, item.fact_key, (item.tags || []).join(' ')].some(function(text) { return String(text || '').toLowerCase().includes(q); });
+        return [item.id, item.content, item.fact_key, (item.tags || []).join(' ')].some(function(text) { return String(text || '').toLowerCase().includes(q); });
       });
     },
     memoryFooter() {
       const total = Number(this.typeCount(this.memoryType)) || 0;
       const shown = this.memories.length;
       if (total > shown) return this.L('显示最近更新的 ' + shown + ' 条，共 ' + total + ' 条', 'Showing the ' + shown + ' most recent of ' + total);
+      if (this.memoriesHasMore) return this.L('已加载 ' + shown + ' 条，还有更多', 'Loaded ' + shown + ' memories, more available');
       return this.L('共 ' + shown + ' 条', shown + ' in total');
     },
     openMemoryTab(id) {

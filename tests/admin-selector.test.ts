@@ -487,3 +487,78 @@ test('a new assistant shares the default space unless told otherwise, and an emp
   await app.gwLoad();
   assert.equal(app.gwSpaceHint(app.gwIdentities[0]), null);
 });
+
+test('admin memory list paginates via cursor, deduplicates overlap, and searches by id', async () => {
+  const { app } = panel();
+  const requests: string[] = [];
+  app.request = async (path: string) => {
+    requests.push(path);
+    if (path.includes('cursor=100')) {
+      return {
+        data: [
+          { id: 'mem_overlap', type: 'fact', content: 'overlap item', fact_key: null, tags: [] },
+          { id: 'mem_older_152', type: 'fact', content: 'older memory', fact_key: null, tags: [] }
+        ],
+        paging: { limit: 100, cursor: null, has_more: false, count: 2 }
+      };
+    }
+    return {
+      data: [
+        { id: 'mem_recent_1', type: 'fact', content: 'recent memory', fact_key: null, tags: [] },
+        { id: 'mem_overlap', type: 'fact', content: 'overlap item', fact_key: null, tags: [] }
+      ],
+      paging: { limit: 100, cursor: '100', has_more: true, count: 2 }
+    };
+  };
+
+  await app.loadMemories();
+  assert.equal(app.memories.length, 2);
+  assert.equal(app.memoriesHasMore, true);
+  assert.equal(app.memoriesCursor, '100');
+
+  await app.loadMoreMemories();
+  assert.equal(requests.length, 2);
+  assert.match(requests[1], /cursor=100/);
+  assert.deepEqual(app.memories.map((item: any) => item.id), ['mem_recent_1', 'mem_overlap', 'mem_older_152']);
+  assert.equal(app.memoriesHasMore, false);
+  assert.equal(app.memoriesCursor, null);
+
+  app.memoryQuery = 'MEM_OLDER_152';
+  assert.deepEqual(app.filteredMemories().map((item: any) => item.id), ['mem_older_152']);
+  assert.match(ADMIN_HTML, /loadMoreMemories\(\)/);
+});
+
+test('stale loadMoreMemories response is ignored after switching memoryType', async () => {
+  const { app } = panel();
+  let releaseStalePage!: () => void;
+  app.request = async (path: string) => {
+    if (path.includes('cursor=100')) {
+      await new Promise<void>(resolve => { releaseStalePage = resolve; });
+      return {
+        data: [{ id: 'mem_stale_page2', type: 'fact', content: 'stale page 2', fact_key: null, tags: [] }],
+        paging: { limit: 100, cursor: null, has_more: false, count: 1 }
+      };
+    }
+    if (path.includes('type=event')) {
+      return {
+        data: [{ id: 'mem_event_1', type: 'event', content: 'event item', fact_key: null, tags: [] }],
+        paging: { limit: 100, cursor: null, has_more: false, count: 1 }
+      };
+    }
+    return {
+      data: [{ id: 'mem_all_1', type: 'fact', content: 'all page 1', fact_key: null, tags: [] }],
+      paging: { limit: 100, cursor: '100', has_more: true, count: 1 }
+    };
+  };
+
+  await app.loadMemories();
+  const pendingMore = app.loadMoreMemories();
+  app.memoryType = 'event';
+  await app.loadMemories();
+  releaseStalePage();
+  await pendingMore;
+
+  assert.deepEqual(app.memories.map((item: any) => item.id), ['mem_event_1']);
+  assert.equal(app.memoriesHasMore, false);
+  assert.equal(app.memoriesLoadingMore, false);
+});
