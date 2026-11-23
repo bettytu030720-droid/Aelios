@@ -8,6 +8,7 @@ import {
   handleWeeklyApproveAdmin
 } from "./api/admin";
 import { handleHealth } from "./api/health";
+import { handleDeploymentUpdate } from "./api/admin/deploymentUpdate";
 import { handleFtsReconcile, handleVectorBackfill, handleVectorDoctor, handleVectorHealth, handleVectorReindex } from "./api/debug";
 import { handleDreamHarvest, handleDreamResolve, handleDreamRun, handleDreamStatus } from "./api/dream";
 import { handleGateway } from "./gateway/handler";
@@ -79,6 +80,7 @@ export default {
 
     if (request.method === "GET" && url.pathname === "/admin/gateway") return new Response(null, { status: 302, headers: { location: "/admin", "cache-control": "no-store" } });
     // The admin endpoints report and edit the deployed values, so they run before the overrides.
+    if (url.pathname === "/api/admin/update") return handleDeploymentUpdate(request, deployed, ctx);
     if (url.pathname === "/api/gateway/config") return handleGatewayAdmin(request, deployed);
     if (request.method === "GET" && url.pathname === "/api/gateway/env") return handleGatewayEnv(request, deployed);
     if (request.method === "GET" && url.pathname === "/api/gateway/spaces") return handleGatewaySpaces(request, deployed);

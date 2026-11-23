@@ -1,4 +1,4 @@
-import { I, navLink, t } from "./helpers";
+import { I, ICON_SPIN, navLink, t } from "./helpers";
 import {
   BRAND_APPLE_TOUCH_ICON_DATA_URI,
   BRAND_LOGO_DARK_DATA_URI,
@@ -93,11 +93,22 @@ export const ADMIN_BODY_START = `<body>
   </aside>
 
   <main class="main">
-    <!-- 手机上只有这一条：左边 ☰ 打开侧边栏（导航只有那一套），右边刷新。 -->
-    <header class="topbar">
-      <button type="button" @click="navOpen = true" class="btn btn-icon relative" :aria-label="L('打开菜单', 'Open menu')">${I.menu}<span x-show="pendingCount" class="badge" x-text="pendingCount"></span></button>
-      <div class="brand min-w-0 flex-1"><span class="logo" aria-hidden="true"></span><span>Aelios</span></div>
-      <button type="button" @click="reloadAll()" class="btn btn-icon" :aria-label="L('刷新', 'Refresh')">${I.refresh}</button>
+    <header class="topbar" :class="{ 'has-deployment-update': deploymentUpdateVisible() }">
+      <button type="button" @click="navOpen = true" class="topbar-mobile btn btn-icon relative" :aria-label="L('打开菜单', 'Open menu')">${I.menu}<span x-show="pendingCount" class="badge" x-text="pendingCount"></span></button>
+      <div class="topbar-mobile brand min-w-0 flex-1"><span class="logo" aria-hidden="true"></span><span class="truncate">Aelios</span></div>
+      <button type="button" @click="reloadAll()" class="topbar-mobile btn btn-icon" :aria-label="L('刷新', 'Refresh')">${I.refresh}</button>
+      <div x-show="deploymentUpdateVisible()" class="deployment-update">
+        <button type="button" class="btn deployment-update-button" :class="{ 'is-retry': deploymentUpdate.state === 'failed' }"
+          @click="loadDeploymentUpdate(true)" :disabled="deploymentUpdateBusy()" :aria-busy="deploymentUpdateBusy()"
+          :title="deploymentUpdateHint()" :aria-label="deploymentUpdateLabel() + ' · ' + deploymentUpdateHint()">
+          <span x-show="!deploymentUpdateBusy()" aria-hidden="true">${I.upload}</span>
+          <span x-show="deploymentUpdateBusy()" class="deployment-update-spin" aria-hidden="true">${ICON_SPIN}</span>
+          <span x-text="deploymentUpdateLabel()" aria-live="polite"></span>
+        </button>
+        <a x-show="deploymentUpdate.state === 'failed' && deploymentUpdate.buildUrl" :href="deploymentUpdate.buildUrl"
+          class="btn btn-icon deployment-build-link" target="_blank" rel="noopener noreferrer"
+          :aria-label="L('查看构建记录', 'View build details')" :title="L('查看构建记录', 'View build details')">${I.ext}</a>
+      </div>
     </header>
 
     <div class="wrap">

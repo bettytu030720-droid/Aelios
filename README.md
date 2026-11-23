@@ -100,6 +100,10 @@ GitHub forks stay on the commit where you forked them until you sync.
 
 Your memories, settings, assistants, and secrets live inside your Cloudflare account. Keep runtime configuration inside `/admin` so syncing your fork never hits merge conflicts.
 
+### Update from the admin panel
+
+For a direct Aelios fork connected to Workers Builds on the production `main` branch, add the [update credentials](SECRETS.md#后台一键更新) to the Worker and deploy once through that connection. After you sign in with the main key, **Update** appears at the top right when the deployed commit is behind upstream. Clicking it syncs your fork and lets Workers Builds run `npm run deploy`. The button tracks the build and disappears when the updated Worker is serving requests. A production Deploy Hook enables retries when the fork has already synced.
+
 ### Deployed with the button
 
 Switching from a button-created copy to a fork keeps all existing Cloudflare data intact.

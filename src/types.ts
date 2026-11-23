@@ -8,6 +8,12 @@ export interface Env {
   VECTORIZE_INDEX_NAME?: string;
   CLOUDFLARE_ACCOUNT_ID?: string;
   CLOUDFLARE_API_TOKEN?: string;
+  AELIOS_BUILD_COMMIT?: string;
+  AELIOS_BUILD_REPO?: string;
+  AELIOS_BUILD_WORKER?: string;
+  AELIOS_UPDATE_REPO?: string;
+  AELIOS_UPDATE_GITHUB_TOKEN?: string;
+  AELIOS_UPDATE_DEPLOY_HOOK?: string;
   PUBLIC_MODEL_NAME?: string;
   CHAT_MODEL?: string;
   DEFAULT_UPSTREAM_MODEL?: string;

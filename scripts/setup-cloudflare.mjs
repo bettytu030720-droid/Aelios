@@ -1,6 +1,7 @@
 import { spawnSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { workersBuildSource } from "./workers-build-source.mjs";
 
 const root = resolve(import.meta.dirname, "..");
 const wranglerTomlPath = resolve(root, "wrangler.toml");
@@ -373,6 +374,13 @@ function ensurePlacement() {
 }
 
 ensureVisibleVars();
+const origin = process.env.WORKERS_CI === "1"
+  ? spawnSync("git", ["remote", "get-url", "origin"], { cwd: root, encoding: "utf8" }).stdout ?? ""
+  : "";
+const build = workersBuildSource(process.env, origin, wranglerToml.match(/^name\s*=\s*"([^"]+)"/m)?.[1] ?? "");
+upsertVarFromEnvironment("AELIOS_BUILD_COMMIT", build.commit);
+upsertVarFromEnvironment("AELIOS_BUILD_REPO", build.repo);
+upsertVarFromEnvironment("AELIOS_BUILD_WORKER", build.workerName);
 ensureAccountIdVar();
 ensureD1();
 ensurePlacement();

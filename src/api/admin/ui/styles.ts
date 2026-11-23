@@ -114,6 +114,10 @@ export const ADMIN_STYLES = `<style>
     .side { position: sticky; top: 0; height: 100dvh; width: 240px; max-width: none; flex: none; transform: none; transition: none; z-index: 2;
       background: var(--side); box-shadow: inset -1px 0 0 var(--div); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); }
     .side-scrim, .topbar { display: none !important; }
+    .topbar.has-deployment-update { display: flex !important; justify-content: flex-end; position: relative; box-sizing: border-box;
+      max-width: 1120px; margin: 0 auto; padding: 16px clamp(16px, 4vw, 40px) 0; border: 0; background: transparent; backdrop-filter: none; }
+    .topbar.has-deployment-update .topbar-mobile { display: none; }
+    .topbar.has-deployment-update + .wrap { padding-top: 10px; }
   }
   .brand { display: flex; align-items: center; gap: 10px; padding: 0 6px; font-size: 16px; font-weight: 600; letter-spacing: -.01em; }
   .logo { width: 32px; height: 32px; border-radius: 9px; background-image: var(--logo-img); background-size: cover; background-position: center; background-repeat: no-repeat; border: 1px solid var(--logo-border); box-shadow: var(--logo-shadow); flex: none; }
@@ -150,6 +154,22 @@ export const ADMIN_STYLES = `<style>
   .btn { display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 44px; padding: 0 16px; border-radius: 10px; border: 1px solid var(--line); background: var(--panel); color: var(--t2); font-size: 14px; font-weight: 500; white-space: nowrap; transition: border-color .15s ease, background-color .15s ease, color .15s ease; }
   .btn:hover:not(:disabled) { border-color: var(--aurb); color: var(--t1); }
   .btn:disabled { opacity: .45; }
+  .deployment-update { display: flex; align-items: center; gap: 5px; flex: none; }
+  .deployment-update .deployment-update-button { min-height: 44px; gap: 7px; padding: 0 11px; border-radius: 999px;
+    border-color: var(--aurb); background: var(--aur), var(--panel); color: var(--t1); font-size: 12px; font-weight: 600; }
+  .deployment-update .deployment-update-button:hover:not(:disabled) { border-color: var(--vline); box-shadow: var(--glow); }
+  .deployment-update .deployment-update-button:disabled { opacity: .82; }
+  .deployment-update .deployment-update-button.is-retry { border-color: var(--aurb); background: var(--panel); }
+  .deployment-update-button span:first-child, .deployment-update-spin { display: inline-flex; }
+  .deployment-update-button .i { width: 15px; height: 15px; }
+  .deployment-update-spin { animation: deployment-update-spin 1s linear infinite; }
+  .deployment-update .deployment-build-link { width: 44px; padding: 0; }
+  @keyframes deployment-update-spin { to { transform: rotate(360deg); } }
+  @media (min-width: 768px) {
+    .deployment-update .deployment-update-button, .deployment-update .deployment-build-link { min-height: 34px; }
+    .deployment-update .deployment-build-link { width: 34px; }
+  }
+  @media (prefers-reduced-motion: reduce) { .deployment-update-spin { animation: none; } }
   .btn-primary { border: 0; background: var(--coral); color: var(--on-coral); font-weight: 600; }
   .btn-primary:hover:not(:disabled) { color: var(--on-coral); filter: brightness(1.04); }
   .btn-sm { min-height: 36px; padding: 0 12px; font-size: 13px; }
