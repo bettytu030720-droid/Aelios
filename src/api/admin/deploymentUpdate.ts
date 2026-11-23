@@ -2,14 +2,16 @@ import { authenticate } from "../../auth/apiKey";
 import { object } from "../../gateway/config";
 import type { Env } from "../../types";
 import { json } from "../../utils/json";
+import { sealSecret, unsealSecret } from "../../utils/sealedSecret";
+import { forkRepository, GitHubError, githubRequest, UPSTREAM } from "./updateGithub";
+import { handleGitHubConnect, installedGitHubApp, mintGitHubUpdateToken } from "./updateGithubApp";
 
-const UPSTREAM = "Aelios-project/Aelios";
 const DEPLOY_BRANCH = "main";
 const START_TIMEOUT = 90_000;
 const BUILD_TIMEOUT = 25 * 60_000;
 const VERSION_CACHE_SECONDS = 180;
 
-type Settings = { current: string; repo: string; worker: string; deployment: string; token: string; deployHook: string | null };
+type Settings = { current: string; repo: string; worker: string; deployment: string; token?: string; deployHook: string | null };
 type Attempt = {
   attempt_id: string;
   start_commit: string;
@@ -17,14 +19,16 @@ type Attempt = {
   started_at: number;
   hook_started_at: number | null;
   failure: string | null;
+  github_token_enc: string | null;
 };
 type Build = { status: string; conclusion?: string; completed_at?: string | null; details_url?: string };
 type UpdateStatus = {
-  state: "off" | "current" | "available" | "unavailable" | "starting" | "deploying" | "failed";
+  state: "off" | "current" | "available" | "connect" | "unavailable" | "starting" | "deploying" | "failed";
   current?: string;
   target?: string;
   reason?: string;
   buildUrl?: string;
+  repo?: string;
 };
 
 class UpdateFailure extends Error {}
@@ -47,37 +51,24 @@ function settings(env: Env): Settings | null {
   const current = sha(env.AELIOS_BUILD_COMMIT);
   const repo = env.AELIOS_BUILD_REPO?.trim() || env.AELIOS_UPDATE_REPO?.trim();
   const worker = env.AELIOS_BUILD_WORKER?.trim();
-  const token = env.AELIOS_UPDATE_GITHUB_TOKEN?.trim();
-  if (!current || !repo || !worker || !token || !/^[a-z\d-]+\/[a-z\d_.-]+$/i.test(repo) ||
+  const token = env.AELIOS_UPDATE_GITHUB_TOKEN?.trim() || undefined;
+  if (!current || !repo || !worker || !/^[a-z\d-]+\/[a-z\d_.-]+$/i.test(repo) ||
     repo.toLowerCase() === UPSTREAM.toLowerCase()) return null;
   const deployment = `${repo.toLowerCase()}:${worker}`;
   return { current, repo, worker, deployment, token, deployHook: deployHookUrl(env.AELIOS_UPDATE_DEPLOY_HOOK) };
 }
 
 async function github(config: Settings, path: string, body?: { branch: string }): Promise<Record<string, unknown>> {
-  const response = await fetch(`https://api.github.com${path}`, {
-    method: body ? "POST" : "GET",
-    headers: {
-      "authorization": `Bearer ${config.token}`,
-      "accept": "application/vnd.github+json",
-      "user-agent": "Aelios-updater",
-      ...(body ? { "content-type": "application/json" } : {})
-    },
-    body: body ? JSON.stringify(body) : undefined,
-    signal: AbortSignal.timeout(8_000),
-    redirect: "error"
-  });
-  if (!response.ok) {
-    if (body && response.status === 409) throw new UpdateFailure("merge_conflict");
-    if (body && response.status === 422) throw new UpdateFailure("sync_rejected");
-    if ([401, 403].includes(response.status) && response.headers.get("x-ratelimit-remaining") !== "0") {
-      throw new UpdateFailure("github_permission");
+  try {
+    return await githubRequest(path, config.token, body ? { body } : undefined);
+  } catch (error) {
+    if (error instanceof GitHubError && !error.rateLimited) {
+      if (body && error.status === 409) throw new UpdateFailure("merge_conflict");
+      if (body && error.status === 422) throw new UpdateFailure("sync_rejected");
+      if ([401, 403].includes(error.status)) throw new UpdateFailure("github_permission");
     }
     throw new UpdateFailure("github_unavailable");
   }
-  const data: unknown = await response.json();
-  if (!object(data)) throw new UpdateFailure("github_unavailable");
-  return data;
 }
 
 async function branchCommit(config: Settings, repo: string): Promise<string> {
@@ -99,7 +90,7 @@ async function isBehind(config: Settings): Promise<boolean> {
 
 async function available(request: Request, ctx: ExecutionContext, config: Settings): Promise<boolean> {
   const cache = typeof caches === "undefined" ? undefined : caches.default;
-  const cacheKey = new Request(new URL(`/__aelios/deployment-update/${config.current}`, request.url));
+  const cacheKey = new Request(new URL(`/__aelios/deployment-update/${config.repo.toLowerCase()}/${config.current}`, request.url));
   const cached = await cache?.match(cacheKey).catch(() => undefined);
   if (cached) return await cached.text() === "behind";
   const behind = await isBehind(config);
@@ -128,7 +119,11 @@ function buildLink(build: Build | undefined): string | undefined {
   } catch { return undefined; }
 }
 
-async function attemptStatus(config: Settings, attempt: Attempt | null): Promise<UpdateStatus | null> {
+function buildTokenContext(config: Settings, attemptId: string): string {
+  return `aelios.github-update-build.v1:${config.deployment}:${attemptId}`;
+}
+
+async function attemptStatus(config: Settings, key: string, attempt: Attempt | null): Promise<UpdateStatus | null> {
   if (!attempt || attempt.start_commit !== config.current) return null;
   const elapsed = Date.now() - attempt.started_at;
   if (attempt.failure) return { state: "failed", reason: attempt.failure };
@@ -136,7 +131,9 @@ async function attemptStatus(config: Settings, attempt: Attempt | null): Promise
     return elapsed < START_TIMEOUT ? { state: "starting" } : { state: "failed", reason: "start_timeout" };
   }
   const target = attempt.target_commit;
-  const build = await latestBuild(config, target).catch(() => undefined);
+  const token = config.token ??
+    await unsealSecret(key, buildTokenContext(config, attempt.attempt_id), attempt.github_token_enc) ?? undefined;
+  const build = await latestBuild({ ...config, token }, target).catch(() => undefined);
   const buildUrl = buildLink(build);
   // A manual retry can leave the previous failed check visible until the new build reports.
   const fromThisBuild = Date.parse(build?.completed_at ?? "") >= (attempt.hook_started_at ?? attempt.started_at);
@@ -151,7 +148,7 @@ async function attemptStatus(config: Settings, attempt: Attempt | null): Promise
 async function triggerBuild(config: Settings): Promise<void> {
   if (!config.deployHook) throw new UpdateFailure("deploy_hook_required");
   const response = await fetch(config.deployHook, {
-    method: "POST", redirect: "error", signal: AbortSignal.timeout(8_000)
+    method: "POST", redirect: "manual", signal: AbortSignal.timeout(8_000)
   });
   if (!response.ok) throw new UpdateFailure("deploy_hook_failed");
   const data: unknown = await response.json();
@@ -160,28 +157,37 @@ async function triggerBuild(config: Settings): Promise<void> {
     (data.result.worker && data.result.worker !== config.worker)) throw new UpdateFailure("deploy_hook_failed");
 }
 
-async function startUpdate(env: Env, config: Settings, previous: Attempt | null): Promise<UpdateStatus> {
+function connectStatus(config: Settings): UpdateStatus {
+  return { state: "connect", repo: config.repo };
+}
+
+async function startUpdate(env: Env, config: Settings, key: string, previous: Attempt | null): Promise<UpdateStatus> {
   if (!await isBehind(config)) return { state: "current" };
-  const fork = await github(config, `/repos/${config.repo}`);
-  if (fork.fork !== true || !object(fork.parent) || typeof fork.parent.full_name !== "string" ||
-    fork.parent.full_name.toLowerCase() !== UPSTREAM.toLowerCase()) throw new UpdateFailure("fork_required");
+  const fork = await forkRepository(config.repo, config.token);
+  if (!fork) throw new UpdateFailure("fork_required");
+  const app = config.token ? null : await installedGitHubApp(env, key, config);
+  if (!config.token && (!app || app.repository_id !== fork.id || app.owner_id !== fork.ownerId)) return connectStatus(config);
   const id = crypto.randomUUID();
   const start = Date.now();
   const claimed = await env.DB.prepare(`INSERT INTO admin_deployment_update (deployment, attempt_id, start_commit, started_at)
     VALUES (?, ?, ?, ?) ON CONFLICT(deployment) DO UPDATE SET
     attempt_id=excluded.attempt_id, start_commit=excluded.start_commit, started_at=excluded.started_at,
-    target_commit=NULL, hook_started_at=NULL, failure=NULL WHERE attempt_id=?`)
+    target_commit=NULL, hook_started_at=NULL, failure=NULL, github_token_enc=NULL WHERE attempt_id=?`)
     .bind(config.deployment, id, config.current, start, previous?.attempt_id ?? null).run();
   if (!claimed.meta.changes) return { state: "starting" };
 
   try {
-    const merged = await github(config, `/repos/${config.repo}/merge-upstream`, { branch: DEPLOY_BRANCH });
+    const token = app ? await mintGitHubUpdateToken(env, config, app) : config.token;
+    if (!token) throw new UpdateFailure("github_connect_required");
+    const authenticated = { ...config, token };
+    const sealed = app ? await sealSecret(key, buildTokenContext(config, id), token) : null;
+    const merged = await github(authenticated, `/repos/${config.repo}/merge-upstream`, { branch: DEPLOY_BRANCH });
     if (!["merge", "fast-forward", "none"].includes(String(merged.merge_type))) throw new UpdateFailure("github_unavailable");
-    const target = await branchCommit(config, config.repo);
+    const target = await branchCommit(authenticated, config.repo);
     if (target === config.current) throw new UpdateFailure("sync_incomplete");
     let hookStartedAt = null;
     if (merged.merge_type === "none") {
-      const build = await latestBuild(config, target);
+      const build = await latestBuild(authenticated, target);
       const recentlySuccessful = build?.conclusion === "success" &&
         start - Date.parse(build.completed_at ?? "") < START_TIMEOUT;
       if ((!build || build.status === "completed") && !recentlySuccessful) {
@@ -189,37 +195,43 @@ async function startUpdate(env: Env, config: Settings, previous: Attempt | null)
         await triggerBuild(config);
       }
     }
-    await env.DB.prepare("UPDATE admin_deployment_update SET target_commit=?, hook_started_at=? WHERE deployment=? AND attempt_id=?")
-      .bind(target, hookStartedAt, config.deployment, id).run();
+    await env.DB.prepare(`UPDATE admin_deployment_update SET target_commit=?, hook_started_at=?, github_token_enc=?
+      WHERE deployment=? AND attempt_id=?`).bind(target, hookStartedAt, sealed, config.deployment, id).run();
     return { state: "deploying", target };
   } catch (error) {
     const reason = error instanceof UpdateFailure ? error.message : "update_unavailable";
     await env.DB.prepare("UPDATE admin_deployment_update SET failure=? WHERE deployment=? AND attempt_id=?")
       .bind(reason, config.deployment, id).run();
-    return { state: "failed", reason };
+    return reason === "github_connect_required" ? connectStatus(config) : { state: "failed", reason };
   }
 }
 
 export async function handleDeploymentUpdate(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
+  const config = settings(env);
+  if (new URL(request.url).pathname !== "/api/admin/update") return handleGitHubConnect(request, env, config);
   const headers = { "cache-control": "no-store" };
   const auth = await authenticate(request, env);
-  if (!auth.ok || auth.keyName !== "CHATBOX_API_KEY") return json({ error: "Main key required" }, { status: 401, headers });
+  const key = env.CHATBOX_API_KEY;
+  if (!key || !auth.ok || auth.keyName !== "CHATBOX_API_KEY") return json({ error: "Main key required" }, { status: 401, headers });
   if (request.method !== "GET" && request.method !== "POST") {
     return json({ error: "Use GET or POST" }, { status: 405, headers: { ...headers, allow: "GET, POST" } });
   }
-  const config = settings(env);
   if (!config) return json({ state: "off" }, { headers });
   const reply = (status: UpdateStatus) => json({ ...status, current: config.current }, { headers });
   try {
     const attempt = await env.DB.prepare("SELECT * FROM admin_deployment_update WHERE deployment=?")
       .bind(config.deployment).first<Attempt>();
-    const status = await attemptStatus(config, attempt);
+    const status = await attemptStatus(config, key, attempt);
     if (request.method === "GET") {
       if (status && status.state !== "failed") return reply(status);
-      return reply(await available(request, ctx, config) ? (status ?? { state: "available" }) : { state: "current" });
+      if (!await available(request, ctx, config)) return reply({ state: "current" });
+      if (!config.token && !await installedGitHubApp(env, key, config)) {
+        return reply(await forkRepository(config.repo) ? connectStatus(config) : { state: "off" });
+      }
+      return reply(status && status.reason !== "github_connect_required" ? status : { state: "available" });
     }
     if (status?.state === "starting" || status?.state === "deploying") return reply(status);
-    return reply(await startUpdate(env, config, attempt));
+    return reply(await startUpdate(env, config, key, attempt));
   } catch (error) {
     return reply(request.method === "POST"
       ? { state: "failed", reason: error instanceof UpdateFailure ? error.message : "update_unavailable" }

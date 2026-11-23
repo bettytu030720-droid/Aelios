@@ -80,7 +80,9 @@ export default {
 
     if (request.method === "GET" && url.pathname === "/admin/gateway") return new Response(null, { status: 302, headers: { location: "/admin", "cache-control": "no-store" } });
     // The admin endpoints report and edit the deployed values, so they run before the overrides.
-    if (url.pathname === "/api/admin/update") return handleDeploymentUpdate(request, deployed, ctx);
+    if (url.pathname === "/api/admin/update" || url.pathname.startsWith("/api/admin/update/")) {
+      return handleDeploymentUpdate(request, deployed, ctx);
+    }
     if (url.pathname === "/api/gateway/config") return handleGatewayAdmin(request, deployed);
     if (request.method === "GET" && url.pathname === "/api/gateway/env") return handleGatewayEnv(request, deployed);
     if (request.method === "GET" && url.pathname === "/api/gateway/spaces") return handleGatewaySpaces(request, deployed);

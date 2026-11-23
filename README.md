@@ -102,7 +102,9 @@ Your memories, settings, assistants, and secrets live inside your Cloudflare acc
 
 ### Update from the admin panel
 
-For a direct Aelios fork connected to Workers Builds on the production `main` branch, add the [update credentials](SECRETS.md#后台一键更新) to the Worker and deploy once through that connection. After you sign in with the main key, **Update** appears at the top right when the deployed commit is behind upstream. Clicking it syncs your fork and lets Workers Builds run `npm run deploy`. The button tracks the build and disappears when the updated Worker is serving requests. A production Deploy Hook enables retries when the fork has already synced.
+Deploy a direct Aelios fork with Workers Builds on the production `main` branch and sign in to that Worker's `/admin` with the main key. When an update is available, click **Connect GitHub** the first time. Create the private update app on GitHub, choose **Only select repositories**, and install it on your fork. Approve the installation once. Aelios requests fresh one-hour installation tokens from GitHub as needed.
+
+Click **Update** to sync your fork and let Workers Builds run `npm run deploy`. The button tracks the build and disappears when the new Worker is serving requests. See the [update settings](SECRETS.md#后台一键更新) for optional build retries and token-based setup.
 
 ### Deployed with the button
 

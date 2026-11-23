@@ -24,15 +24,17 @@
 
 ### 后台一键更新
 
-对于生产 `main` 连接到 Aelios 直接 Fork 的 Workers Builds，在 **Worker → Settings → Variables and Secrets** 配置：
+对于生产 `main` 连接到 Aelios 直接 Fork 的 Workers Builds，用主钥匙登录 Worker 的 `/admin`。有更新时点「连接 GitHub」，在 GitHub 创建私有 App，再选择 **Only select repositories**，只安装到对应的 Fork。App 私钥用主钥匙派生的密钥加密后保存在 D1。Aelios 按需签发仅限该 Fork 的一小时安装令牌。撤销安装后可重新连接，更换主钥匙后需重新连接。
+
+可在 **Worker → Settings → Variables and Secrets** 配置以下选项。
 
 | 名称 | 类型 | 用途 |
 | --- | --- | --- |
-| `AELIOS_UPDATE_GITHUB_TOKEN` | **Secret** | 选择自己的 Fork 创建 fine-grained PAT，授予 **Contents: Read and write** 和 **Checks: Read**。用于同步 Fork 和读取该 Worker 的构建状态 |
+| `AELIOS_UPDATE_GITHUB_TOKEN` | **Secret** | 也可选自己的 Fork 创建 fine-grained PAT，授予 **Contents: Read and write**、**Checks: Read** 和 **Workflows: Read and write**。配置后优先使用该令牌 |
 | `AELIOS_UPDATE_DEPLOY_HOOK` | **Secret** | 可选。在同一 Worker 的 **Settings → Builds → Deploy Hooks** 创建生产 `main` 的链接，用于 Fork 已同步时重新触发构建 |
 | `AELIOS_UPDATE_REPO` | Variable | 可选。当构建拿不到 Git remote 时填写 `owner/repo`，与 Workers Builds 连接的 Fork 一致 |
 
-构建会自动记录提交 SHA 和仓库，后台用主钥匙启用更新。令牌和 Hook 由 Worker 读取。同步涉及 `.github/workflows/` 的提交时，GitHub 可能要求 **Workflows: Read and write**，也可以先在 GitHub 同步这些提交。遇到分支冲突时，在 GitHub 处理后再重试。
+构建会自动记录提交 SHA 和仓库。同步 Fork 后由 Workers Builds 部署。遇到分支冲突时，在 GitHub 处理后再重试。
 
 ## 2. 新部署配置流程
 
