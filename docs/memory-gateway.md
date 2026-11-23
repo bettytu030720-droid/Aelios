@@ -86,13 +86,13 @@ Aelios 负责身份识别、单轮记忆召回与对话记录，客户端工具�
 - 跨空间检索并行执行、轮询归并、按类型与内容去重，最后统一应用单轮条数与字数预算。单个空间异常时继续返回其他可用空间的命中，全部失败才报告召回不可用。
 - 注入计数写回条目所属空间，`recall_explain` 记录在写入空间内。Cron 仅对配置中的写入空间运行 Dream，避免只读共享关系触发额外整理。
 
-## 写代码对话过滤（`codingFilter`）
+## 代码与工具收录过滤（`codingFilter`）
 
-当请求头（`User-Agent`、`x-title`、`Referer`、`originator`）识别为 Claude Code、Codex、Cline、opencode、Kilo Code、Aider 等编程代理，或工具定义同时包含命令行与文件编辑工具时，网关自动启用编程对话过滤。
+网关直连与 Hook 的自动收录默认过滤代码和工作工具，适用于所有客户端。
 
-- 用户消息与未调用工作工具的助手回复会将代码块替换为 `[code]`。
-- 调用了工作工具的中间回合，仅保留面向人类的发言类工具调用，过滤读文件、跑命令、改文件的参数与返回，避免大段代码挤爆 8,000 字单条上限。
-- 召回仅在人类回合触发且剥离代码块进行检索。助手配置里设置 `codingFilter: false` 可关闭过滤并完整记录。
+- 跳过纯代码块和符合 DSH 格式的后台 Bash 通知。围栏代码块和能按段识别的独立代码片段（例如脚本、补丁、部分 JavaScript 或 Python 声明）记为 `[code]`，其余对话正文参与收录。
+- 工作工具的参数和结果不进入记录。发言工具仍可收录，发言中的代码也经过过滤。识别为编程代理时，带工作工具调用的中间回合只收录发言工具。
+- 召回在 Worker 中先过滤本轮和近期用户文本，纯代码输入跳过召回和收录。库内已有记录无需参与过滤。助手配置里的 `codingFilter: false` 可关闭此过滤。
 
 ## 缓存转换、思考块策略与工具字段学习
 
@@ -122,10 +122,12 @@ Aelios 单次请求只发往一个上游，不重排客户端前缀，也不主�
 | --- | --- |
 | `protocol` | `chat`、`messages` 或 `responses`（`anthropic` 视同 `messages`） |
 | `model` | 本轮模型名，用于匹配助手主模型白名单 |
-| `agent` | 可选，调用方代理标识（如 `claude`、`codex`、`opencode`、`kilo`），用于触发编程对话过滤 |
+| `agent` | 可选，调用方代理标识（如 `claude`、`codex`、`opencode`、`kilo`），用于识别编程代理的中间回合 |
 | `session` | 可选，等同 `x-aelios-session-id`，缺省依次回退 `body.metadata.session_id` 与 `unscoped` |
 | `identity` | 可选，显式指定已授权的助手 `slug`，省略时按配置顺序匹配第一个主模型命中的授权助手 |
 | `body` | 请求体（可精简为 `messages`/`input`、工具名称与 `metadata`） |
 
 - **`POST /v1/hook/recall`** 返回 HTTP `200` 及 `{"memory": "injected" | "empty" | "off" | "skipped" | "stateful" | "unavailable", "patch": "...", "recall_id": "...", "remember": "..."}`，调用方将 `patch` 附加到最后一条用户消息末尾。默认只做召回，仅在显式传入 `record: true` 时当场保存用户原话并处理即时记忆。调用方应在发送前自行拦截含敏感凭证的轮次。
 - **`POST /v1/hook/record`** 额外接收 `reply`（非流式完整回复，可为 `null`）、`success`、`upstream_model` 与 `http_status`，写队列或直写 D1 后返回 `{"recorded": true, "exchange_id": "gw_req_...", "completion": "complete"}`（非主模型返回 `off`，带服务端状态的 Responses 返回 `stateful`，写入失败返回 `503`）。工具回合也需上报。`exchange_id` 基于请求内容与外层 `model` 哈希生成，同一轮 `recall` 与 `record` 自动去重，写入 `messages.source = "gateway:<slug>"`。
+
+过滤后无需收录的回合返回 HTTP `200` 和 `{"recorded": false, "reason": "filtered"}`。

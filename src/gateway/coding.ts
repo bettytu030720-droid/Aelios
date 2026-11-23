@@ -2,20 +2,10 @@ import { object } from "./config";
 import type { Body } from "./protocol";
 
 /**
- * Coding agents (Claude Code, Codex, Cline, opencode…) keep their memory, but only of what was said.
- * Each tool step is its own request, and what it carries is about the code, not the relationship.
- * So for a coding request the gateway records:
- *  - the person's words with code blocks replaced by [code];
- *  - a reply that called no work tool, with code blocks replaced the same way as the text streams in,
- *    so a long block never fills the 8,000-character cap before the words after it;
- *  - from a step that called a work tool, only its speech tool calls (a message sent through a
- *    tool), with code in what they say replaced too. A speech tool's name is made only of the words
- *    below; every other tool is work, so tool names nobody listed stay out. Work tool arguments never
- *    enter the record, so they cannot crowd out or outgrow the cap. A finished step left with nothing
- *    writes no new rows (it only closes an earlier failed try of the same request); a failed one is
- *    still recorded as failed.
- * Recall still runs on the person's turns only, and searches without the code.
- * An assistant can switch this off with `codingFilter: false` to record everything as before.
+ * Automatic capture replaces code blocks in speech and drops work tool calls for every client.
+ * Known coding clients also omit preambles on work-tool steps, keeping only speech tool calls.
+ * Speech tool names consist of the words below, and their text goes through the same code filter.
+ * Recall uses the filtered human text. An assistant can opt out with `codingFilter: false`.
  *
  * A request counts as coding when either signal is present:
  *  - the client names itself in its User-Agent or attribution headers;
@@ -157,17 +147,59 @@ export class CodeFilter {
   }
 }
 
-/** Fenced code blocks become [code]. */
+// DSH sends background job notifications as user text, including the command and its output.
+const DSH_JOB_NOTIFICATION = /^background job bash-[a-f0-9]{16} \(bash: /;
+
+// A blank line can end an unfenced example. Continue redacting across it only if the next
+// paragraph starts with recognizable syntax for the same format.
+const UNFENCED_CODE = [
+  {
+    opening: /^(?:#![ \t]*\/\S+|set -euo pipefail[ \t]*(?:\r?\n|$))/,
+    continuation: /^(?:[A-Za-z_]\w*=(?!=)|(?:printf|echo)[ \t]+["'$-]|(?:fi|done|esac)[ \t]*(?:\r?\n|$))/
+  },
+  {
+    opening: /^(?:\*\*\* Begin Patch[ \t]*(?:\r?\n|$)|diff --git [^\r\n]+\r?\n|--- (?:a\/|\/dev\/null)[^\r\n]*\r?\n\+\+\+ )/,
+    continuation: /^(?:\*\*\* (?:End Patch|(?:Add|Update|Delete) File:)|@@(?:[ \t]|\r?\n|$)|[+-]\S)/
+  },
+  {
+    opening: /^(?:export[ \t]+)?(?:const|let|var)[ \t]+[$A-Z_a-z][$\w]*[ \t]*=[^\r\n]*;[ \t]*(?:\r?\n|$)/,
+    continuation: /^(?:(?:[$A-Z_a-z][$\w]*\.)*[$A-Z_a-z][$\w]*\([^\r\n]*\);|[{}];?)[ \t]*(?:\r?\n|$)/
+  },
+  {
+    opening: /^(?:async[ \t]+)?def[ \t]+[A-Z_a-z]\w*\([^\r\n]*\)[ \t]*:[ \t]*(?:#[^\r\n]*)?\r?\n[ \t]+\S/,
+    continuation: /^[ \t]+\S/
+  }
+];
+
+function replaceUnfencedCode(text: string): string {
+  const paragraphs = text.split(/\r?\n(?:[ \t]*\r?\n)+/);
+  const output: string[] = [];
+  let previous: typeof UNFENCED_CODE[number] | undefined;
+  for (const paragraph of paragraphs) {
+    const start = paragraph.trimStart();
+    const rule = UNFENCED_CODE.find(candidate => candidate.opening.test(start)) ??
+      (previous?.continuation.test(paragraph) ? previous : undefined);
+    if (!rule) output.push(paragraph);
+    else if (!previous) output.push("[code]");
+    previous = rule;
+  }
+  return output.join("\n\n");
+}
+
+/** Fenced code blocks and standalone code artifacts become [code]. */
 export function replaceCode(text: string): string {
+  const trimmed = text.trim();
+  if (DSH_JOB_NOTIFICATION.test(trimmed)) return "[code]";
+  if (!/^[ \t]*(?:`{3}|~{3})/m.test(trimmed)) return replaceUnfencedCode(trimmed);
   let out = "";
   const filter = new CodeFilter(piece => { out += piece; });
   filter.push(text);
   filter.end();
-  return out.replace(/\n{3,}/g, "\n\n").trim();
+  return replaceUnfencedCode(out.trim());
 }
 
-/** Fenced code blocks become [code]; code alone leaves "". */
-export function stripCodeBlocks(text: string): string {
+/** Keep the text around code, and return an empty string for code alone. */
+export function stripCodeContent(text: string): string {
   const said = replaceCode(text);
   return said.replaceAll("[code]", "").trim() ? said : "";
 }
@@ -182,12 +214,12 @@ export function replaceCodeIn(value: unknown): unknown {
 
 /** The words to search memories with: no code, no placeholders. */
 export function recallWords(text: string): string {
-  return stripCodeBlocks(text).replaceAll("[code]", " ").replace(/\s+/g, " ").trim();
+  return stripCodeContent(text).replaceAll("[code]", " ").replace(/\s+/g, " ").trim();
 }
 
 /** What a coding agent's reply said, for the record (see the header), and whether it hit the cap. */
 export function codingSpeech(out: { text: string; truncated: boolean; overflow: boolean; workCalls: number;
   spoken: string; spokenTruncated: boolean }): { text: string; truncated: boolean } {
   if (out.workCalls) return { text: out.spoken, truncated: out.overflow || out.spokenTruncated };
-  return { text: stripCodeBlocks(out.text), truncated: out.truncated };
+  return { text: out.text, truncated: out.truncated };
 }

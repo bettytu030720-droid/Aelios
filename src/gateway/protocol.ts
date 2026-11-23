@@ -1,5 +1,6 @@
 import { object, type Identity, type Protocol } from "./config";
 import { cleanMessageText } from "../utils/sanitize";
+import { stripCodeContent } from "./coding";
 
 /**
  * Client request bodies are arbitrary JSON that this layer reads and rewrites field by field.
@@ -23,7 +24,7 @@ export function validateBody(body: unknown, protocol: Protocol): asserts body is
   const items = inputItems(body, protocol);
   if (!Array.isArray(items) || !items.every(object)) throw new Error(protocol === "responses" ? "input must be a string or item array" : "messages must be an array of objects");
 }
-export interface Turn { kind: "human" | "tool" | "auxiliary"; text: string; index: number }
+export interface Turn { kind: "human" | "tool" | "auxiliary"; text: string; index: number; codeOnly?: true }
 export function recentHumanTexts(body: Body, protocol: Protocol, limit = 4): string[] {
   const items = inputItems(body, protocol) ?? [];
   const texts: string[] = [];
@@ -38,7 +39,8 @@ export function recentHumanTexts(body: Body, protocol: Protocol, limit = 4): str
   return texts.reverse();
 }
 
-export function classifyTurn(body: Body, protocol: Protocol, auxiliary = false): Turn {
+export function classifyTurn(body: Body, protocol: Protocol,
+  { auxiliary = false, filterCode = false }: { auxiliary?: boolean; filterCode?: boolean } = {}): Turn {
   const items = inputItems(body, protocol);
   const index = items.length - 1;
   const last = items[index];
@@ -46,10 +48,12 @@ export function classifyTurn(body: Body, protocol: Protocol, auxiliary = false):
   if (last.role === "tool" || /_call_output$/.test(last.type || "")) return { kind: "tool", text: "", index };
   if (last.role !== "user" || last.type && !["message", "input_message"].includes(last.type)) return { kind: "auxiliary", text: "", index };
   const raw = visibleText(last.content);
-  const text = cleanMessageText(raw);
+  const spoken = cleanMessageText(raw);
+  const text = filterCode && spoken ? stripCodeContent(spoken) : spoken;
   const blocks = Array.isArray(last.content) ? last.content : [];
   const tool = blocks.some(p => object(p) && p.type === "tool_result");
   if (tool && !text.trim()) return { kind: "tool", text: "", index };
+  if (spoken && !text) return { kind: "auxiliary", text: "", index, codeOnly: true };
   // Recap / system-reminder / empty envelopes: not a user utterance.
   if (!text.trim() && raw.trim()) return { kind: "auxiliary", text: "", index };
   return { kind: "human", text, index };

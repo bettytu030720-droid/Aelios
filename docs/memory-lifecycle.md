@@ -18,7 +18,7 @@
 
 - **去重幂等** 通过 `saveUserMessages` 写入的用户消息使用 10 分钟时间桶哈希（`conversationId + role + normalizedContent + 10m_bucket`）配合唯一部分索引，防止短时间内的客户端重试写入重复行，同时保留不同时间段重复说出的日常语句。
 - **信封与系统噪声过滤** 若客户端消息带有 `<message ...>`、`<wecom-message ...>` 等传输信封，仅提取正文用于存储、召回与整理，忽略消息 ID 与哈希。客户端自动注入的 `<recap>`、`<system-reminder>`、`User stepped away; returning. Recap:` 以及助手侧的简短回执会被直接丢弃，不进入记忆与召回。旧历史数据在召回和 Dream 读取时也会按同样规则清洗。
-- **写代码过滤** 当客户端识别为 Claude Code、Codex、Cline、opencode 等编程代理，或请求同时声明命令行和文件编辑工具时，默认只记录对话语言，代码块替换为 `[code]`，跳过读文件、跑命令和改文件的工具步骤。助手配置里的 `codingFilter: false` 可关闭此行为。
+- **代码与工具过滤** 自动收录默认对所有客户端跳过纯代码输入与工作工具的参数和结果。对话中的围栏代码块替换为 `[code]`。助手配置里的 `codingFilter: false` 可关闭此行为。
 
 ## 召回管线
 

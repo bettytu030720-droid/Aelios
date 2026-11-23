@@ -1,7 +1,7 @@
 import { authenticate } from "../auth/apiKey";
 import type { Env } from "../types";
 import { newId } from "../utils/ids";
-import { codingAgent, stripCodeBlocks } from "./coding";
+import { codingAgent } from "./coding";
 import { allowedIdentities, findIdentity, isMainModel, loadConfig, object, PROTOCOLS, type GatewayConfig, type Identity, type Protocol } from "./config";
 import { recordExchange, rememberAndRecall, settleOutput } from "./handler";
 import { classifyTurn, hasServerState, validateBody, type Body, type Turn } from "./protocol";
@@ -30,6 +30,7 @@ interface HookContext {
   identity: Identity;
   source: string;
   main: boolean;
+  filterCode: boolean;
   coding: string | null;
   turn: Turn;
   stateful: boolean;
@@ -105,10 +106,10 @@ async function openHook(request: Request, env: Env): Promise<HookContext | Respo
       : "This key has no identity. Configure one at /admin.", 403);
   }
   const main = isMainModel(identity, input.model);
-  const coding = main && identity.codingFilter !== false ? codingAgent(input.agent, input.body) : null;
-  const classified = classifyTurn(input.body, protocol);
-  const turn = coding && classified.text ? { ...classified, text: stripCodeBlocks(classified.text) } : classified;
-  return { input, identity, source: auth.profile.source, main, coding, turn,
+  const filterCode = main && identity.codingFilter !== false;
+  const coding = filterCode ? codingAgent(input.agent, input.body) : null;
+  const turn = classifyTurn(input.body, protocol, { filterCode });
+  return { input, identity, source: auth.profile.source, main, filterCode, coding, turn,
     stateful: protocol === "responses" && hasServerState(input.body, protocol) };
 }
 
@@ -138,20 +139,25 @@ export async function handleHookRecord(request: Request, env: Env): Promise<Resp
   if (hook instanceof Response) return hook;
   if (!hook.main) return hookJson({ recorded: false, reason: "off" });
   if (hook.stateful) return hookJson({ recorded: false, reason: "stateful" });
+  if (hook.turn.codeOnly) return hookJson({ recorded: false, reason: "filtered" });
   const { raw } = hook.input;
   const reply = object(raw.reply) ? raw.reply : null;
   const ok = raw.success !== false && reply !== null;
   const exchange = await exchangeFor(request, hook);
   exchange.httpStatus = Number.isInteger(raw.http_status) ? raw.http_status : ok ? 200 : 502;
   exchange.model = optionalText(raw.upstream_model) || hook.input.model;
-  const out = new OutputCollector(hook.input.protocol, Boolean(hook.coding));
+  const out = new OutputCollector(hook.input.protocol, hook.filterCode);
   try {
     if (reply) out.json(reply);
     out.finish();
   } catch { out.failed = true; }
   settleOutput(exchange, out, Boolean(hook.coding), ok, false);
-  try { await recordExchange(env, exchange, Boolean(hook.coding)); }
-  catch {
+  try {
+    const recorded = await recordExchange(env, exchange, hook.filterCode);
+    if (!recorded) {
+      return hookJson({ recorded: false, reason: "filtered" });
+    }
+  } catch {
     console.error("hook exchange recording failed", { identity: hook.identity.slug, id: exchange.id });
     return Response.json({ recorded: false, reason: "unavailable" }, { status: 503, headers: { "cache-control": "no-store" } });
   }

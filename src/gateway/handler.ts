@@ -13,7 +13,7 @@ import type { Env } from "../types";
 import { newId } from "../utils/ids";
 import { nowIso } from "../utils/time";
 import { cleanMessageText } from "../utils/sanitize";
-import { codingClient, codingSpeech, recallWords, stripCodeBlocks } from "./coding";
+import { codingClient, codingSpeech, recallWords } from "./coding";
 import { assistantNameOf, findIdentity, identityNamespace, identityReadNamespaces, isMainModel, loadConfig, type GatewayConfig, type Identity, type Protocol } from "./config";
 import { classifyTurn, hasServerState, inputItems, recentHumanTexts, validateBody, visibleText, type Body, type Turn } from "./protocol";
 import { RequestContractError } from "./request";
@@ -211,17 +211,21 @@ export async function recallPatch(
   return assembled.text;
 }
 /**
- * A coding step that only worked on code leaves nothing to keep. Finished, it adds no rows and only
+ * A filtered work step with nothing to keep adds no rows when complete and only
  * closes an earlier failed try of the same request; failed or cut off, it is written at once instead
  * of queued, so that a quick retry finds the row to close.
  */
-export async function recordExchange(env: Env, exchange: GatewayExchange, coding: boolean): Promise<void> {
-  if (coding && exchange.kind !== "human" && !cleanMessageText(exchange.assistantText)) {
-    if (exchange.completion === "complete") await settleExchange(env, exchange);
-    else await persistExchange(env, exchange);
-    return;
+export async function recordExchange(env: Env, exchange: GatewayExchange, filterCode: boolean): Promise<boolean> {
+  if (filterCode && exchange.kind !== "human" && !exchange.assistantText) {
+    if (exchange.completion === "complete") {
+      await settleExchange(env, exchange);
+      return false;
+    }
+    await persistExchange(env, exchange);
+  } else {
+    await dispatchExchange(env, exchange);
   }
-  await dispatchExchange(env, exchange);
+  return true;
 }
 
 export interface RecallOutcome { memory: string; patch: string; remember: string }
@@ -248,10 +252,10 @@ export async function rememberAndRecall(env: Env, ctx: ExecutionContext, identit
   }
   if (turn.kind === "human" && turn.text) {
     try {
-      // A coding agent's code is not words to search memories with, in this turn or the ones before.
+      const filterCode = identity.codingFilter !== false;
       const prior = recentHumanTexts(body, protocol).slice(0, -1).slice(-3)
-        .map(text => coding ? recallWords(text) : text).filter(Boolean);
-      patch = await recallPatch(env, identity, coding ? recallWords(turn.text) : turn.text, ctx, prior, {
+        .map(text => filterCode ? recallWords(text) : text).filter(Boolean);
+      patch = await recallPatch(env, identity, filterCode ? recallWords(turn.text) : turn.text, ctx, prior, {
         excludeMessageIds: exchange ? [exchange.userId] : [],
         recallId,
         // A quote still present in this request's history is visible; recalling it
@@ -319,10 +323,9 @@ export async function handleGateway(request: Request, env: Env, ctx: ExecutionCo
   if (protocol === "responses" && main && hasServerState(body, protocol)) {
     return gatewayError(protocol, "Request-only memory requires stateless Responses input: send full history without previous_response_id, conversation or item_reference; or use a model outside the main list.", 400);
   }
-  // Coding agents keep memory of what was said, not of the code (see coding.ts).
-  const coding = main && identity.codingFilter !== false ? codingClient(request.headers, body) : null;
-  const classified = classifyTurn(body, protocol, request.headers.get("x-aelios-purpose") === "auxiliary");
-  const turn = coding && classified.text ? { ...classified, text: stripCodeBlocks(classified.text) } : classified;
+  const filterCode = main && identity.codingFilter !== false;
+  const coding = filterCode ? codingClient(request.headers, body) : null;
+  const turn = classifyTurn(body, protocol, { auxiliary: request.headers.get("x-aelios-purpose") === "auxiliary", filterCode });
   let prepared: PreparedRequest;
   try { prepared = prepareGatewayRequest(env, config, identity, protocol, request, body); }
   catch (error) {
@@ -331,7 +334,7 @@ export async function handleGateway(request: Request, env: Env, ctx: ExecutionCo
   }
   if (prepared.removed.length) console.log("gateway request normalized", { protocol, removed: prepared.removed });
   const recallId = newId("rcl");
-  const exchange = main ? await prepareExchange(request, body, identity, protocol, turn, auth.profile.source) : null;
+  const exchange = main && !turn.codeOnly ? await prepareExchange(request, body, identity, protocol, turn, auth.profile.source) : null;
   const { memory: memoryStatus, patch, remember: rememberStatus } = main
     ? await rememberAndRecall(env, ctx, identity, protocol, body, turn, exchange, coding, recallId)
     : { memory: "off", patch: "", remember: "none" };
@@ -355,19 +358,19 @@ export async function handleGateway(request: Request, env: Env, ctx: ExecutionCo
     exchange.provider = headers.get("x-aelios-provider")!;
     if (!response.body) {
       exchange.completion = "failed";
-      ctx.waitUntil(recordExchange(env, exchange, Boolean(coding)).catch(() => console.error("gateway exchange recording failed")));
+      ctx.waitUntil(recordExchange(env, exchange, filterCode).catch(() => console.error("gateway exchange recording failed")));
       return response;
     }
     return observeResponse(response, protocol, ctx, async (out, interrupted) => {
       settleOutput(exchange, out, Boolean(coding), upstream.ok, interrupted);
-      await recordExchange(env, exchange, Boolean(coding));
-    }, Boolean(coding));
+      await recordExchange(env, exchange, filterCode);
+    }, filterCode);
   } catch (error) {
     console.error("gateway upstream error", error);
     if (exchange) {
       exchange.completion = "failed";
       exchange.httpStatus = 502;
-      ctx.waitUntil(recordExchange(env, exchange, Boolean(coding)).catch(() => console.error("gateway exchange recording failed")));
+      ctx.waitUntil(recordExchange(env, exchange, filterCode).catch(() => console.error("gateway exchange recording failed")));
     }
     return gatewayError(protocol, `Upstream request failed: ${error instanceof Error ? error.message : String(error)}`,
       error instanceof UpstreamRouteError || error instanceof RequestContractError ? error.status : 502);
