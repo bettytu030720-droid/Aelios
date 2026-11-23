@@ -32,7 +32,7 @@
 | `AELIOS_UPDATE_DEPLOY_HOOK` | **Secret** | 可选。在同一 Worker 的 **Settings → Builds → Deploy Hooks** 创建生产 `main` 的链接，用于 Fork 已同步时重新触发构建 |
 | `AELIOS_UPDATE_REPO` | Variable | 可选。当构建拿不到 Git remote 时填写 `owner/repo`，与 Workers Builds 连接的 Fork 一致 |
 
-构建会自动记录提交 SHA 和仓库，后台用主钥匙启用更新。令牌和 Hook 由 Worker 读取。同步遇到冲突时，在 GitHub 处理后再重试。
+构建会自动记录提交 SHA 和仓库，后台用主钥匙启用更新。令牌和 Hook 由 Worker 读取。同步涉及 `.github/workflows/` 的提交时，GitHub 可能要求 **Workflows: Read and write**，也可以先在 GitHub 同步这些提交。遇到分支冲突时，在 GitHub 处理后再重试。
 
 ## 2. 新部署配置流程
 

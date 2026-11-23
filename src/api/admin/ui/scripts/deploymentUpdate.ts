@@ -12,17 +12,20 @@ export const ADMIN_SCRIPT_DEPLOYMENT_UPDATE = `    deploymentUpdate: { state: 'o
         (this.deploymentUpdateBusy() || ['available', 'failed'].includes(this.deploymentUpdate.state));
     },
     deploymentUpdateLabel() {
+      if (this.deploymentUpdate.reason === 'awaiting_live_commit') return this.L('发布中', 'Deploying');
       if (this.deploymentUpdateBusy()) return this.L('更新中', 'Updating');
-      return this.deploymentUpdate.state === 'failed' ? this.L('重试更新', 'Retry update') : this.L('更新', 'Update');
+      return this.deploymentUpdate.state === 'failed' ? this.L('重试', 'Retry') : this.L('更新', 'Update');
     },
     deploymentUpdateHint() {
       const reason = this.deploymentUpdate.reason;
       if (reason === 'merge_conflict') return this.L('Fork 有合并冲突，请在 GitHub 处理后重试。', 'Resolve the fork conflict on GitHub, then retry.');
       if (reason === 'fork_required') return this.L('请配置连接到 Workers Builds 的 Aelios fork。', 'Configure the Aelios fork connected to Workers Builds.');
       if (reason === 'github_permission') return this.L('请检查更新专用 GitHub Token 的权限。', 'Check the update token’s GitHub permissions.');
+      if (reason === 'sync_rejected') return this.L('GitHub 拒绝了同步。请检查 Fork 分支和令牌权限。', 'GitHub rejected the sync. Check the fork branch and token permissions.');
       if (reason === 'deploy_hook_required' || reason === 'deploy_hook_failed') return this.L('请检查生产分支的 Cloudflare Deploy Hook。', 'Check the Cloudflare Deploy Hook for the production branch.');
       if (reason === 'build_failed') return this.L('Cloudflare 构建失败，可以查看日志或重试。', 'The Cloudflare build failed. View its logs or retry.');
       if (reason === 'build_timeout') return this.L('暂未确认新版本上线，请查看 Cloudflare 构建记录。', 'The new deployment hasn’t been confirmed. Check Cloudflare build history.');
+      if (reason === 'awaiting_live_commit') return this.L('Cloudflare 构建已通过，等待 Worker 报出新提交。', 'Cloudflare built successfully. Waiting for the Worker to serve the new commit.');
       if (this.deploymentUpdate.state === 'failed') return this.L('更新未完成，请重试。', 'The update didn’t finish. Try again.');
       if (this.deploymentUpdate.state === 'starting') return this.L('正在同步部署分支', 'Syncing the deployment branch');
       if (this.deploymentUpdate.state === 'deploying') return this.L('等待 Cloudflare 构建和发布', 'Waiting for Cloudflare to build and deploy');
@@ -59,6 +62,9 @@ export const ADMIN_SCRIPT_DEPLOYMENT_UPDATE = `    deploymentUpdate: { state: 'o
         if (result.state !== 'unavailable' || !wasBusy) this.deploymentUpdate = result;
         if (wasBusy && result.state === 'current') {
           this.notify(this.L('Worker 已上线最新提交', 'The Worker is up to date'));
+        }
+        if (wasBusy && result.state === 'off') {
+          this.notify(this.L('暂时无法确认线上版本，请查看 Cloudflare 构建记录。', 'The live version could not be confirmed. Check Cloudflare build history.'));
         }
         if ((wasBusy || start) && result.state === 'failed') this.notify(this.deploymentUpdateHint());
       } catch (error) {

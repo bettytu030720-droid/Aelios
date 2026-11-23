@@ -69,6 +69,7 @@ async function github(config: Settings, path: string, body?: { branch: string })
   });
   if (!response.ok) {
     if (body && response.status === 409) throw new UpdateFailure("merge_conflict");
+    if (body && response.status === 422) throw new UpdateFailure("sync_rejected");
     if ([401, 403].includes(response.status) && response.headers.get("x-ratelimit-remaining") !== "0") {
       throw new UpdateFailure("github_permission");
     }
@@ -143,7 +144,8 @@ async function attemptStatus(config: Settings, attempt: Attempt | null): Promise
     return { state: "failed", target, buildUrl, reason: "build_failed" };
   }
   if (elapsed >= BUILD_TIMEOUT) return { state: "failed", target, buildUrl, reason: "build_timeout" };
-  return { state: "deploying", target, buildUrl };
+  return { state: "deploying", target, buildUrl,
+    ...(fromThisBuild && build?.status === "completed" && build.conclusion === "success" ? { reason: "awaiting_live_commit" } : {}) };
 }
 
 async function triggerBuild(config: Settings): Promise<void> {

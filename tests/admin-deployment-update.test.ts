@@ -119,7 +119,9 @@ test("one sync is claimed across concurrent clicks and only a running commit con
   assert.equal(calls.filter(call => call.endsWith("/merge-upstream")).length, 1);
   assert.equal(calls.some(call => call.includes("/deploy_hooks/")), false);
   mock.build = { status: "completed", conclusion: "success", completed_at: new Date().toISOString() };
-  assert.equal((await request()).body.state, "deploying");
+  const deploying = (await request()).body;
+  assert.equal(deploying.state, "deploying");
+  assert.equal(deploying.reason, "awaiting_live_commit");
   env.AELIOS_BUILD_COMMIT = latest;
   assert.equal((await request()).body.state, "current");
 });
@@ -152,6 +154,8 @@ test("the updater rejects unrelated repos and a sync conflict does not deploy", 
   mock.isFork = true;
   mock.syncStatus = 409;
   assert.equal((await request("POST")).body.reason, "merge_conflict");
+  mock.syncStatus = 422;
+  assert.equal((await request("POST")).body.reason, "sync_rejected");
   assert.equal(calls.some(call => call.includes("/deploy_hooks/")), false);
 });
 
@@ -174,7 +178,8 @@ test("the header offers an update only when needed and polls until the Worker re
     window: { setTimeout(next: () => Promise<void>) { timers.set(1, next); return 1; }, clearTimeout(id: number) { timers.delete(id); } }
   });
   app.notify = () => {};
-  const states = [{ state: "current" }, { state: "available" }, { state: "deploying" }, { state: "current" }];
+  const states = [{ state: "current" }, { state: "available" }, { state: "deploying" },
+    { state: "deploying", reason: "awaiting_live_commit" }, { state: "current" }];
   const methods: string[] = [];
   app.request = async (path: string, init: RequestInit) => {
     assert.equal(path, "/api/admin/update");
@@ -189,10 +194,15 @@ test("the header offers an update only when needed and polls until the Worker re
   assert.equal(app.deploymentUpdateVisible(), true);
   await app.loadDeploymentUpdate(true);
   assert.equal(app.deploymentUpdateBusy(), true);
+  assert.equal(app.deploymentUpdateLabel(), "更新中");
   const nextPoll = timers.get(1);
   assert.ok(nextPoll);
   await nextPoll();
+  assert.equal(app.deploymentUpdateLabel(), "发布中");
+  const finalPoll = timers.get(1);
+  assert.ok(finalPoll);
+  await finalPoll();
   assert.equal(app.deploymentUpdateVisible(), false);
   assert.equal(timers.size, 0);
-  assert.deepEqual(methods, ["GET", "GET", "POST", "GET"]);
+  assert.deepEqual(methods, ["GET", "GET", "POST", "GET", "GET"]);
 });

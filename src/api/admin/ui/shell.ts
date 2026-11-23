@@ -95,7 +95,7 @@ export const ADMIN_BODY_START = `<body>
   <main class="main">
     <header class="topbar" :class="{ 'has-deployment-update': deploymentUpdateVisible() }">
       <button type="button" @click="navOpen = true" class="topbar-mobile btn btn-icon relative" :aria-label="L('打开菜单', 'Open menu')">${I.menu}<span x-show="pendingCount" class="badge" x-text="pendingCount"></span></button>
-      <div class="topbar-mobile brand min-w-0 flex-1"><span class="logo" aria-hidden="true"></span><span class="truncate">Aelios</span></div>
+      <div class="topbar-mobile brand min-w-0 flex-1"><span class="logo" aria-hidden="true"></span><span class="topbar-brand-name truncate">Aelios</span></div>
       <button type="button" @click="reloadAll()" class="topbar-mobile btn btn-icon" :aria-label="L('刷新', 'Refresh')">${I.refresh}</button>
       <div x-show="deploymentUpdateVisible()" class="deployment-update">
         <button type="button" class="btn deployment-update-button" :class="{ 'is-retry': deploymentUpdate.state === 'failed' }"

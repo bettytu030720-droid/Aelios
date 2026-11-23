@@ -374,10 +374,14 @@ function ensurePlacement() {
 }
 
 ensureVisibleVars();
-const origin = process.env.WORKERS_CI === "1"
-  ? spawnSync("git", ["remote", "get-url", "origin"], { cwd: root, encoding: "utf8" }).stdout ?? ""
-  : "";
-const build = workersBuildSource(process.env, origin, wranglerToml.match(/^name\s*=\s*"([^"]+)"/m)?.[1] ?? "");
+const git = (...args) => spawnSync("git", args, { cwd: root, encoding: "utf8" }).stdout?.trim() ?? "";
+const workersBuild = process.env.WORKERS_CI === "1";
+const origin = workersBuild ? git("remote", "get-url", "origin") : "";
+// A build without push branch metadata must still match a main ref in the checkout.
+const mainRefs = workersBuild && !process.env.WORKERS_CI_BRANCH?.trim()
+  ? git("show-ref", "--hash", "refs/heads/main", "refs/remotes/origin/main").split("\n")
+  : [];
+const build = workersBuildSource(process.env, origin, wranglerToml.match(/^name\s*=\s*"([^"]+)"/m)?.[1] ?? "", mainRefs);
 upsertVarFromEnvironment("AELIOS_BUILD_COMMIT", build.commit);
 upsertVarFromEnvironment("AELIOS_BUILD_REPO", build.repo);
 upsertVarFromEnvironment("AELIOS_BUILD_WORKER", build.workerName);

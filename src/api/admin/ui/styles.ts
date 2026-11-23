@@ -164,6 +164,12 @@ export const ADMIN_STYLES = `<style>
   .deployment-update-button .i { width: 15px; height: 15px; }
   .deployment-update-spin { animation: deployment-update-spin 1s linear infinite; }
   .deployment-update .deployment-build-link { width: 44px; padding: 0; }
+  @media (max-width: 359px) {
+    .topbar.has-deployment-update { gap: 5px; padding-inline: 8px; }
+    .topbar.has-deployment-update .brand { gap: 0; padding: 0; min-width: 32px; }
+    .topbar.has-deployment-update .topbar-brand-name { display: none; }
+    .deployment-update .deployment-update-button { gap: 5px; padding-inline: 9px; }
+  }
   @keyframes deployment-update-spin { to { transform: rotate(360deg); } }
   @media (min-width: 768px) {
     .deployment-update .deployment-update-button, .deployment-update .deployment-build-link { min-height: 34px; }

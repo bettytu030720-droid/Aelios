@@ -1,6 +1,8 @@
-export function workersBuildSource(env, remote, workerName) {
+export function workersBuildSource(env, remote, workerName, mainRefs = []) {
   const commit = env.WORKERS_CI_COMMIT_SHA?.trim().toLowerCase() ?? "";
-  if (env.WORKERS_CI !== "1" || env.WORKERS_CI_BRANCH !== "main" || !/^[0-9a-f]{40}$/.test(commit)) {
+  const branch = env.WORKERS_CI_BRANCH?.trim();
+  const isMain = branch ? branch === "main" : mainRefs.includes(commit);
+  if (env.WORKERS_CI !== "1" || !isMain || !/^[0-9a-f]{40}$/.test(commit)) {
     return { commit: "", repo: "", workerName: "" };
   }
   let path = "";
