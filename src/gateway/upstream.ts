@@ -1,6 +1,6 @@
 import type { Env } from "../types";
 import { GATEWAY_HOST_RE, gatewayInAddress, identityNamespace, isMainModel, PATHS, stripAddress, type GatewayConfig, type Identity, type Protocol } from "./config";
-import { appendMemory, applyThinkingPolicy, PROTECTED_TOOL_FIELDS, rejectedFieldNames, sanitizeCacheControl, STRIPPABLE_TOOL_FIELDS, stripToolField, type Body } from "./protocol";
+import { appendMemory, applyThinkingPolicy, PROTECTED_TOOL_FIELDS, rejectedFieldNames, sanitizeCacheControl, STRIPPABLE_TOOL_FIELDS, stripToolField, THINKING_BINDING_BETA, type Body, type ThinkingFallback } from "./protocol";
 import { normalizeRequest, validateRequest } from "./request";
 import { gptRecallPlacement, placeGptRecall } from "./gpt-recall";
 import { MODEL_PREFIX, RESPONSES_URL } from "../chatgpt/client";
@@ -171,12 +171,6 @@ export function nativeAnthropic(route: UpstreamRoute): boolean {
   return route.auth === "cf-aig" && /\/anthropic\/v1\/messages$/.test(route.url);
 }
 
-/** Known Messages routes that enforce prefix bindings and accept Anthropic's mismatch controls. */
-export function supportsThinkingBinding(route: UpstreamRoute): boolean {
-  return nativeAnthropic(route) || route.auth === "cf-aig" && /\/openrouter\/v1\/messages$/.test(route.url) &&
-    /^anthropic\/claude-/i.test(route.model);
-}
-
 /**
  * Whether the REST API turned the call down for a reason the provider endpoint does not have, so the same
  * request should go there instead: a model the catalog does not know (404 "Model not found"; or 400 "No such model",
@@ -213,8 +207,8 @@ export interface PreparedRequest { route: UpstreamRoute; headers: Headers; body:
   requestedModel: string;
   /** Authenticated identity scope for ChatGPT cache affinity; no caller credentials are included. */
   chatgptScope?: string;
-  /** Set when auto guessed adaptive thinking; holds the client's own anthropic-beta for the fallback. */
-  guessedThinking?: { beta: string | null };
+  /** Client thinking and beta header before the automatic binding policy. */
+  thinkingFallback?: ThinkingFallback;
 }
 export function prepareGatewayRequest(env: Env, config: GatewayConfig, identity: Identity,
   protocol: Protocol, original: Request, body: Body): PreparedRequest {
@@ -239,10 +233,11 @@ export function prepareGatewayRequest(env: Env, config: GatewayConfig, identity:
   const normalized = normalizeRequest(body, protocol);
   const out = normalized.body;
   out.model = route.model;
-  const clientBeta = headers.get("anthropic-beta");
-  // The thinking-binding policy is Anthropic-line plumbing; a ChatGPT answer has no Anthropic signature to bind.
-  const guessed = !chatgpt && isMainModel(identity, body.model) &&
-    applyThinkingPolicy(out, identity, protocol, headers, supportsThinkingBinding(route));
+  const autoBinding = !refusedThinkingBinding.has(thinkingBindingKey(route)) &&
+    (nativeAnthropic(route) || /claude/i.test(route.model) || /claude/i.test(body.model));
+  const thinkingFallback = !chatgpt && isMainModel(identity, body.model)
+    ? applyThinkingPolicy(out, identity, protocol, headers, autoBinding)
+    : undefined;
   validateRequest(out, protocol, headers);
   sanitizeCacheControl(out, protocol);
   validateRequest(out, protocol, headers);
@@ -250,8 +245,14 @@ export function prepareGatewayRequest(env: Env, config: GatewayConfig, identity:
   if (chatgpt) toChatGptRequest(out, protocol, route.model);
   return { route, headers, body: out, removed: normalized.removed, requestedModel: body.model,
     ...(chatgpt ? { chatgptScope: JSON.stringify([identityNamespace(identity), identity.slug]) } : {}),
-    ...(guessed ? { guessedThinking: { beta: clientBeta } } : {}) };
+    ...(thinkingFallback ? { thinkingFallback } : {}) };
 }
+// Isolate-scope learned refusal: a Claude line that does not take Anthropic's thinking-binding
+// controls (Vertex, some relays) answers 400 once; later requests on that route and model are sent
+// with the client's own thinking settings instead of failing first and retrying every time.
+export const refusedThinkingBinding = new Set<string>();
+const thinkingBindingKey = (route: UpstreamRoute) => `${route.url}\n${route.model}`;
+
 // Isolate-scope learned capability: Vertex-backed and relay lines answer 400
 // "unrecognizedProperty=<field>" to tool-definition fields they do not know
 // (cache_control, eager_input_streaming). Once per isolate per route, the refused
@@ -338,16 +339,18 @@ export async function callGatewayUpstream(env: Env, protocol: Protocol, original
     console.log("gateway learned upstream rejects tool fields", { url: route.url, fields: refused });
     response = await send();
   }
-  // Signed history made auto guess the model thinks by default. A model that refuses the guess
-  // (haiku-4-5 has no adaptive, e.g. after switching models mid-chat) gets what the client sent.
-  if (response.status === 400 && prepared.guessedThinking) {
+  // Some Claude relays reject the controls, and a model switch can make guessed adaptive thinking invalid.
+  if (response.status === 400 && prepared.thinkingFallback) {
+    const { thinking, beta } = prepared.thinkingFallback;
     const detail = await response.clone().text().catch(() => "");
-    if (/thinking/i.test(detail)) {
-      delete body.thinking;
-      const { beta } = prepared.guessedThinking;
+    const refusedBinding = /\b(?:block_binding|prefix_mismatch_behavior)\b/i.test(detail) || detail.includes(THINKING_BINDING_BETA);
+    if (refusedBinding) refusedThinkingBinding.add(thinkingBindingKey(route));
+    if (refusedBinding || thinking === undefined && /thinking/i.test(detail)) {
+      if (thinking === undefined) delete body.thinking;
+      else body.thinking = thinking;
       if (beta) headers.set("anthropic-beta", beta);
       else headers.delete("anthropic-beta");
-      console.log("gateway upstream refused guessed thinking; resending as the client sent it", { url: route.url });
+      console.log("gateway upstream refused automatic thinking settings; retrying with client settings", { url: route.url });
       response = await send();
     }
   }

@@ -105,9 +105,9 @@ export const ADMIN_TAB_SETTINGS = `      <!-- ===== 设置 ===== -->
                           <p class="-mt-1 text-xs muted">${t("最多 8 个，共用注入预算。共享时填同一空间；迁移时写新空间、召回保留旧空间。", "Up to 8, sharing one budget. To share, use the same space; to migrate, write to the new one and keep recalling the old.")}</p>
                           <label class="block"><span class="label">${t("Claude 思考块", "Claude thinking blocks")}</span>
                             <select x-model="idn.anthropicThinking" class="field">
-                              <option value="auto" x-text="L('自动（默认）：Anthropic 与 OR Claude 丢弃失配思考，其余透传', 'Auto (default): drop mismatched thinking on Anthropic and OpenRouter Claude, pass through elsewhere')"></option>
-                              <option value="passthrough" x-text="L('原样透传（Anthropic 与 OR Claude 可能签名失配）', 'Pass through (Anthropic and OpenRouter Claude can reject mismatched signatures)')"></option>
-                              <option value="drop_block" x-text="L('总是丢弃失配思考（需 beta，Vertex 勿用）', 'Always drop mismatched thinking (needs beta; not for Vertex)')"></option>
+                              <option value="auto" x-text="L('自动（默认）：由 Claude 上游处理思考块签名失配', 'Auto (default): let the Claude upstream handle mismatched thinking')"></option>
+                              <option value="passthrough" x-text="L('原样透传（保留客户端思考设置）', 'Pass through (keep client thinking settings)')"></option>
+                              <option value="drop_block" x-text="L('强制丢弃失配思考（需上游支持 beta）', 'Always drop mismatched thinking (requires upstream beta support)')"></option>
                             </select>
                           </label>
                           <label class="block"><span class="label">${t("单次记忆字数上限", "Memory characters per turn")}</span>

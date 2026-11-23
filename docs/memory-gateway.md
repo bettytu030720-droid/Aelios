@@ -99,7 +99,7 @@ Aelios 负责身份识别、单轮记忆召回与对话记录，客户端工具�
 Aelios 单次请求只发往一个上游，不重排客户端前缀，也不主动插入提示词缓存断点，以维持各家模型的缓存命中。
 
 - **顶层 `cache_control` 兼容** 为兼容部分拒绝顶层 `cache_control` 的代理或 Vertex 线路，网关会将其转换为注入前最后一个可缓存块上的显式断点，原有断点保持不变，TTL 冲突或断点超过 4 个时提前返回 `400`。
-- **Anthropic thinking 策略** 支持 `auto`（默认）、`passthrough` 与 `drop_block`。默认 `auto` 在原生 Anthropic 线路及 OpenRouter Claude Messages 线路上遵循前缀失配处理策略，其余线路按 `passthrough` 透传。完整行为矩阵见 [docs/request-contract.md](request-contract.md)。
+- **Anthropic thinking 策略** 支持 `auto`（默认）、`passthrough` 与 `drop_block`。主模型走 Messages API 时，`auto` 对原生 Anthropic 及模型 ID 含 `claude` 的请求启用前缀失配处理，匹配忽略大小写。上游拒绝自动添加的控制参数时，网关按客户端原有的思考设置重试一次。完整行为矩阵见 [docs/request-contract.md](request-contract.md)。
 - **工具字段自适应剥离** 当某条线路返回 `400` 并提示 `unrecognizedProperty=<字段>`（常见于 Vertex 拒绝工具级 `cache_control` 或中转层拒绝 `eager_input_streaming`），网关剥离该字段重试，并在当前 isolate 按线路记住该规则。若希望首轮即预先剥离，可在「设置 → 模型与线路」填写逗号分隔的 `UPSTREAM_STRIP_TOOL_FIELDS`（工具核心字段 `name`、`description`、`input_schema`、`type` 受保护，禁止剥离）。
 - **诊断响应头** 响应附带 `x-aelios-identity`、`x-aelios-memory`、`x-aelios-provider`、`x-aelios-model` 与 `x-aelios-normalized`（已清洗的非规范字段数），实际模型与 provider 优先采用上游返回的 `cf-aig-model` / `cf-aig-provider`。
 
