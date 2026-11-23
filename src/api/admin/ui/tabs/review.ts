@@ -102,7 +102,7 @@ export const ADMIN_TAB_REVIEW = `      <!-- ===== 待审 ===== -->
                     <span class="muted" x-text="dreamCandidateSourceLabel(item.source)"></span>
                     <span class="muted" x-text="fmt(item.updated_at)"></span>
                   </div>
-                  <p class="whitespace-pre-wrap text-sm leading-7" x-text="item.content"></p>
+                  <p class="whitespace-pre-wrap wrap-anywhere text-sm leading-7" x-text="item.content"></p>
                   <p x-show="item.reason" class="mt-1 text-[13px] muted" x-text="item.reason"></p>
                 </div>
                 <button type="button" x-show="item.undoable" @click="undoJudgeDecision(item)" class="btn btn-sm">${I.undo}<span x-text="judgeUndoLabel(item)"></span></button>

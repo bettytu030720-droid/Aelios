@@ -15,8 +15,8 @@ export const ADMIN_TAB_DREAM = `      <!-- ===== 夜间整理 ===== -->
         ${nightlyProgressCard()}
         ${rollingStatusPanel(t)}
 
-        <div class="grid gap-5 lg:grid-cols-[minmax(0,1fr)_360px] lg:items-start">
-          <div class="flex flex-col gap-5">
+        <div class="grid grid-cols-1 gap-5 lg:grid-cols-[minmax(0,1fr)_360px] lg:items-start">
+          <div class="flex min-w-0 flex-col gap-5">
             <section class="panel">
               <div class="panel-head">
                 <h2 class="h2">${t("每天的对话量", "Chats per day")}</h2>
