@@ -13,6 +13,8 @@ import { canonical, inputItems, visibleText, type Body, type Turn } from "./prot
 const TEXT_LIMIT = 8000;
 /** A streamed tool call's arguments are held up to this much (8,000 characters even when \u-escaped). */
 const TOOL_ARGS_LIMIT = 64000;
+const RESPONSE_TOOL_TYPES = new Set(["function_call", "custom_tool_call"]);
+
 export interface GatewayExchange {
   type: "gateway_exchange";
   id: string;
@@ -201,7 +203,7 @@ export class OutputCollector {
   /** The output outgrew what the gateway buffers, so part of it was never seen. */
   overflow = false;
   hasRecordedTool = false;
-  /** Filtered work calls and the speech tool calls that can stand on their own. */
+  /** Filtered work calls and the speech kept when a reply contains them. */
   workCalls = 0;
   spoken = "";
   spokenTruncated = false;
@@ -225,17 +227,19 @@ export class OutputCollector {
     if (this.text.length + text.length > TEXT_LIMIT) this.truncated = true;
     this.text = (this.text + text).slice(0, TEXT_LIMIT);
   }
+  private appendSpoken(text: string): void {
+    if (!text) return;
+    const spoken = this.spoken ? `${this.spoken}\n${text}` : text;
+    if (spoken.length > TEXT_LIMIT) this.spokenTruncated = true;
+    this.spoken = spoken.slice(0, TEXT_LIMIT);
+  }
   private appendTool(name: string, input: unknown, clipped = false): void {
     if (this.filterCode && !isSpeechTool(String(name || ""))) { this.workCalls += 1; return; }
     const line = formatToolCall(name, this.filterCode ? replaceCodeIn(coerceToolInput(input)) : input);
     if (!line) return;
     this.hasRecordedTool = true;
     if (clipped) { this.truncated = true; if (this.filterCode) this.spokenTruncated = true; }
-    if (this.filterCode) {
-      const spoken = this.spoken ? `${this.spoken}\n${line}` : line;
-      if (spoken.length > TEXT_LIMIT) this.spokenTruncated = true;
-      this.spoken = spoken.slice(0, TEXT_LIMIT);
-    }
+    if (this.filterCode) this.appendSpoken(line);
     this.filter?.end();
     if (this.text && !this.text.endsWith("\n")) this.keep("\n");
     this.keep(`${line}\n`);
@@ -274,10 +278,19 @@ export class OutputCollector {
       }
       this.complete = !!data.stop_reason && !["max_tokens", "refusal"].includes(data.stop_reason);
     } else {
-      for (const item of data.output || []) {
+      const items: unknown[] = Array.isArray(data.output) ? data.output : [];
+      const lastWork = this.filterCode ? items.reduce<number>((last, item, index) =>
+        object(item) && RESPONSE_TOOL_TYPES.has(item.type) && !isSpeechTool(String(item.name || "")) ? index : last, -1) : -1;
+      for (const [index, item] of items.entries()) {
         if (!object(item)) continue;
-        if (item.type === "message" && item.role === "assistant") this.append(visibleText(item.content));
-        if (item.type === "function_call" || item.type === "custom_tool_call") {
+        if (item.type === "message" && item.role === "assistant") {
+          const text = visibleText(item.content);
+          this.append(text);
+          if (lastWork >= 0 && (item.phase === "final_answer" || (item.phase == null && index > lastWork))) {
+            this.appendSpoken(stripCodeContent(cleanMessageText(text)));
+          }
+        }
+        if (RESPONSE_TOOL_TYPES.has(item.type)) {
           this.appendTool(item.name, item.arguments ?? item.input);
         }
       }
@@ -333,8 +346,7 @@ export class OutputCollector {
       if (data.type === "response.function_call_arguments.delta" && typeof data.delta === "string") {
         this.notePending(typeof data.output_index === "number" ? data.output_index : 0, "", data.delta);
       }
-      if (data.type === "response.output_item.added" && object(data.item) &&
-          (data.item.type === "function_call" || data.item.type === "custom_tool_call")) {
+      if (data.type === "response.output_item.added" && object(data.item) && RESPONSE_TOOL_TYPES.has(data.item.type)) {
         this.notePending(typeof data.output_index === "number" ? data.output_index : 0, data.item.name || "tool",
           typeof data.item.arguments === "string" ? data.item.arguments : "");
       }

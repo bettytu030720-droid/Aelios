@@ -430,6 +430,35 @@ test("hook capture filters Responses work tools without recognizing the client",
   assert.equal(count("chat_archive WHERE content = ?", queue[0].assistantText), 1);
 });
 
+test("hook capture keeps Codex final answers alongside work calls", async () => {
+  env.CHAT_ARCHIVE_ENABLED = "true";
+  const turn = { protocol: "responses", model: "partner", agent: "codex",
+    body: { input: [{ type: "function_call_output", call_id: "tool-fixture", output: "private tool result" }] } };
+  const message = (text: string, phase?: string) => ({
+    type: "message", role: "assistant", ...(phase ? { phase } : {}), content: [{ type: "output_text", text }]
+  });
+  const record = (output: unknown[], session: string) =>
+    hook("/v1/hook/record", { ...turn, session, reply: { status: "completed", output } });
+  const work = { type: "function_call", name: "exec_command", arguments: "{\"cmd\":\"private command\"}" };
+  const progress = message("再跑一遍测试。", "commentary");
+  const { json: skipped } = await record([work, progress], "progress");
+  assert.deepEqual(skipped, { recorded: false, reason: "filtered" });
+  assert.equal(queue.length, 0);
+
+  const answer = "改好了。\n```sh\nprintf fixture\n```\n试试看。";
+  const withPhase = await record([message(answer, "final_answer"), work, progress], "marked");
+  const withoutPhase = await record([message("我先看看。"), work, message(answer)], "legacy");
+  assert.equal(withPhase.json.completion, "complete");
+  assert.equal(withoutPhase.json.completion, "complete");
+  assert.equal(queue.length, 2);
+  for (const exchange of queue) {
+    assert.equal(exchange.assistantText, "改好了。\n[code]\n试试看。");
+    await persistExchange(env, exchange);
+  }
+  assert.equal(count("messages WHERE role = 'assistant'"), 2);
+  assert.equal(count("chat_archive WHERE content = ?", queue[0].assistantText), 2);
+});
+
 test("code-only input skips hook recall and recording before memory work", async () => {
   const artifacts = ["```js\nconst fixture = 1;\n```", "#!/bin/sh\nprintf fixture", "set -euo pipefail\nprintf fixture",
     "const fixture = 1;\nconsole.log(fixture);", "def fixture():\n    return 1",

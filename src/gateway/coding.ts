@@ -3,7 +3,7 @@ import type { Body } from "./protocol";
 
 /**
  * Automatic capture replaces code blocks in speech and drops work tool calls for every client.
- * Known coding clients also omit preambles on work-tool steps, keeping only speech tool calls.
+ * Known coding clients omit preambles on work-tool steps, keeping speech tool calls and final answers.
  * Speech tool names consist of the words below, and their text goes through the same code filter.
  * Recall uses the filtered human text. An assistant can opt out with `codingFilter: false`.
  *
