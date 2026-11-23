@@ -102,7 +102,9 @@ GitHub Fork 不会自动同步上游新提交。
 
 ### 在后台一键更新
 
-用 Workers Builds 把 Aelios 的直接 Fork 连到生产 `main` 分支，在 Worker 上配置[更新凭据](SECRETS.md#后台一键更新)，再用这条构建链路部署一次。之后用主钥匙登录 `/admin`，线上提交落后于上游时，右上角会出现「更新」。点一下会同步 Fork，由 Workers Builds 执行 `npm run deploy`。按钮会显示更新状态，等新 Worker 上线再消失。Fork 已同步时，可以通过生产分支的 Deploy Hook 重试部署。
+用 Workers Builds 部署 Aelios 的直接 Fork，选生产 `main` 分支。用主钥匙登录该 Worker 的 `/admin`，有更新时先点右上角「连接 GitHub」。在 GitHub 创建私有更新 App，选 **Only select repositories**，只安装到自己的 Aelios Fork。安装授权做一次即可，Aelios 会按需从 GitHub 获取有效期一小时的新令牌。
+
+点「更新」就会同步 Fork，由 Workers Builds 执行 `npm run deploy`。按钮会显示更新状态，等新 Worker 上线再消失。部署重试和已有令牌的用法见[更新设置](SECRETS.md#后台一键更新)。
 
 ### 用按钮装的怎么办
 

@@ -1,6 +1,7 @@
 export const ADMIN_SCRIPT_SETTINGS = String.raw`    async init() {
       this.applyLang();
       this.applyTheme();
+      this.deploymentGitHubResult();
       this.icons();
       await this.loadMemoryIdentities();
       await this.reloadAll();

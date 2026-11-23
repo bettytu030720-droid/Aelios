@@ -160,7 +160,7 @@ export const ADMIN_STYLES = `<style>
   .deployment-update .deployment-update-button:hover:not(:disabled) { border-color: var(--vline); box-shadow: var(--glow); }
   .deployment-update .deployment-update-button:disabled { opacity: .82; }
   .deployment-update .deployment-update-button.is-retry { border-color: var(--aurb); background: var(--panel); }
-  .deployment-update-button span:first-child, .deployment-update-spin { display: inline-flex; }
+  .deployment-update-button > span[aria-hidden] { display: inline-flex; }
   .deployment-update-button .i { width: 15px; height: 15px; }
   .deployment-update-spin { animation: deployment-update-spin 1s linear infinite; }
   .deployment-update .deployment-build-link { width: 44px; padding: 0; }

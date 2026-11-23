@@ -6,6 +6,10 @@
 // Endpoints come from https://auth.openai.com/.well-known/openid-configuration.
 // No client secret: the issued client_id is public and every exchange is PKCE.
 
+import { b64url, fromB64url } from "../utils/base64";
+
+export { b64url, fromB64url, randomToken } from "../utils/base64";
+
 export const ISSUER = "https://auth.openai.com";
 export const AUTHORIZE_URL = `${ISSUER}/api/accounts/authorize`;
 export const TOKEN_URL = `${ISSUER}/api/accounts/oauth/token`;
@@ -36,19 +40,6 @@ export class OAuthError extends Error {
   }
 }
 
-export function b64url(bytes: Uint8Array): string {
-  let text = "";
-  for (const byte of bytes) text += String.fromCharCode(byte);
-  return btoa(text).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "");
-}
-export function fromB64url(text: string): Uint8Array {
-  const padded = text.replace(/-/g, "+").replace(/_/g, "/").padEnd(Math.ceil(text.length / 4) * 4, "=");
-  const raw = atob(padded);
-  return Uint8Array.from(raw, ch => ch.charCodeAt(0));
-}
-export function randomToken(bytes = 32): string {
-  return b64url(crypto.getRandomValues(new Uint8Array(bytes)));
-}
 export async function pkceChallenge(verifier: string): Promise<string> {
   return b64url(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier))));
 }

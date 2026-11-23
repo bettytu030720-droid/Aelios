@@ -1,4 +1,4 @@
-import { I, ICON_SPIN, navLink, t } from "./helpers";
+import { I, ICON_LINK, ICON_SPIN, navLink, t } from "./helpers";
 import {
   BRAND_APPLE_TOUCH_ICON_DATA_URI,
   BRAND_LOGO_DARK_DATA_URI,
@@ -99,9 +99,10 @@ export const ADMIN_BODY_START = `<body>
       <button type="button" @click="reloadAll()" class="topbar-mobile btn btn-icon" :aria-label="L('刷新', 'Refresh')">${I.refresh}</button>
       <div x-show="deploymentUpdateVisible()" class="deployment-update">
         <button type="button" class="btn deployment-update-button" :class="{ 'is-retry': deploymentUpdate.state === 'failed' }"
-          @click="loadDeploymentUpdate(true)" :disabled="deploymentUpdateBusy()" :aria-busy="deploymentUpdateBusy()"
+          @click="startDeploymentUpdate()" :disabled="deploymentUpdateBusy()" :aria-busy="deploymentUpdateBusy()"
           :title="deploymentUpdateHint()" :aria-label="deploymentUpdateLabel() + ' · ' + deploymentUpdateHint()">
-          <span x-show="!deploymentUpdateBusy()" aria-hidden="true">${I.upload}</span>
+          <span x-show="deploymentUpdate.state === 'connect'" aria-hidden="true">${ICON_LINK}</span>
+          <span x-show="!deploymentUpdateBusy() && deploymentUpdate.state !== 'connect'" aria-hidden="true">${I.upload}</span>
           <span x-show="deploymentUpdateBusy()" class="deployment-update-spin" aria-hidden="true">${ICON_SPIN}</span>
           <span x-text="deploymentUpdateLabel()" aria-live="polite"></span>
         </button>

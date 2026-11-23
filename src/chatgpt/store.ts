@@ -1,6 +1,7 @@
 import type { Env } from "../types";
+import { sealSecret, unsealSecret } from "../utils/sealedSecret";
 import { nowIso } from "../utils/time";
-import { b64url, fromB64url, hasPlanScope } from "./oauth";
+import { hasPlanScope } from "./oauth";
 
 export type ConnectionStatus = "disconnected" | "connected" | "plan_disabled" | "needs_login";
 
@@ -32,28 +33,15 @@ const PENDING_TTL_MS = 10 * 60_000;
 
 // Tokens never sit in D1 as plain text. The key is derived from the owner key, so there is nothing new to
 // configure; rotate that key and the stored tokens stop opening, which reads as "sign in again", not a fault.
-async function sealKey(env: Env): Promise<CryptoKey> {
-  const secret = env.CHATBOX_API_KEY;
-  if (!secret) throw new Error("CHATBOX_API_KEY is required to keep the ChatGPT sign-in");
-  const material = await crypto.subtle.importKey("raw", new TextEncoder().encode(secret), "HKDF", false, ["deriveKey"]);
-  return crypto.subtle.deriveKey({
-    name: "HKDF", hash: "SHA-256",
-    salt: new TextEncoder().encode("aelios.chatgpt-signin.v1"), info: new TextEncoder().encode("token-seal")
-  }, material, { name: "AES-GCM", length: 256 }, false, ["encrypt", "decrypt"]);
-}
+const SEAL_CONTEXT = "aelios.chatgpt-signin.v1";
+
 export async function seal(env: Env, plain: string): Promise<string> {
-  const iv = crypto.getRandomValues(new Uint8Array(12));
-  const cipher = new Uint8Array(await crypto.subtle.encrypt({ name: "AES-GCM", iv }, await sealKey(env), new TextEncoder().encode(plain)));
-  return `v1.${b64url(iv)}.${b64url(cipher)}`;
+  if (!env.CHATBOX_API_KEY) throw new Error("CHATBOX_API_KEY is required to keep the ChatGPT sign-in");
+  return sealSecret(env.CHATBOX_API_KEY, SEAL_CONTEXT, plain);
 }
 /** null when there is nothing stored or it no longer opens (the owner key changed). */
 export async function unseal(env: Env, sealed: string | null): Promise<string | null> {
-  const parts = (sealed || "").split(".");
-  if (parts.length !== 3 || parts[0] !== "v1") return null;
-  try {
-    const plain = await crypto.subtle.decrypt({ name: "AES-GCM", iv: fromB64url(parts[1]) }, await sealKey(env), fromB64url(parts[2]));
-    return new TextDecoder().decode(plain);
-  } catch { return null; }
+  return env.CHATBOX_API_KEY ? unsealSecret(env.CHATBOX_API_KEY, SEAL_CONTEXT, sealed) : null;
 }
 
 export async function loadConnection(env: Env): Promise<ConnectionRow | null> {
