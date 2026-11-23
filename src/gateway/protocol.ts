@@ -50,10 +50,10 @@ export function classifyTurn(body: Body, protocol: Protocol,
   const raw = visibleText(last.content);
   const spoken = cleanMessageText(raw);
   const text = filterCode && spoken ? stripCodeContent(spoken) : spoken;
-  if (spoken && !text) return { kind: "auxiliary", text: "", index, codeOnly: true };
   const blocks = Array.isArray(last.content) ? last.content : [];
   const tool = blocks.some(p => object(p) && p.type === "tool_result");
   if (tool && !text.trim()) return { kind: "tool", text: "", index };
+  if (spoken && !text) return { kind: "auxiliary", text: "", index, codeOnly: true };
   // Recap / system-reminder / empty envelopes: not a user utterance.
   if (!text.trim() && raw.trim()) return { kind: "auxiliary", text: "", index };
   return { kind: "human", text, index };

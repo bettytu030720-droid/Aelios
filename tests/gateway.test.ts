@@ -2030,6 +2030,22 @@ test("the gateway forwards a code-only user message without memory capture", asy
   assert.equal(count("messages"), 0);
 });
 
+test("unfenced examples leave separated conversation and one-line questions eligible for capture", async () => {
+  for (const words of ["const a = 1 和 let a = 1 有什么区别？", "let me = 'happy' 哈哈这是我今天的状态"]) {
+    assert.equal(stripCodeContent(words), words);
+  }
+  assert.equal(stripCodeContent("def fixture():\n    x = 1\n\n    return x"), "");
+  const text = "#!/bin/sh\nprintf fixture\n\nprintf 'fixture again'\n\n我先休息一会儿。";
+  const { response } = await run("/v1/chat/completions", {
+    model: "partner", messages: [{ role: "user", content: text }]
+  });
+  assert.equal(response.status, 200);
+  assert.equal(calls[0].query.messages[0].content, text);
+  assert.equal(queue.length, 1);
+  assert.equal(queue[0].kind, "human");
+  assert.equal(queue[0].userText, "[code]\n\n我先休息一会儿。");
+});
+
 test("on a milestone day the assistant hears it in the day's first few messages, and not in coding sessions", async () => {
   const today = formatDateLabel(new Date(), "Asia/Singapore");
   const daysAgo = (days: number) => new Date(Date.parse(today) - days * 86_400_000).toISOString().slice(0, 10);

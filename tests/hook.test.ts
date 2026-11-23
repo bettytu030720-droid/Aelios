@@ -450,6 +450,41 @@ test("code-only input skips hook recall and recording before memory work", async
   assert.equal(count("messages"), 0);
 });
 
+test("hook recall and capture keep the conversation after an unfenced patch", async () => {
+  env.CHAT_ARCHIVE_ENABLED = "true";
+  const words = "记得我的暗号是什么吗？";
+  precious("partner-a", "我的暗号是云朵");
+  const diff = "diff --git a/fixture b/fixture\n--- a/fixture\n+++ b/fixture\n-old\n+new";
+  const input = `${diff}\n\n@@ -10 +10 @@\n-older\n+newer\n\n${words}`;
+  const turn = { protocol: "messages", model: "partner", agent: "t3code", record: true, body: humanBody(input) };
+  const { json: recall } = await hook("/v1/hook/recall", turn);
+  assert.match(recall.patch, /我的暗号是云朵/);
+  assert.equal(count("messages WHERE role = 'user' AND content = ?", `[code]\n\n${words}`), 1);
+  const { json } = await hook("/v1/hook/record", { ...turn,
+    reply: claudeReply("const fixture = 2;\n\nconsole.log(fixture);\n\n记得。你的暗号是云朵。") });
+  assert.equal(json.recorded, true);
+  assert.equal(queue.length, 1);
+  assert.equal(queue[0].assistantText, "[code]\n\n记得。你的暗号是云朵。");
+  await persistExchange(env, queue[0]);
+  assert.equal(count("messages WHERE role = 'user'"), 1);
+  assert.equal(count("chat_archive WHERE content LIKE '%fixture%'"), 0);
+});
+
+test("a code-only note alongside a tool result still permits capturing the closing reply", async () => {
+  const [user, assistant, result] = toolBody().messages;
+  const note = { type: "text", text: "```text\nprivate fixture\n```" };
+  const body = { messages: [user, assistant, { ...result, content: [...result.content, note] }] };
+  const turn = { protocol: "messages", model: "partner", agent: "claude", body };
+  const { json: recall } = await hook("/v1/hook/recall", turn);
+  assert.equal(recall.memory, "skipped");
+  const { json } = await hook("/v1/hook/record", { ...turn, reply: claudeReply("查到了，是周五。") });
+  assert.equal(json.recorded, true);
+  assert.equal(queue.length, 1);
+  assert.equal(queue[0].kind, "tool");
+  assert.equal(queue[0].userText, "");
+  assert.equal(queue[0].assistantText, "查到了，是周五。");
+});
+
 test("the agent id is still reported, and the assistant can opt out of filtering", async () => {
   delete env.MEMORY_QUEUE;
   const said = "看看这个\n```js\nconst secret = 1;\n```";

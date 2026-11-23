@@ -147,21 +147,55 @@ export class CodeFilter {
   }
 }
 
-// Recognize standalone artifacts with a clear opening line, even without Markdown fences.
-const SCRIPT_HEADER = /^(?:#![ \t]*\/\S+|set -euo pipefail[ \t]*(?:\r?\n|$)|background job bash-[a-f0-9]{16} \(bash: )/;
-const PATCH_HEADER = /^(?:\*\*\* Begin Patch[ \t]*(?:\r?\n|$)|diff --git [^\r\n]+\r?\n|--- (?:a\/\S+|\/dev\/null)[^\r\n]*\r?\n\+\+\+ )/;
-const SOURCE_HEADER = /^(?:(?:export[ \t]+)?(?:const|let|var)[ \t]+[$A-Z_a-z][$\w]*[ \t]*=(?!=)|(?:async[ \t]+)?def[ \t]+[A-Z_a-z]\w*\([^\r\n]*\)[ \t]*:)/;
+// DSH sends background job notifications as user text, including the command and its output.
+const DSH_JOB_NOTIFICATION = /^background job bash-[a-f0-9]{16} \(bash: /;
+
+// A blank line can end an unfenced example. Continue redacting across it only if the next
+// paragraph starts with recognizable syntax for the same format.
+const UNFENCED_CODE = [
+  {
+    opening: /^(?:#![ \t]*\/\S+|set -euo pipefail[ \t]*(?:\r?\n|$))/,
+    continuation: /^(?:[A-Za-z_]\w*=(?!=)|(?:printf|echo)[ \t]+["'$-]|(?:fi|done|esac)[ \t]*(?:\r?\n|$))/
+  },
+  {
+    opening: /^(?:\*\*\* Begin Patch[ \t]*(?:\r?\n|$)|diff --git [^\r\n]+\r?\n|--- (?:a\/|\/dev\/null)[^\r\n]*\r?\n\+\+\+ )/,
+    continuation: /^(?:\*\*\* (?:End Patch|(?:Add|Update|Delete) File:)|@@(?:[ \t]|\r?\n|$)|[+-]\S)/
+  },
+  {
+    opening: /^(?:export[ \t]+)?(?:const|let|var)[ \t]+[$A-Z_a-z][$\w]*[ \t]*=[^\r\n]*;[ \t]*(?:\r?\n|$)/,
+    continuation: /^(?:(?:[$A-Z_a-z][$\w]*\.)*[$A-Z_a-z][$\w]*\([^\r\n]*\);|[{}];?)[ \t]*(?:\r?\n|$)/
+  },
+  {
+    opening: /^(?:async[ \t]+)?def[ \t]+[A-Z_a-z]\w*\([^\r\n]*\)[ \t]*:[ \t]*(?:#[^\r\n]*)?\r?\n[ \t]+\S/,
+    continuation: /^[ \t]+\S/
+  }
+];
+
+function replaceUnfencedCode(text: string): string {
+  const paragraphs = text.split(/\r?\n(?:[ \t]*\r?\n)+/);
+  const output: string[] = [];
+  let previous: typeof UNFENCED_CODE[number] | undefined;
+  for (const paragraph of paragraphs) {
+    const start = paragraph.trimStart();
+    const rule = UNFENCED_CODE.find(candidate => candidate.opening.test(start)) ??
+      (previous?.continuation.test(paragraph) ? previous : undefined);
+    if (!rule) output.push(paragraph);
+    else if (!previous) output.push("[code]");
+    previous = rule;
+  }
+  return output.join("\n\n");
+}
 
 /** Fenced code blocks and standalone code artifacts become [code]. */
 export function replaceCode(text: string): string {
   const trimmed = text.trim();
-  if (SCRIPT_HEADER.test(trimmed) || PATCH_HEADER.test(trimmed) || SOURCE_HEADER.test(trimmed)) return "[code]";
-  if (!/^[ \t]*(?:`{3}|~{3})/m.test(trimmed)) return trimmed.replace(/\n{3,}/g, "\n\n");
+  if (DSH_JOB_NOTIFICATION.test(trimmed)) return "[code]";
+  if (!/^[ \t]*(?:`{3}|~{3})/m.test(trimmed)) return replaceUnfencedCode(trimmed);
   let out = "";
   const filter = new CodeFilter(piece => { out += piece; });
   filter.push(text);
   filter.end();
-  return out.replace(/\n{3,}/g, "\n\n").trim();
+  return replaceUnfencedCode(out.trim());
 }
 
 /** Keep the text around code, and return an empty string for code alone. */
