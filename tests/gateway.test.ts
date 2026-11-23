@@ -501,6 +501,34 @@ test("Responses terminal snapshot does not duplicate deltas; broken stream stays
   broken.chunk(new TextEncoder().encode('data: {"choices":[{"index":0,"delta":{"content":"partial"}}]}\n\n'));
   broken.finish(); assert.equal(broken.complete, false);
 });
+
+test("Responses stream captures final speech alongside work calls after oversized progress", async () => {
+  const progress = "Checking the files. ".repeat(500);
+  const answer = "修好了。\n```\nprivate code\n```\n可以继续了。";
+  const message = (phase: string, text: string) => ({
+    type: "message", role: "assistant", phase, content: [{ type: "output_text", text }]
+  });
+  const work = { type: "custom_tool_call", name: "apply_patch", input: "private patch" };
+  const spoken = { type: "function_call", name: "send_message", arguments: "{\"text\":\"好了\"}" };
+  const raw = [
+    { type: "response.output_text.delta", output_index: 0, delta: progress },
+    { type: "response.output_item.added", output_index: 1, item: work },
+    { type: "response.output_text.delta", output_index: 2, delta: answer },
+    { type: "response.completed", response: {
+      status: "completed", output: [message("commentary", progress), work, message("final_answer", answer), spoken]
+    } }
+  ].map(event => `data: ${JSON.stringify(event)}\n\n`).join("");
+  globalThis.fetch = async () => new Response(raw, { headers: { "content-type": "text/event-stream" } });
+
+  const { response, text } = await run("/v1/responses", { model: "partner", input: "请帮我改一下", stream: true },
+    { originator: "codex_cli_rs" });
+  assert.equal(response.headers.get("x-aelios-coding"), "client:codex");
+  assert.equal(text, raw);
+  assert.equal(queue.length, 1);
+  assert.equal(queue[0].completion, "complete");
+  assert.equal(queue[0].assistantText, '修好了。\n[code]\n可以继续了。\nsend_message {"text":"好了"}');
+});
+
 test("cancellation cancels upstream and records interrupted state", async () => {
   let cancelled = false; let interrupted = false;
   const source = new ReadableStream({ pull(c) { c.enqueue(new TextEncoder().encode('data: {"choices":[{"index":0,"delta":{"content":"half"}}]}\n\n')); }, cancel() { cancelled = true; } });
