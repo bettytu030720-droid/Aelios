@@ -38,7 +38,7 @@ export interface Identity {
   keys: AuthResult["keyName"][];
   /** Main models: recalled and recorded. Every other model passes through quietly. */
   models: string[];
-  /** Omitted means auto: drop_block on native Anthropic and Claude on OpenRouter, passthrough elsewhere. */
+  /** Omitted means auto: try drop_block for Claude Messages requests, including native Anthropic. */
   anthropicThinking?: "auto" | "passthrough" | "drop_block";
   /** Omitted means on: coding agents are recorded as conversation only (see coding.ts). False records everything. */
   codingFilter?: boolean;

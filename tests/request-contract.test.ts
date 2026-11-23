@@ -123,11 +123,11 @@ test("the binding policy is present through tool continuations and later signed 
   assert.equal(headers.has("anthropic-beta"), false);
 });
 
-test("auto binds thinking only on the native Anthropic line and never switches thinking on by itself", () => {
+test("auto applies binding to eligible requests with thinking enabled or signed history", () => {
   const binding = (body: any) => body.thinking?.block_binding?.prefix_mismatch_behavior;
-  const apply = (body: any, mode: any, native: boolean) => {
+  const apply = (body: any, mode: any, autoBinding: boolean) => {
     const headers = new Headers();
-    applyThinkingPolicy(body, mode === undefined ? {} as any : { anthropicThinking: mode } as any, "messages", headers, native);
+    applyThinkingPolicy(body, mode === undefined ? {} as any : { anthropicThinking: mode } as any, "messages", headers, autoBinding);
     return headers.get("anthropic-beta");
   };
   const loop = () => [base().messages[0], assistant, result];
@@ -143,7 +143,7 @@ test("auto binds thinking only on the native Anthropic line and never switches t
     // Unset thinking with signed history: the model already thinks by default, so the block needs binding.
     const unsetWithHistory: any = { ...base(), messages: loop() };
     const headers = new Headers();
-    assert.equal(applyThinkingPolicy(unsetWithHistory, mode === undefined ? {} as any : { anthropicThinking: mode } as any, "messages", headers, true), true);
+    assert.deepEqual(applyThinkingPolicy(unsetWithHistory, mode === undefined ? {} as any : { anthropicThinking: mode } as any, "messages", headers, true), { thinking: undefined, beta: null });
     assert.equal(unsetWithHistory.thinking.type, "adaptive");
     assert.equal(binding(unsetWithHistory), "drop_block");
     assert.doesNotThrow(() => validateRequest(unsetWithHistory, "messages", headers));
@@ -152,7 +152,7 @@ test("auto binds thinking only on the native Anthropic line and never switches t
   for (const extra of [{ temperature: 0.7 }, { tool_choice: { type: "any" }, tools: [{ name: "lookup", input_schema: { type: "object" } }] }]) {
     const other: any = { ...base(), ...extra, messages: loop() };
     const before = structuredClone(other);
-    assert.equal(applyThinkingPolicy(other, {} as any, "messages", new Headers(), true), false);
+    assert.equal(applyThinkingPolicy(other, {} as any, "messages", new Headers(), true), undefined);
     assert.deepEqual(other, before);
   }
   // Unset thinking and nothing signed yet: leave the request exactly as the client sent it.

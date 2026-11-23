@@ -1,5 +1,5 @@
 import { object, type Protocol } from "./config";
-import { lastCacheableBlock, validateBody, type Body } from "./protocol";
+import { lastCacheableBlock, THINKING_BINDING_BETA, validateBody, type Body } from "./protocol";
 
 // Contract snapshot: 2026-09-07. Keep protocol envelopes separate from opaque
 // application data (JSON Schema, tool arguments/results, encrypted reasoning).
@@ -235,7 +235,7 @@ export function validateRequest(body: Body, protocol: Protocol, headers = new He
     if (t.display !== undefined) requireField(t.type !== "disabled" && ["summarized", "omitted"].includes(t.display), "thinking.display", "Use summarized or omitted with thinking enabled/adaptive.");
     if (t.block_binding !== undefined) {
       requireField(object(t.block_binding) && ["error", "drop_block"].includes(t.block_binding.prefix_mismatch_behavior), "thinking.block_binding", "Use prefix_mismatch_behavior: error or drop_block.");
-      requireField(headers.get("anthropic-beta")?.split(",").map(s => s.trim()).includes("thinking-binding-controls-2026-08-01"), "thinking.block_binding", "Requires anthropic-beta: thinking-binding-controls-2026-08-01.");
+      requireField(headers.get("anthropic-beta")?.split(",").map(s => s.trim()).includes(THINKING_BINDING_BETA), "thinking.block_binding", `Requires anthropic-beta: ${THINKING_BINDING_BETA}.`);
     }
     if (t.type !== "disabled") {
       requireField(body.temperature === undefined || body.temperature === 1, "temperature", "Thinking requests require the default temperature (omit it or use 1).");

@@ -26,18 +26,18 @@
 
 | 情形 | 召回/注入 | 思考历史及出站策略 |
 | --- | --- | --- |
-| 主模型、人类输入、默认 auto，原生 Anthropic 或 OpenRouter Claude Messages 线路 | 单次注入 | 客户端声明 enabled 或 adaptive 时按 drop_block 处理。未指定时，仅在历史已有思考块且未带 temperature 或强制工具时补充 adaptive 与绑定，若上游拒绝则按原样重发一次 |
-| 主模型、人类输入、auto 走其他线路或 passthrough，thinking 开启或未指定 | 单次注入 | 历史不变，补丁仅附在本轮 user 尾部（Vertex 线路默认不校验前缀绑定） |
+| 主模型、人类输入、默认 auto，原生 Anthropic 或模型 ID 含 claude 的 Messages 请求 | 单次注入 | 客户端声明 enabled 或 adaptive 时附加 drop_block。未指定时，仅在历史已有思考块、temperature 为默认值且未强制工具时补充 adaptive 与绑定 |
+| 主模型、人类输入、auto 走其他线路或 passthrough，thinking 开启或未指定 | 单次注入 | 保留客户端思考设置，补丁附在本轮 user 尾部 |
 | 主模型、显式 disabled、人类输入 | 单次注入 | 不启用 adaptive，不自动加 beta，已有失配历史仍可能由上游报错 |
 | 主模型、人类输入、drop_block | 单次注入 | 保留 enabled/adaptive 参数，合并 binding 和 beta |
-| 纯 tool_result 续轮 | 不召回、不恢复旧补丁 | drop_block（含 auto 走原生 Anthropic 或 OpenRouter Claude 线路）设置照常发送，历史所有块顺序不变 |
+| 纯 tool_result 续轮 | 不召回、不恢复旧补丁 | 照常应用 thinking 策略，保留历史块及其顺序 |
 | tool_result 后有独立用户文本 | 按新用户输入召回 | 记忆追加在结果和用户文字之后，不插到结果前 |
 | 多次工具调用、分开的连续同角色消息 | 不重排消息 | 按 Anthropic 合并后的逻辑回合校验配对 |
 | 多轮签名、空 thinking、redacted thinking | 不删除、不改写 | 本地检查必要字段，真实性及前缀绑定由上游验证 |
 | 客户端压缩/换 system/换工具/换模型 | 不恢复影子历史 | passthrough 不保证旧签名有效，drop_block 依赖线路支持 |
 | 非主模型 | 无召回、无记录 | 净化和结构校验仍执行，身份策略不启用 thinking |
 
-`drop_block` 指示上游仅丢弃失配的思考块及受其影响的后续块，可能会损失部分推理连续性。切回 `passthrough` 或 `disabled` 后，先前已失配的历史无法自动恢复。原生 Anthropic 线路（2026-10-08 实测）与 OpenRouter 的 Claude Messages 线路（2026-11-16 实测）默认强制校验前缀绑定并支持 `thinking-binding-controls-2026-08-01` beta，因此 `auto` 在这两条线路上按 `drop_block` 处理，其余线路走 `passthrough`。
+`drop_block` 指示上游丢弃失配的思考块及受其影响的后续块，可能会损失部分推理连续性。`auto` 为原生 Anthropic 及模型 ID 含 `claude` 的 Messages 请求附加 `thinking-binding-controls-2026-08-01` beta，模型 ID 的匹配忽略大小写。若上游返回 `400` 并拒绝绑定字段、beta 或自动补充的 adaptive，网关恢复客户端的 `thinking` 和 `anthropic-beta` 后重试一次。
 
 ## 验证范围
 
