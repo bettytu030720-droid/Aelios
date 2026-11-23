@@ -404,7 +404,53 @@ test("a tool step's reply is recorded; a failed or missing reply records no assi
   assert.equal((sqlite.prepare("SELECT http_status FROM gateway_exchanges WHERE completion_status = 'failed' LIMIT 1").get() as any).http_status, 502);
 });
 
-test("the agent id turns on the coding filter, unless the assistant switched it off", async () => {
+test("hook capture filters Responses work tools without recognizing the client", async () => {
+  env.CHAT_ARCHIVE_ENABLED = "true";
+  const turn = { protocol: "responses", model: "partner", agent: "t3code",
+    body: { input: [{ type: "function_call_output", call_id: "tool-fixture", output: "private tool result" }] } };
+  const work = [
+    { type: "function_call", name: "exec_command", arguments: JSON.stringify({ cmd: "printf fixture" }) },
+    { type: "custom_tool_call", name: "apply_patch", input: `*** Begin Patch\n${"x".repeat(9000)}` },
+    { type: "function_call", name: "future_work_tool", arguments: "{}" }
+  ];
+  const { json: skipped } = await hook("/v1/hook/record", { ...turn, reply: { status: "completed", output: work } });
+  assert.deepEqual(skipped, { recorded: false, reason: "filtered" });
+  assert.equal(queue.length, 0);
+  assert.equal(count("gateway_exchanges"), 0);
+
+  const message = { type: "message", role: "assistant", content: [{ type: "output_text",
+    text: "改好了。\n```sh\nprintf fixture\n```\n试试看。" }] };
+  const { json } = await hook("/v1/hook/record", { ...turn, reply: { status: "completed", output: [...work, message] } });
+  assert.equal(json.recorded, true);
+  assert.equal(json.completion, "complete");
+  assert.equal(queue.length, 1);
+  assert.equal(queue[0].assistantText, "改好了。\n[code]\n试试看。");
+  await persistExchange(env, queue[0]);
+  assert.equal(count("messages WHERE role = 'assistant'"), 1);
+  assert.equal(count("chat_archive WHERE content = ?", queue[0].assistantText), 1);
+});
+
+test("code-only input skips hook recall and recording before memory work", async () => {
+  const artifacts = ["```js\nconst fixture = 1;\n```", "#!/bin/sh\nprintf fixture", "set -euo pipefail\nprintf fixture",
+    "const fixture = 1;\nconsole.log(fixture);", "def fixture():\n    return 1",
+    "*** Begin Patch\n*** End Patch", "diff --git a/fixture b/fixture\n+fixture", "--- a/fixture\n+++ b/fixture\n+fixture",
+    "background job bash-0123456789abcdef (bash: printf fixture) completed"];
+  for (const input of artifacts) {
+    const turn = { protocol: "responses", model: "partner", record: true, body: { input } };
+    const { json: recall } = await hook("/v1/hook/recall", turn);
+    assert.equal(recall.memory, "skipped");
+    const { json: record } = await hook("/v1/hook/record", { ...turn,
+      reply: { status: "completed", output: [{ type: "message", role: "assistant",
+        content: [{ type: "output_text", text: "完成了。" }] }] } });
+    assert.deepEqual(record, { recorded: false, reason: "filtered" });
+  }
+  assert.ok(queries.every(sql => sql === "SELECT config_json FROM gateway_config WHERE id = 1"));
+  assert.deepEqual(upstream, []);
+  assert.equal(queue.length, 0);
+  assert.equal(count("messages"), 0);
+});
+
+test("the agent id is still reported, and the assistant can opt out of filtering", async () => {
   delete env.MEMORY_QUEUE;
   const said = "看看这个\n```js\nconst secret = 1;\n```";
   const turn = { protocol: "messages", model: "partner", agent: "claude", record: true, body: humanBody(said) };

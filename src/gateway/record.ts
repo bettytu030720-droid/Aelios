@@ -5,7 +5,7 @@ import { captureRememberNow } from "../memory/rememberNow";
 import { sha256Hex } from "../utils/hash";
 import { getSseData, splitSseEvents } from "../utils/sseParser";
 import { cleanMessageText } from "../utils/sanitize";
-import { CodeFilter, isSpeechTool, replaceCodeIn } from "./coding";
+import { CodeFilter, isSpeechTool, replaceCodeIn, stripCodeContent } from "./coding";
 import { identityNamespace, object, type Identity, type Protocol } from "./config";
 import { canonical, inputItems, visibleText, type Body, type Turn } from "./protocol";
 
@@ -200,8 +200,8 @@ export class OutputCollector {
   truncated = false;
   /** The output outgrew what the gateway buffers, so part of it was never seen. */
   overflow = false;
-  /** Coding mode only: work tool calls (left out of `text`), and the speech tool calls on their own. */
   hasRecordedTool = false;
+  /** Filtered work calls and the speech tool calls that can stand on their own. */
   workCalls = 0;
   spoken = "";
   spokenTruncated = false;
@@ -211,10 +211,10 @@ export class OutputCollector {
   private pending = new Map<number, ToolBuffer>();
   private chatTools = new Map<number, ToolBuffer>();
   private sealed = false;
-  /** Coding mode only: code blocks become [code] as the text streams in, before the cap. */
+  /** Code blocks become [code] as the text streams in, before the cap. */
   private filter: CodeFilter | null;
-  constructor(readonly protocol: Protocol, readonly coding = false) {
-    this.filter = coding ? new CodeFilter(text => this.keep(text)) : null;
+  constructor(readonly protocol: Protocol, readonly filterCode = false) {
+    this.filter = filterCode ? new CodeFilter(text => this.keep(text)) : null;
   }
   private append(text: unknown): void {
     if (typeof text !== "string") return;
@@ -226,13 +226,12 @@ export class OutputCollector {
     this.text = (this.text + text).slice(0, TEXT_LIMIT);
   }
   private appendTool(name: string, input: unknown, clipped = false): void {
-    // A coding agent's work tools carry code: count them, never keep their arguments.
-    if (this.coding && !isSpeechTool(String(name || ""))) { this.workCalls += 1; return; }
-    const line = formatToolCall(name, this.coding ? replaceCodeIn(coerceToolInput(input)) : input);
+    if (this.filterCode && !isSpeechTool(String(name || ""))) { this.workCalls += 1; return; }
+    const line = formatToolCall(name, this.filterCode ? replaceCodeIn(coerceToolInput(input)) : input);
     if (!line) return;
     this.hasRecordedTool = true;
-    if (clipped) { this.truncated = true; if (this.coding) this.spokenTruncated = true; }
-    if (this.coding) {
+    if (clipped) { this.truncated = true; if (this.filterCode) this.spokenTruncated = true; }
+    if (this.filterCode) {
       const spoken = this.spoken ? `${this.spoken}\n${line}` : line;
       if (spoken.length > TEXT_LIMIT) this.spokenTruncated = true;
       this.spoken = spoken.slice(0, TEXT_LIMIT);
@@ -361,16 +360,17 @@ export class OutputCollector {
     this.filter?.end();
     if (this.sealed) return;
     this.sealed = true;
-    this.text = cleanMessageText(this.text);
     this.spoken = cleanMessageText(this.spoken);
+    const text = cleanMessageText(this.text);
+    this.text = this.filterCode ? stripCodeContent(text) || this.spoken : text;
   }
 }
 
 export function observeResponse(upstream: Response, protocol: Protocol, ctx: ExecutionContext,
-  onFinish: (collector: OutputCollector, interrupted: boolean) => Promise<void>, coding = false): Response {
+  onFinish: (collector: OutputCollector, interrupted: boolean) => Promise<void>, filterCode = false): Response {
   if (!upstream.body) return upstream;
   const reader = upstream.body.getReader();
-  const collector = new OutputCollector(protocol, coding);
+  const collector = new OutputCollector(protocol, filterCode);
   const sse = upstream.headers.get("content-type")?.includes("text/event-stream");
   const decoder = new TextDecoder();
   let json = "";

@@ -16,7 +16,7 @@ import { backfillFts } from "../src/memory/fts";
 import { formatDateLabel } from "../src/utils/time";
 
 import { lexicalOverlapScore, shapeRecallQuery } from "../src/memory/queryShape";
-import { codingClient, codingSpeech, isSpeechTool, stripCodeBlocks } from "../src/gateway/coding";
+import { codingClient, codingSpeech, isSpeechTool, stripCodeContent } from "../src/gateway/coding";
 
 // Test production modules and SQL with deterministic HTTP and Workers AI doubles.
 (crypto.subtle as any).timingSafeEqual = (a: Uint8Array, b: Uint8Array) => timingSafeEqual(a, b);
@@ -324,7 +324,7 @@ test("Anthropic tool_result is not human; client beta, signatures, tools and cac
   assert.equal(calls[0].headers["x-api-key"], undefined);
   assert.equal(queue[0].kind, "tool"); assert.equal(queue[0].assistantText, "Claude reply");
 });
-test("model tool calls are recorded; delivery receipts and tool results are not", async () => {
+test("the gateway captures speech tool calls and leaves work tool calls on the wire", async () => {
   const mock = globalThis.fetch;
   globalThis.fetch = async (url: any, init: any) => {
     calls.push({ url: String(url), headers: Object.fromEntries(new Headers(init?.headers)), query: JSON.parse(init?.body as string) });
@@ -339,14 +339,14 @@ test("model tool calls are recorded; delivery receipts and tool results are not"
     });
   };
   try {
-    const { response } = await run("/v1/messages", {
+    const { response, text } = await run("/v1/messages", {
       model: "partner", max_tokens: 16, messages: [{ role: "user", content: "晚饭呢" }]
     });
     assert.equal(response.status, 200);
     assert.match(queue[0].assistantText, /weixin_send/);
     assert.match(queue[0].assistantText, /今晚吃什么/);
-    assert.match(queue[0].assistantText, /bash/);
-    assert.match(queue[0].assistantText, /date/);
+    assert.match(text, /"command":"date"/);
+    assert.doesNotMatch(queue[0].assistantText, /bash|date/);
     assert.doesNotMatch(queue[0].assistantText, /已回她/);
     await persistExchange(env, { ...queue[0], completion: "complete" });
     const assistant = sqlite.prepare("SELECT content FROM messages WHERE role = 'assistant'").get() as { content: string };
@@ -1877,10 +1877,10 @@ test("codingClient knows coding agents by header or by shell plus edit tools", (
 });
 
 test("coding speech keeps words, turns code blocks into [code] and drops code steps", () => {
-  assert.equal(stripCodeBlocks("改成这样：\n```ts\nconst a = 1;\n```\n好了"), "改成这样：\n[code]\n好了");
-  assert.equal(stripCodeBlocks("先看：\n~~~py\nprint(1)\n没关上"), "先看：\n[code]");
-  assert.equal(stripCodeBlocks("行内 `code` 不动"), "行内 `code` 不动");
-  assert.equal(stripCodeBlocks("```\nonly code\n```"), "");
+  assert.equal(stripCodeContent("改成这样：\n```ts\nconst a = 1;\n```\n好了"), "改成这样：\n[code]\n好了");
+  assert.equal(stripCodeContent("先看：\n~~~py\nprint(1)\n没关上"), "先看：\n[code]");
+  assert.equal(stripCodeContent("行内 `code` 不动"), "行内 `code` 不动");
+  assert.equal(stripCodeContent("```\nonly code\n```"), "");
   const said = (content: unknown[]) => {
     const out = new OutputCollector("messages", true);
     out.json({ content, stop_reason: "tool_use" });
@@ -2010,13 +2010,24 @@ test("coding filter: streamed code is dropped as it arrives, and streamed tool a
 });
 
 test("coding filter: a longer closing fence ends the block, and earlier code stays out of recall", async () => {
-  assert.equal(stripCodeBlocks("看：\n```\ncode\n````\n后面的话"), "看：\n[code]\n后面的话");
-  assert.equal(stripCodeBlocks("看：\n````\n```\n还在块里\n````\n后面"), "看：\n[code]\n后面");
+  assert.equal(stripCodeContent("看：\n```\ncode\n````\n后面的话"), "看：\n[code]\n后面的话");
+  assert.equal(stripCodeContent("看：\n````\n```\n还在块里\n````\n后面"), "看：\n[code]\n后面");
   precious("partner-a", "量子猫咪是暗号");
   await run("/v1/chat/completions", { model: "partner", messages: [
-    { role: "user", content: "看这个\n```\n量子猫咪\n```" }, { role: "assistant", content: "嗯" }, { role: "user", content: "好了吗" }] },
-  { "user-agent": "claude-cli/2.1.0 (external, cli)" });
+    { role: "user", content: "看这个\n```\n量子猫咪\n```" }, { role: "assistant", content: "嗯" }, { role: "user", content: "好了吗" }] });
   assert.doesNotMatch(JSON.stringify(calls.at(-1).query.messages.at(-1)), /量子猫咪是暗号/);
+});
+
+test("the gateway forwards a code-only user message without memory capture", async () => {
+  const message = "```sh\nprintf fixture\n```";
+  const { response } = await run("/v1/chat/completions", {
+    model: "partner", messages: [{ role: "user", content: message }]
+  });
+  assert.equal(response.status, 200);
+  assert.equal(response.headers.get("x-aelios-memory"), "skipped");
+  assert.equal(calls[0].query.messages[0].content, message);
+  assert.equal(queue.length, 0);
+  assert.equal(count("messages"), 0);
 });
 
 test("on a milestone day the assistant hears it in the day's first few messages, and not in coding sessions", async () => {

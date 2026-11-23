@@ -75,7 +75,7 @@ https://<your-worker-url>/coder/v1
 
 Only registered primary models trigger recall and recording. Utility models such as background classifiers or lightweight sub-models pass through quietly.
 
-When you use coding agents such as Claude Code, Codex, Cline, or opencode, Aelios records spoken conversation only. Code blocks are stored as `[code]`, and shell or file-editing tool steps are omitted. To record everything verbatim, turn off the coding speech filter in the assistant's advanced options.
+Aelios filters code and work tools from automatic conversation capture for every client by default. It skips code-only input, replaces fenced code blocks within conversation with `[code]`, and omits shell and file-editing tool payloads. To opt out, turn off the code and work-tool filter in the assistant's advanced options.
 
 ### 3. Connect your client
 

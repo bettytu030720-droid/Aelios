@@ -114,7 +114,7 @@ export const ADMIN_TAB_SETTINGS = `      <!-- ===== 设置 ===== -->
                             <input x-model="idn.maxMemoryChars" type="number" min="256" max="24000" class="field" :placeholder="L('留空默认 6000', 'Blank: 6000')">
                           </label>
                           <div>
-                            <label class="check"><input type="checkbox" x-model="idn.codingFilter"><span>${t("写代码时只记说的话（默认开）", "When coding, keep only what was said (on by default)")}</span></label>
+                            <label class="check"><input type="checkbox" x-model="idn.codingFilter"><span>${t("自动收录时过滤代码和工作工具（默认开）", "Filter code and work tools from automatic capture (on by default)")}</span></label>
                             <p class="text-xs muted">${t("Claude Code、Codex、Cline 这类写代码的工具发来的请求，代码块记成 [code]，读文件、跑命令、改文件的步骤不记。关掉就全记。", "For requests from coding tools such as Claude Code, Codex and Cline, code blocks are saved as [code], and steps that read, run or edit code are not saved. Turn off to save everything.")}</p>
                           </div>
                         </div>
