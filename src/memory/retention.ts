@@ -5,9 +5,11 @@ import {
   deleteOldIdempotencyKeys,
   expireOldMemories,
   listHardDeletableMemories,
+  listStaleWorldFacts,
   hardDeleteMemoriesBatched,
   readCursor,
   writeCursor,
+  type HardDeletableMemory,
   RETENTION_BATCH_SIZE,
 } from "../db/retention";
 import { deleteFtsRow } from "./fts";
@@ -24,6 +26,7 @@ function messagesRetentionDays(env: Env): number {
 const USAGE_LOGS_RETENTION_DAYS = 30;
 const MEMORY_EVENTS_RETENTION_DAYS = 30;
 const IDEMPOTENCY_KEYS_RETENTION_DAYS = 7;
+export const WORLD_FACT_RETENTION_DAYS = 60;
 const MEMORY_ACTIVE_EXPIRY_DAYS = 180;
 const MEMORY_HARD_DELETE_DAYS = 30;
 const THROTTLE_HOURS = 24;
@@ -53,6 +56,44 @@ async function deleteVectorizeBatched(
     const batch = vectorIds.slice(i, i + RETENTION_BATCH_SIZE);
     await vectorize.deleteByIds(batch);
   }
+}
+
+async function hardDeleteWithVectorSync(
+  env: Env,
+  namespace: string,
+  candidates: HardDeletableMemory[],
+  label: string
+): Promise<{ deleted: number; skipped: number }> {
+  if (candidates.length === 0) return { deleted: 0, skipped: 0 };
+
+  const vectorIds = candidates
+    .map((m) => m.vector_id)
+    .filter((v): v is string => v !== null);
+
+  if (env.VECTORIZE && vectorIds.length > 0) {
+    try {
+      await deleteVectorizeBatched(env.VECTORIZE, vectorIds);
+    } catch (error) {
+      console.error(`retention: vectorize delete failed for ${label}, skipping vector-backed memories`, error);
+      const noVectorIds = candidates
+        .filter((m) => m.vector_id === null)
+        .map((m) => m.id);
+      const deleted = await hardDeleteMemoriesBatched(env.DB, namespace, noVectorIds);
+      return { deleted, skipped: candidates.length - noVectorIds.length };
+    }
+  }
+
+  if (!env.VECTORIZE) {
+    const safeIds = candidates
+      .filter((m) => m.vector_id === null)
+      .map((m) => m.id);
+    const deleted = await hardDeleteMemoriesBatched(env.DB, namespace, safeIds);
+    return { deleted, skipped: candidates.length - safeIds.length };
+  }
+
+  const allIds = candidates.map((m) => m.id);
+  const deleted = await hardDeleteMemoriesBatched(env.DB, namespace, allIds);
+  return { deleted, skipped: 0 };
 }
 
 // ---------------------------------------------------------------------------
@@ -95,7 +136,15 @@ export async function runMemoryRetention(
   // 4. Delete old idempotency_keys (namespace-agnostic)
   stats.idempotencyKeys = await deleteOldIdempotencyKeys(env.DB, daysAgo(IDEMPOTENCY_KEYS_RETENTION_DAYS));
 
-  // 5. Expire old active memories and sync Vectorize
+  // 5. Hard delete stale world_fact memories (> 60 days without recall or update)
+  const staleWorldFacts = await listStaleWorldFacts(env.DB, namespace, daysAgo(WORLD_FACT_RETENTION_DAYS));
+  const worldFactDelete = await hardDeleteWithVectorSync(env, namespace, staleWorldFacts, "stale world_fact");
+  stats.hardDeletedWorldFacts = worldFactDelete.deleted;
+  if (worldFactDelete.skipped > 0) {
+    stats.hardDeleteWorldFactsSkipped = worldFactDelete.skipped;
+  }
+
+  // 6. Expire old active memories and sync Vectorize
   const expireResult = await expireOldMemories(env.DB, namespace, daysAgo(MEMORY_ACTIVE_EXPIRY_DAYS));
   stats.expiredMemories = expireResult.count;
   if (expireResult.expired.length > 0) {
@@ -104,7 +153,7 @@ export async function runMemoryRetention(
     }
   }
 
-  // 5a. Sync Vectorize: remove vectors for newly expired memories
+  // 6a. Sync Vectorize: remove vectors for newly expired memories
   if (env.VECTORIZE && expireResult.expired.length > 0) {
     const expiredVectorIds = expireResult.expired
       .map((m) => m.vector_id)
@@ -121,50 +170,16 @@ export async function runMemoryRetention(
     }
   }
 
-  // 6. Hard delete terminal memories (deleted/superseded/expired > 30 days)
+  // 7. Hard delete terminal memories (deleted/superseded/expired > 30 days)
   const hardCutoff = daysAgo(MEMORY_HARD_DELETE_DAYS);
   const deletable = await listHardDeletableMemories(env.DB, namespace, hardCutoff);
-
-  if (deletable.length > 0) {
-    const vectorIds = deletable
-      .map((m) => m.vector_id)
-      .filter((v): v is string => v !== null);
-
-    // 6a. Delete Vectorize vectors first (if available)
-    if (env.VECTORIZE && vectorIds.length > 0) {
-      try {
-        await deleteVectorizeBatched(env.VECTORIZE, vectorIds);
-      } catch (error) {
-        // Vectorize delete failed — only hard-delete records without vector_id
-        // to avoid D1/Vectorize mismatch
-        console.error("retention: vectorize delete failed, skipping vector-backed memories", error);
-        const noVectorIds = deletable
-          .filter((m) => m.vector_id === null)
-          .map((m) => m.id);
-        stats.hardDeletedMemories = await hardDeleteMemoriesBatched(env.DB, namespace, noVectorIds);
-        stats.hardDeleteSkipped = deletable.length - noVectorIds.length;
-        await writeCursor(env.DB, cursorName, now);
-        return { ran: true, stats };
-      }
-    }
-
-    // 6b. If no VECTORIZE, only delete records that have no vector_id
-    if (!env.VECTORIZE) {
-      const safeIds = deletable
-        .filter((m) => m.vector_id === null)
-        .map((m) => m.id);
-      stats.hardDeletedMemories = await hardDeleteMemoriesBatched(env.DB, namespace, safeIds);
-      stats.hardDeleteSkipped = deletable.length - safeIds.length;
-    } else {
-      // Vectorize delete succeeded — safe to hard-delete all
-      const allIds = deletable.map((m) => m.id);
-      stats.hardDeletedMemories = await hardDeleteMemoriesBatched(env.DB, namespace, allIds);
-    }
-  } else {
-    stats.hardDeletedMemories = 0;
+  const terminalDelete = await hardDeleteWithVectorSync(env, namespace, deletable, "terminal memories");
+  stats.hardDeletedMemories = terminalDelete.deleted;
+  if (terminalDelete.skipped > 0) {
+    stats.hardDeleteSkipped = terminalDelete.skipped;
   }
 
-  // 7. Write throttle cursor
+  // 8. Write throttle cursor
   await writeCursor(env.DB, cursorName, now);
 
   return { ran: true, stats };

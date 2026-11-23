@@ -2,7 +2,8 @@ import { strict as assert } from "node:assert";
 import { test, beforeEach } from "node:test";
 import { DatabaseSync } from "node:sqlite";
 import { readFileSync, readdirSync } from "node:fs";
-import { expireOldMemories } from "../src/db/retention";
+import { expireOldMemories, listStaleWorldFacts } from "../src/db/retention";
+import { runMemoryRetention } from "../src/memory/retention";
 
 // The 180-day expiry: a memory that keeps being recalled is still in use, even if
 // nobody has rewritten it.
@@ -40,11 +41,25 @@ function memory(id: string, extra: { updated?: string; pinned?: number; type?: s
     .run(id, extra.namespace ?? "default", extra.type ?? "fact", `content of ${id}`, extra.pinned ?? 0, `vec_${id}`,
       OLD, extra.updated ?? OLD);
 }
+function memoryWithVector(
+  id: string,
+  extra: { updated?: string; pinned?: number; type?: string; namespace?: string; vectorId?: string | null } = {}
+) {
+  const vectorId = extra.vectorId === undefined ? `vec_${id}` : extra.vectorId;
+  sqlite.prepare(`INSERT INTO memories (id, namespace, type, content, importance, confidence, status, pinned, tags, source,
+    source_message_ids, vector_id, created_at, updated_at)
+    VALUES (?, ?, ?, ?, 0.4, 0.8, 'active', ?, '[]', 'mcp', '[]', ?, ?, ?)`)
+    .run(id, extra.namespace ?? "default", extra.type ?? "world_fact", `content of ${id}`, extra.pinned ?? 0, vectorId,
+      OLD, extra.updated ?? OLD);
+}
 function lifecycle(id: string, fields: { injected?: string | null; seen?: string | null }) {
   sqlite.prepare(`INSERT INTO memory_lifecycle (memory_id, namespace, seen_count, last_seen_at, last_injected_at)
     VALUES (?, 'default', 0, ?, ?)`).run(id, fields.seen ?? null, fields.injected ?? null);
 }
 const status = (id: string) => (sqlite.prepare("SELECT status FROM memories WHERE id = ?").get(id) as any).status;
+const exists = (id: string) => Boolean(sqlite.prepare("SELECT 1 FROM memories WHERE id = ?").get(id));
+const lifecycleExists = (id: string) => Boolean(sqlite.prepare("SELECT 1 FROM memory_lifecycle WHERE memory_id = ?").get(id));
+const daysBefore = (days: number) => new Date(Date.now() - days * 86_400_000).toISOString();
 
 test("a memory recalled after the cutoff stays active even if never rewritten", async () => {
   memory("recalled");
@@ -100,4 +115,72 @@ test("expiring more memories than one SQL batch marks every one of them", async 
   assert.equal(result.count, 200);
   const left = sqlite.prepare("SELECT COUNT(*) AS n FROM memories WHERE status = 'active'").get() as any;
   assert.equal(left.n, 0);
+});
+
+test("listStaleWorldFacts picks only non-pinned world_fact rows inactive before cutoff", async () => {
+  memory("wf-stale", { type: "world_fact" });
+  lifecycle("wf-stale", { injected: OLD });
+  memory("wf-recalled", { type: "world_fact" });
+  lifecycle("wf-recalled", { injected: RECENT });
+  memory("wf-seen", { type: "world_fact" });
+  lifecycle("wf-seen", { seen: RECENT });
+  memory("wf-updated", { type: "world_fact", updated: RECENT });
+  memory("wf-pinned", { type: "world_fact", pinned: 1 });
+  memory("fact-old", { type: "fact" });
+  memory("wf-other-ns", { type: "world_fact", namespace: "other" });
+
+  const stale = await listStaleWorldFacts(db, "default", CUTOFF);
+
+  assert.deepEqual(stale.map((m) => [m.id, m.vector_id]), [["wf-stale", "vec_wf-stale"]]);
+});
+
+test("runMemoryRetention hard-deletes world_fact rows inactive for over 60 days", async () => {
+  const deletedVectors: string[] = [];
+  memoryWithVector("wf-old-65d", { updated: daysBefore(65) });
+  lifecycle("wf-old-65d", { injected: daysBefore(65) });
+  memoryWithVector("wf-old-recalled-10d", { updated: daysBefore(90) });
+  lifecycle("wf-old-recalled-10d", { injected: daysBefore(10) });
+  memoryWithVector("wf-old-pinned", { updated: daysBefore(90), pinned: 1 });
+  memoryWithVector("wf-fresh-30d", { updated: daysBefore(30) });
+  memoryWithVector("fact-90d", { type: "fact", updated: daysBefore(90) });
+
+  const result = await runMemoryRetention({
+    DB: db,
+    VECTORIZE: {
+      async deleteByIds(ids: string[]) {
+        deletedVectors.push(...ids);
+      },
+    },
+  } as any, "default");
+
+  assert.equal(result.ran, true);
+  assert.equal(result.stats?.hardDeletedWorldFacts, 1);
+  assert.deepEqual(deletedVectors, ["vec_wf-old-65d"]);
+  assert.equal(exists("wf-old-65d"), false);
+  assert.equal(lifecycleExists("wf-old-65d"), false);
+  assert.equal(exists("wf-old-recalled-10d"), true);
+  assert.equal(exists("wf-old-pinned"), true);
+  assert.equal(exists("wf-fresh-30d"), true);
+  assert.equal(exists("fact-90d"), true);
+  assert.equal(status("fact-90d"), "active");
+});
+
+test("runMemoryRetention skips vector-backed stale world_fact rows if Vectorize deletion fails", async () => {
+  memoryWithVector("wf-with-vec", { updated: daysBefore(70) });
+  memoryWithVector("wf-no-vec", { updated: daysBefore(70), vectorId: null });
+
+  const result = await runMemoryRetention({
+    DB: db,
+    VECTORIZE: {
+      async deleteByIds() {
+        throw new Error("vectorize unavailable");
+      },
+    },
+  } as any, "default");
+
+  assert.equal(result.ran, true);
+  assert.equal(result.stats?.hardDeletedWorldFacts, 1);
+  assert.equal(result.stats?.hardDeleteWorldFactsSkipped, 1);
+  assert.equal(exists("wf-no-vec"), false);
+  assert.equal(exists("wf-with-vec"), true);
 });
